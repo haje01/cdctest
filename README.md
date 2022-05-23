@@ -1,1 +1,3 @@
-# debezium-test
+# dbztest
+
+Debezium Test for SQL Server
