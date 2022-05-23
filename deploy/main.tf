@@ -40,6 +40,14 @@ resource "aws_security_group" "sqlserver" {
     ]
   }
 
+  ingress {
+    from_port = 1433
+    to_port = 1433
+    description = "From Dev PC to SQL Server"
+    protocol = "tcp"
+    cidr_blocks = var.work_cidr
+  }
+
   egress {
     protocol  = "-1"
     from_port = 0
@@ -90,6 +98,14 @@ resource "aws_security_group" "debezium" {
   )
 }
 
+data "template_file" "initdb" {
+  template = file("${path.module}/init.sql")
+  vars = {
+    user = var.db_user,
+    passwd = var.db_passwd
+  }
+}
+
 # SQL Server 인스턴스
 resource "aws_instance" "sqlserver" {
   ami = var.sqlserver_ami
@@ -103,13 +119,13 @@ resource "aws_instance" "sqlserver" {
     host = self.public_ip
     user = var.sqlserver_user
     password = var.sqlserver_passwd
-    private_key = file(var.private_key_path)
+    # private_key = file(var.private_key_path)
     timeout = "1m"
   }
 
-  # WinRM 설정
   user_data = <<EOF
 <powershell>
+# WinRM 설정
 net user ${var.sqlserver_user} '${var.sqlserver_passwd}' /add /y
 net localgroup administrators ${var.sqlserver_user} /add
 winrm quickconfig -q
@@ -122,17 +138,29 @@ netsh advfirewall firewall add rule name="WinRM 5986" protocol=TCP dir=in localp
 net stop winrm
 sc.exe config winrm start=auto
 net start winrm
+
+# 로그인 인증을 Mixed 로 변경
+Set-ItemProperty -Path 'HKLM:\\SOFTWARE\\Microsoft\\Microsoft SQL Server\\MSSQL14.MSSQLSERVER\\MSSQLServer' -Name LoginMode -Value 2
+Restart-Service -Force MSSQLSERVER
+
+# Chocolatey 설치
+Set-ExecutionPolicy Bypass -Scope Process -Force; [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072; iex ((New-Object System.Net.WebClient).DownloadString('https://chocolatey.org/install.ps1'))
 </powershell>
   EOF
 
   provisioner "file" {
-    source = "init.sql"
+    content = data.template_file.initdb.rendered
     destination = "C:/Windows/Temp/init.sql"
   }
 
   provisioner "remote-exec" {
     inline = [
-      "sqlcmd -i C:\\Windows\\Temp\\init.sql"
+      # DB 및 유저 초기화
+      "sqlcmd -i C:\\Windows\\Temp\\init.sql",
+      # 로그인 인증을 Mixed 로 변경
+      # "Set-ItemProperty -Path 'HKLM:\\SOFTWARE\\Microsoft\\Microsoft SQL Server\\MSSQL14.MSSQLSERVER\\MSSQLServer' -Name LoginMode -Value 2",
+      # # 서비스 재시작
+      # "Restart-Service -Force MSSQLSERVER"
     ]
   }
 
@@ -151,6 +179,9 @@ resource "aws_instance" "debezium" {
   instance_type = var.debezium_instance_type
   security_groups = [aws_security_group.debezium.name]
   key_name = var.key_pair_name
+  credit_specification {
+    cpu_credits = "unlimited"
+  }
   tags = merge(
     {
       Name = "${var.name}-debezium",
@@ -158,4 +189,17 @@ resource "aws_instance" "debezium" {
     },
     var.tags
   )
+  connection {
+    type     = "ssh"
+    host     = self.public_ip
+    user     = "ubuntu"
+    private_key = file(var.private_key_path)
+    agent = false
+    timeout = "1m"
+  }
+  provisioner "remote-exec" {
+    inline = [
+      "git clone https://github.com/haje01/debezium-test.git"
+    ]
+  }
 }

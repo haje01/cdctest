@@ -1,4 +1,3 @@
-SQLAlchemy
-pyodbc
+pymssql
 faker
 snakemake

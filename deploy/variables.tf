@@ -13,11 +13,10 @@ variable "debezium_instance_type" {
 variable "work_cidr" {}
 variable "key_pair_name" {}
 variable "private_key_path" {}
-variable "win_username" {
-  default = "vagrant"
-}
 variable "sqlserver_user" {}
 variable "sqlserver_passwd" {}
+variable "db_user" {}
+variable "db_passwd" {}
 variable "tags" {
     type = map(string)
 }

@@ -2,7 +2,7 @@ output "sqlserver_public_ip" {
   value = aws_instance.sqlserver.public_ip
 }
 
-output "sqlserver_public_ip" {
+output "sqlserver_private_ip" {
   value = aws_instance.sqlserver.private_ip
 }
 
@@ -17,4 +17,22 @@ output "debezium_private_ip" {
 output "sqlserver_admin_passwd" {
   value = "${rsadecrypt(aws_instance.sqlserver.password_data,file(var.private_key_path))}"
   sensitive = true
+}
+
+output "sqlserver_user" {
+  value = var.sqlserver_user
+}
+
+output "sqlserver_passwd" {
+  sensitive = true
+  value = var.sqlserver_passwd
+}
+
+output "db_user" {
+  value = var.db_user
+}
+
+output "db_passwd" {
+  sensitive = true
+  value = var.db_passwd
 }

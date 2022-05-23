@@ -1,13 +1,15 @@
-CREATE LOGIN tester WITH PASSWORD = 'tester@381', check_policy = off
+CREATE LOGIN {user} WITH PASSWORD = '{passwd}', check_policy = off
 GO
 
 CREATE DATABASE test
+GO
+
 USE test
 GO
 
-IF NOT EXISTS (SELECT * FROM sys.database_principals WHERE name = N'tester')
+IF NOT EXISTS (SELECT * FROM sys.database_principals WHERE name = N'{user}')
 BEGIN
-    CREATE USER tester FOR LOGIN tester
-    EXEC sp_addrolemember N'db_owner', N'tester'
+    CREATE USER {user} FOR LOGIN {user}
+    EXEC sp_addrolemember N'db_owner', N'{user}'
 END;
 GO
