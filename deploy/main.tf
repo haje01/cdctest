@@ -67,36 +67,6 @@ resource "aws_security_group" "sqlserver" {
   )
 }
 
-# Debezium 보안 그룹
-resource "aws_security_group" "debezium" {
-  name = "${var.name}-debezium"
-
-  ingress {
-    from_port = 22
-    to_port = 22
-    description = "From Dev PC to SSH"
-    protocol = "tcp"
-    cidr_blocks = var.work_cidr
-  }
-
-  egress {
-    protocol  = "-1"
-    from_port = 0
-    to_port   = 0
-
-    cidr_blocks = [
-      "0.0.0.0/0",
-    ]
-  }
-
-  tags = merge(
-    {
-      Name = "${var.name}-debezium",
-      terraform = "true"
-    },
-    var.tags
-  )
-}
 
 data "template_file" "initdb" {
   template = file("${path.module}/init.sql")
@@ -173,15 +143,28 @@ Set-ExecutionPolicy Bypass -Scope Process -Force; [System.Net.ServicePointManage
   )
 }
 
-# Debezium 인스턴스 (Debezium + Kafka + Zookeeper)
-resource "aws_instance" "debezium" {
-  ami = var.debezium_ami
-  instance_type = var.debezium_instance_type
-  security_groups = [aws_security_group.debezium.name]
-  key_name = var.key_pair_name
-  credit_specification {
-    cpu_credits = "unlimited"
+# Debezium 보안 그룹
+resource "aws_security_group" "debezium" {
+  name = "${var.name}-debezium"
+
+  ingress {
+    from_port = 22
+    to_port = 22
+    description = "From Dev PC to SSH"
+    protocol = "tcp"
+    cidr_blocks = var.work_cidr
   }
+
+  egress {
+    protocol  = "-1"
+    from_port = 0
+    to_port   = 0
+
+    cidr_blocks = [
+      "0.0.0.0/0",
+    ]
+  }
+
   tags = merge(
     {
       Name = "${var.name}-debezium",
@@ -189,17 +172,31 @@ resource "aws_instance" "debezium" {
     },
     var.tags
   )
-  connection {
-    type     = "ssh"
-    host     = self.public_ip
-    user     = "ubuntu"
-    private_key = file(var.private_key_path)
-    agent = false
-    timeout = "1m"
-  }
-  provisioner "remote-exec" {
-    inline = [
-      "git clone https://github.com/haje01/debezium-test.git"
-    ]
-  }
+}
+
+# Debezium 인스턴스 (Debezium + Kafka + Zookeeper)
+resource "aws_instance" "debezium" {
+  ami = var.debezium_ami
+  instance_type = var.debezium_instance_type
+  security_groups = [aws_security_group.debezium.name]
+  key_name = var.key_pair_name
+
+   # 유저 데이터 (cloud-init) 의 변경 시 인스턴스 교체
+  user_data_replace_on_change = true
+  user_data = <<EOF
+#!/bin/bash
+sudo apt update
+sudo apt install -y python3-pip
+cd /home/ubuntu
+git clone https://github.com/haje01/dbztest.git
+cd dbztest && pip3 install -r requirements.txt
+  EOF
+
+  tags = merge(
+    {
+      Name = "${var.name}-debezium",
+      terraform = "true"
+    },
+    var.tags
+  )
 }

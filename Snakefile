@@ -15,7 +15,6 @@ rule:
     script:
         "gen_fake_data.py"
 
-
 rule:
     output:
         "temp/remove"
