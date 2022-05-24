@@ -37,11 +37,13 @@ rule fake_data:
         "temp/reset_table"
     output:
         "temp/fake_data_{pid}.txt"
+    params:
+        pid="{pid}"
     shell:
         """
         ip=$(cat temp/deploy.json | jq -r .debezium_public_ip.value)
         pkey=$(cat temp/deploy.json | jq -r .private_key_path.value)
-        ssh ubuntu@$ip -i $pkey "cd dbztest && python3 fake_data.py temp/deploy.json {pid} > {output}"
+        ssh ubuntu@$ip -i $pkey "cd dbztest && python3 fake_data.py temp/deploy.json {params.pid} > {output}"
         scp -i $pkey ubuntu@$ip:dbztest/{output} {output}
         """
 
