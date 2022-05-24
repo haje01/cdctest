@@ -7,14 +7,14 @@ import pymssql
 from faker import Faker
 from faker.providers import internet, date_time, company, phone_number
 
-assert len(sys.argv) > 1
-dev = len(sys.argv) == 3
+assert len(sys.argv) > 2
+dev = len(sys.argv) == 4
 deploy = sys.argv[1]
+pid = int(sys.argv[2])
 with open(deploy, 'rt') as f:
     tfout = json.loads(f.read())
 
 print(f"Dev: {dev}")
-pid = int(snakemake.params[0])
 ip = tfout['sqlserver_public_ip'] if dev else tfout['sqlserver_private_ip']
 SERVER = ip['value']
 # SERVER = tfout['sqlserver_public_ip']['value']
