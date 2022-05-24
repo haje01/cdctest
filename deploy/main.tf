@@ -69,7 +69,7 @@ resource "aws_security_group" "sqlserver" {
 
 
 data "template_file" "initdb" {
-  template = file("${path.module}/init.sql")
+  template = file("${path.module}/init.tpl")
   vars = {
     user = var.db_user,
     passwd = var.db_passwd
@@ -93,6 +93,7 @@ resource "aws_instance" "sqlserver" {
     timeout = "1m"
   }
 
+  user_data_replace_on_change = true
   user_data = <<EOF
 <powershell>
 # WinRM 설정
@@ -181,7 +182,6 @@ resource "aws_instance" "debezium" {
   security_groups = [aws_security_group.debezium.name]
   key_name = var.key_pair_name
 
-   # 유저 데이터 (cloud-init) 의 변경 시 인스턴스 교체
   user_data_replace_on_change = true
   user_data = <<EOF
 #!/bin/bash
