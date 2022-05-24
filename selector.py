@@ -5,47 +5,56 @@ from pathlib import Path
 
 import pymssql
 
-assert len(sys.argv) > 1
-dev = len(sys.argv) == 2
+num_arg = len(sys.argv)
+assert num_arg in (2, 3)
+dev = num_arg == 2
 setup = sys.argv[1]
-pid = int(sys.argv[2]) if len(sys.argv) > 2 else -1
+pid = int(sys.argv[2]) if not dev else -1
+
 with open(setup, 'rt') as f:
-    tfout = json.loads(f.read())
+    setup = json.loads(f.read())
 
 print(f"Dev: {dev}")
-ip = tfout['sqlserver_public_ip'] if dev else tfout['sqlserver_private_ip']
+ip = setup['sqlserver_public_ip'] if dev else setup['sqlserver_private_ip']
 SERVER = ip['value']
-# SERVER = tfout['sqlserver_public_ip']['value']
-USER = tfout['db_user']['value']
-PASSWD = tfout['db_passwd']['value']
+# SERVER = setup['sqlserver_public_ip']['value']
+USER = setup['db_user']['value']
+PASSWD = setup['db_passwd']['value']
 DATABASE = 'test'
-BATCH = 1000
-EPOCH = 100
 
 print(f"{pid} Connect SQL Server at {SERVER}")
 conn = pymssql.connect(SERVER, USER, PASSWD, DATABASE)
 cursor = conn.cursor(as_dict=True)
 print("Done")
 
+def count_rows():
+    cursor.execute('''
+    SELECT COUNT(*) cnt
+    FROM [test].[dbo].[person]
+    ''')
+    res = cursor.fetchone()
+    return res['cnt']
+
 sql = f'''
-    SELECT TOP {BATCH} *
+    SELECT TOP {10000} *
     FROM [test].[dbo].[person]
     ORDER BY newid()
     '''
 
+st = time.time()
+i = 0
+prev_cnt = count_rows()
 while True:
+    i += 1
+    time.sleep(1)
+    print(f"Epoch: {i}")
     cursor.execute(sql)
     cursor.fetchall()
-    time.sleep(1)
+    cnt = count_rows()
+    if cnt == prev_cnt:
+        break
+    prev_cnt = cnt
 
-# st = time.time()
-# for j in range(EPOCH):
-#     print(f"Epoch: {j+1}")
-#     cursor.execute(sql)
-#     cursor.fetchall()
+conn.close()
 
-# conn.close()
-
-# elapsed = time.time() - st
-# vel = EPOCH * BATCH / elapsed
-# print(f"Total {BATCH * EPOCH} rows, {int(vel)} rows per seconds with batch of {BATCH}.")
+elapsed = time.time() - st

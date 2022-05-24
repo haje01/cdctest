@@ -1,4 +1,7 @@
-NUM_AGENT = 10
+INSERTER = 10
+SELECTOR = 10
+BATCH = 1000
+EPOCH = 100
 
 rule setup:
     """시스템 설치."""
@@ -36,14 +39,16 @@ rule inserter:
         "temp/copy_deploy",
         "temp/reset_table"
     output:
-        "temp/insert_{pid}.txt"
+        "temp/inserter_{pid}.txt"
     params:
-        pid="{pid}"
+        pid="{pid}",
+        epoch=EPOCH,
+        batch=BATCH
     shell:
         """
         ip=$(cat temp/setup.json | jq -r .debezium_public_ip.value)
         pkey=$(cat temp/setup.json | jq -r .private_key_path.value)
-        ssh ubuntu@$ip -i $pkey "cd dbztest && python3 inserter.py temp/setup.json {params.pid} > {output}"
+        ssh ubuntu@$ip -i $pkey "cd dbztest && python3 inserter.py temp/setup.json {params.pid} {params.epoch} {params.batch} > {output}"
         scp -i $pkey ubuntu@$ip:dbztest/{output} {output}
         """
 
@@ -58,14 +63,14 @@ rule selector:
         "temp/setup.json",
         "temp/copy_deploy"
     output:
-        "temp/select_{pid}.txt"
+        "temp/selector_{pid}.txt"
     params:
         pid="{pid}"
     shell:
         """
         ip=$(cat temp/setup.json | jq -r .debezium_public_ip.value)
         pkey=$(cat temp/setup.json | jq -r .private_key_path.value)
-        ssh ubuntu@$ip -i $pkey "cd dbztest && python3 selector.py temp/setup.json {params.pid}> {output}"
+        ssh ubuntu@$ip -i $pkey "cd dbztest && python3 selector.py temp/setup.json {params.pid} > {output}"
         scp -i $pkey ubuntu@$ip:dbztest/{output} {output}
         """
 
@@ -92,7 +97,8 @@ rule result:
     """테스트 결과."""
     input:
         "temp/start_time",
-        expand("temp/insert_{pid}.txt", pid=(range(NUM_AGENT)))
+        expand("temp/inserter_{pid}.txt", pid=(range(INSERTER))),
+        expand("temp/selector_{pid}.txt", pid=(range(SELECTOR)))
     output:
         "temp/result.txt"
     script:
@@ -106,7 +112,7 @@ rule clear:
     shell:
         """
         rm -f temp/reset_table
-        rm -f temp/insert_*.txt
+        rm -f temp/inserter_*.txt
         rm -f temp/result.txt
         rm -f temp/start_time
         touch {output}
