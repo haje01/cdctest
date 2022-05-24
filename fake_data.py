@@ -20,8 +20,8 @@ SERVER = ip['value']
 USER = tfout['db_user']['value']
 PASSWD = tfout['db_passwd']['value']
 DATABASE = 'test'
-BATCH = 1
-EPOCH = 1000
+BATCH = 100
+EPOCH = 100
 
 print(f"Connect SQL Server at {SERVER}")
 conn = pymssql.connect(SERVER, USER, PASSWD, DATABASE)
