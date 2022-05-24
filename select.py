@@ -27,15 +27,14 @@ conn = pymssql.connect(SERVER, USER, PASSWD, DATABASE)
 cursor = conn.cursor(as_dict=True)
 print("Done")
 
-
+sql = f'''
+    SELECT TOP {BATCH} *
+    FROM [test].[dbo].[person]
+    ORDER BY newid()
+    '''
 st = time.time()
 for j in range(EPOCH):
     print(f"Epoch: {j+1}")
-    sql = '''
-SELECT TOP {BATCH} *
-FROM [test].[dbo].[person]
-ORDER BY newid()
-    '''
     cursor.execute(sql)
     cursor.fetchall()
 
