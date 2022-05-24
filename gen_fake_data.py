@@ -1,4 +1,5 @@
 import time
+import sys
 import json
 from pathlib import Path
 
@@ -6,10 +7,15 @@ import pymssql
 from faker import Faker
 from faker.providers import internet, date_time, company, phone_number
 
-with open(snakemake.input[0], 'rt') as f:
+assert len(sys.argv) > 1
+dev = len(sys.argv) == 3
+deploy = sys.argv[1]
+with open(deploy, 'rt') as f:
     tfout = json.loads(f.read())
 
-SERVER = tfout['sqlserver_private_ip']['value']
+print(f"Dev: {dev}")
+ip = tfout['sqlserver_public_ip'] if dev else tfout['sqlserver_private_ip']
+SERVER = ip['value']
 # SERVER = tfout['sqlserver_public_ip']['value']
 USER = tfout['db_user']['value']
 PASSWD = tfout['db_passwd']['value']
@@ -17,8 +23,10 @@ DATABASE = 'test'
 BATCH = 1
 EPOCH = 1000
 
+print(f"Connect SQL Server at {SERVER}")
 conn = pymssql.connect(SERVER, USER, PASSWD, DATABASE)
 cursor = conn.cursor(as_dict=True)
+print("Done")
 
 # 테이블 생성
 sql = '''
@@ -67,4 +75,3 @@ conn.close()
 elapsed = time.time() - st
 vel = EPOCH * BATCH / elapsed
 print(f"Performance: {int(vel)} rows per seconds with batch of {BATCH}.")
-Path(snakemake.output[0]).touch()

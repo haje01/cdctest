@@ -27,8 +27,8 @@ rule gen_fake_data:
         "temp/copy_deploy"
     output:
         "temp/result.txt"
-    script:
-        "gen_fake_data.py"
+    shell:
+        "python gen_fake_data.py {input[0]} 1 && touch {output}"
 
 rule remove:
     output:
