@@ -28,23 +28,6 @@ conn = pymssql.connect(SERVER, USER, PASSWD, DATABASE)
 cursor = conn.cursor(as_dict=True)
 print("Done")
 
-# 테이블 생성
-sql = '''
-IF OBJECT_ID('person', 'U') IS NOT NULL
-    DROP TABLE person
-CREATE TABLE person (
-    id INT NOT NULL,
-    name VARCHAR(40),
-    address VARCHAR(200),
-    ip VARCHAR(20),
-    birth DATE,
-    company VARCHAR(40),
-    phone VARCHAR(40),
-    PRIMARY KEY(id)
-)
-'''
-cursor.execute(sql)
-
 fake = Faker()
 fake.add_provider(internet)
 fake.add_provider(date_time)

@@ -33,9 +33,12 @@ rule copy_deploy:
 rule fake_data:
     input:
         "temp/deploy.json",
-        "temp/copy_deploy"
+        "temp/copy_deploy",
+        "temp/reset_table"
     output:
         "temp/fake_data_{pid}.txt"
+    params:
+        pid="{pid}"
     shell:
         """
         ip=$(cat temp/deploy.json | jq -r .debezium_public_ip.value)
@@ -44,6 +47,13 @@ rule fake_data:
         scp -i $pkey ubuntu@$ip:dbztest/{output} {output}
         """
 
+rule reset_table:
+    input:
+        "temp/deploy.json"
+    output:
+        "temp/reset_table"
+    script:
+        "reset_table.py"
 
 rule result:
     input:
