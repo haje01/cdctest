@@ -16,11 +16,10 @@ rule copy_deploy:
         """
         ip=$(cat temp/deploy.json | jq -r .debezium_public_ip.value)
         pkey=$(cat temp/deploy.json | jq -r .private_key_path.value)
-        ssh ubuntu@$ip -i $pkey "sudo chown ubuntu:ubuntu -R dbztest && mkdir -p dbztest/temp"
+        ssh ubuntu@$ip -i $pkey "sudo chown ubuntu:ubuntu -R dbztest && mkdir -p dbztest/temp && touch dbztest/temp/copy_deploy"
         scp -o "StrictHostKeyChecking=no" -i $pkey {input} ubuntu@$ip:dbztest/{input}
         touch {output}
         """
-
 
 rule gen_fake_data:
     input:
@@ -30,7 +29,6 @@ rule gen_fake_data:
         "temp/result.txt"
     script:
         "gen_fake_data.py"
-
 
 rule remove:
     output:
