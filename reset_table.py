@@ -36,6 +36,7 @@ CREATE TABLE person (
 )
 '''
 cursor.execute(sql)
+conn.commit()
 conn.close()
 
 Path(snakemake.output[0]).touch()

@@ -14,6 +14,7 @@ with open(deploy, 'rt') as f:
     tfout = json.loads(f.read())
 
 print(f"Dev: {dev}")
+pid = int(snakemake.params[0])
 ip = tfout['sqlserver_public_ip'] if dev else tfout['sqlserver_private_ip']
 SERVER = ip['value']
 # SERVER = tfout['sqlserver_public_ip']['value']
@@ -23,7 +24,7 @@ DATABASE = 'test'
 BATCH = 100
 EPOCH = 100
 
-print(f"Connect SQL Server at {SERVER}")
+print(f"{pid} Connect SQL Server at {SERVER}")
 conn = pymssql.connect(SERVER, USER, PASSWD, DATABASE)
 cursor = conn.cursor(as_dict=True)
 print("Done")
@@ -40,6 +41,7 @@ for j in range(EPOCH):
     rows = []
     for i in range(BATCH):
         row = (
+            pid,
             j * BATCH + i,
             fake.name(),
             fake.address(),
@@ -49,7 +51,7 @@ for j in range(EPOCH):
             fake.phone_number()
         )
         rows.append(row)
-    cursor.executemany("INSERT INTO person VALUES(%d, %s, %s, %s, %s, %s, %s)",
+    cursor.executemany("INSERT INTO person VALUES(%d, %d, %s, %s, %s, %s, %s, %s)",
         rows)
     conn.commit()
 
