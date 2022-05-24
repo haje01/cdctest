@@ -9,8 +9,8 @@ from faker.providers import internet, date_time, company, phone_number
 with open(snakemake.input[0], 'rt') as f:
     tfout = json.loads(f.read())
 
-# SERVER = tfout['sqlserver_private_ip']['value']
-SERVER = tfout['sqlserver_public_ip']['value']
+SERVER = tfout['sqlserver_private_ip']['value']
+# SERVER = tfout['sqlserver_public_ip']['value']
 USER = tfout['db_user']['value']
 PASSWD = tfout['db_passwd']['value']
 DATABASE = 'test'

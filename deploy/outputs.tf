@@ -37,3 +37,7 @@ output "db_passwd" {
   sensitive = true
   value = var.db_passwd
 }
+
+output "private_key_path" {
+  value = var.private_key_path
+}
