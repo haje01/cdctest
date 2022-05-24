@@ -21,15 +21,6 @@ rule copy_deploy:
         touch {output}
         """
 
-# rule gen_fake_data:
-#     input:
-#         "temp/deploy.json",
-#         "temp/copy_deploy"
-#     output:
-#         "temp/result.txt"
-#     shell:
-#         "python gen_fake_data.py {input[0]} 1 && touch {output}"
-
 rule fake_data:
     input:
         "temp/deploy.json",
@@ -55,17 +46,38 @@ rule reset_table:
     script:
         "reset_table.py"
 
+
+rule start_time:
+    output:
+        "temp/start_time"
+    shell:
+        "date +%s > {output}"
+
 rule result:
     input:
-        expand("temp/fake_data_{pid}.txt", pid=(1, 2, 3, 4))
+        "temp/start_time",
+        expand("temp/fake_data_{pid}.txt", pid=(range(4)))
     output:
         "temp/result.txt"
     script:
         "result.py"
 
-rule remove:
+
+rule clear:
     output:
-        "temp/remove"
+        "temp/clear"
+    shell:
+        """
+        rm -f temp/reset_table
+        rm -f temp/fake_data_*.txt
+        rm -f temp/result.txt
+        rm -f temp/start_time
+        touch {output}
+        """
+
+rule destroy:
+    output:
+        "temp/destroy"
     shell:
         """
         cd deploy

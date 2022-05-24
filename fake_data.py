@@ -59,4 +59,4 @@ conn.close()
 
 elapsed = time.time() - st
 vel = EPOCH * BATCH / elapsed
-print(f"Performance: {int(vel)} rows per seconds with batch of {BATCH}.")
+print(f"Total: {BATCH * EPOCH} rows, {int(vel)} rows per seconds with batch of {BATCH}.")
