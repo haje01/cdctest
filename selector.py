@@ -45,6 +45,7 @@ sql = f'''
 st = time.time()
 cnt = i = 0
 prev = count_rows()
+equal = 0
 while True:
     i += 1
     time.sleep(1)
@@ -53,6 +54,8 @@ while True:
     cursor.fetchall()
     cnt = count_rows()
     if cnt == prev:
+        equal += 1
+    if equal > 10:
         break
     prev = cnt
 

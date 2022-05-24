@@ -111,6 +111,9 @@ rule clear:
         "temp/clear"
     shell:
         """
+        ip=$(cat temp/setup.json | jq -r .debezium_public_ip.value)
+        pkey=$(cat temp/setup.json | jq -r .private_key_path.value)
+        ssh ubuntu@$ip -i $pkey "pkill python3" || true
         rm -f temp/reset_table
         rm -f temp/inserter_*.txt
         rm -f temp/result.txt
