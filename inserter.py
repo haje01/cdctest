@@ -12,8 +12,8 @@ assert num_arg in (2, 5)
 dev = num_arg == 2
 setup = sys.argv[1]
 pid = int(sys.argv[2]) if not dev else -1
-epoch = sys.argv[3] if not dev else 100
-batch = sys.argv[4] if not dev else 100
+epoch = int(sys.argv[3]) if not dev else 100
+batch = int(sys.argv[4]) if not dev else 100
 
 with open(setup, 'rt') as f:
     setup = json.loads(f.read())
