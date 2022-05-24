@@ -25,7 +25,7 @@ rule copy_deploy:
         touch {output}
         """
 
-rule insert:
+rule inserter:
     """더미 데이터 인서트.
 
     인서트 전용 노드에서 실행.
@@ -43,12 +43,12 @@ rule insert:
         """
         ip=$(cat temp/setup.json | jq -r .debezium_public_ip.value)
         pkey=$(cat temp/setup.json | jq -r .private_key_path.value)
-        ssh ubuntu@$ip -i $pkey "cd dbztest && python3 insert.py temp/setup.json {params.pid} > {output}"
+        ssh ubuntu@$ip -i $pkey "cd dbztest && python3 inserter.py temp/setup.json {params.pid} > {output}"
         scp -i $pkey ubuntu@$ip:dbztest/{output} {output}
         """
 
 
-rule select:
+rule selector:
     """더미 데이터 셀렉트.
 
     셀렉트 전용 노드에서 실행
@@ -65,7 +65,7 @@ rule select:
         """
         ip=$(cat temp/setup.json | jq -r .debezium_public_ip.value)
         pkey=$(cat temp/setup.json | jq -r .private_key_path.value)
-        ssh ubuntu@$ip -i $pkey "cd dbztest && python3 select.py temp/setup.json {params.pid} > {output}"
+        ssh ubuntu@$ip -i $pkey "cd dbztest && python3 selector.py temp/setup.json {params.pid}> {output}"
         scp -i $pkey ubuntu@$ip:dbztest/{output} {output}
         """
 

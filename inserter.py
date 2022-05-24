@@ -7,11 +7,11 @@ import pymssql
 from faker import Faker
 from faker.providers import internet, date_time, company, phone_number
 
-assert len(sys.argv) > 2
-dev = len(sys.argv) == 4
-deploy = sys.argv[1]
-pid = int(sys.argv[2])
-with open(deploy, 'rt') as f:
+assert len(sys.argv) > 1
+dev = len(sys.argv) == 2
+insert = sys.argv[1]
+pid = int(sys.argv[2]) if len(sys.argv) > 2 else -1
+with open(insert, 'rt') as f:
     tfout = json.loads(f.read())
 
 print(f"Dev: {dev}")

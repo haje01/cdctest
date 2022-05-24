@@ -5,11 +5,11 @@ from pathlib import Path
 
 import pymssql
 
-assert len(sys.argv) > 2
-dev = len(sys.argv) == 4
-deploy = sys.argv[1]
-pid = int(sys.argv[2])
-with open(deploy, 'rt') as f:
+assert len(sys.argv) > 1
+dev = len(sys.argv) == 2
+setup = sys.argv[1]
+pid = int(sys.argv[2]) if len(sys.argv) > 2 else -1
+with open(setup, 'rt') as f:
     tfout = json.loads(f.read())
 
 print(f"Dev: {dev}")
@@ -32,14 +32,20 @@ sql = f'''
     FROM [test].[dbo].[person]
     ORDER BY newid()
     '''
-st = time.time()
-for j in range(EPOCH):
-    print(f"Epoch: {j+1}")
+
+while True:
     cursor.execute(sql)
     cursor.fetchall()
+    time.sleep(1)
 
-conn.close()
+# st = time.time()
+# for j in range(EPOCH):
+#     print(f"Epoch: {j+1}")
+#     cursor.execute(sql)
+#     cursor.fetchall()
 
-elapsed = time.time() - st
-vel = EPOCH * BATCH / elapsed
-print(f"Total {BATCH * EPOCH} rows, {int(vel)} rows per seconds with batch of {BATCH}.")
+# conn.close()
+
+# elapsed = time.time() - st
+# vel = EPOCH * BATCH / elapsed
+# print(f"Total {BATCH * EPOCH} rows, {int(vel)} rows per seconds with batch of {BATCH}.")
