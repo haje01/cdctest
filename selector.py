@@ -50,7 +50,6 @@ equal = 0
 while True:
     i += 1
     time.sleep(1)
-    print(f"Epoch: {i} - row_cnt: {row_cnt}, row_prev: {row_prev}")
     cursor.execute(sql)
     tot_read += len(cursor.fetchall())
     row_cnt = count_rows()
