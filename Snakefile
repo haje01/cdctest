@@ -116,6 +116,7 @@ rule clear:
         ssh ubuntu@$ip -i $pkey "pkill python3" || true
         rm -f temp/reset_table
         rm -f temp/inserter_*.txt
+        rm -f temp/selector_*.txt
         rm -f temp/result.txt
         rm -f temp/start_time
         touch {output}

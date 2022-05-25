@@ -51,13 +51,12 @@ equal = 0
 while True:
     i += 1
     print(f"row_prev: {row_prev}, row_cnt: {row_cnt}")
-    time.sleep(1)
     cursor.execute(sql)
     tot_read += len(cursor.fetchall())
     row_cnt = count_rows()
     if row_cnt == row_prev:
         equal += 1
-    if equal > 5:
+    if equal > 50:
         break
     row_prev = row_cnt
 

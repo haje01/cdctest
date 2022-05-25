@@ -23,7 +23,6 @@ with open(snakemake.output[0], 'wt') as fw:
                 tot_ins += cnt
                 fw.write(result)
             elif elms[0] == "Select":
-                import pdb; pdb.set_trace()
                 proc_sel += 1
                 tot_sel += cnt
                 fw.write(result)
