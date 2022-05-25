@@ -17,6 +17,7 @@ with open(setup, 'rt') as f:
     setup = json.loads(f.read())
 
 print(f"Dev: {dev}")
+print(f"Batch: {BATCH}")
 ip = setup['sqlserver_public_ip'] if dev else setup['sqlserver_private_ip']
 SERVER = ip['value']
 # SERVER = setup['sqlserver_public_ip']['value']
@@ -49,13 +50,14 @@ row_prev = count_rows()
 equal = 0
 while True:
     i += 1
+    print(f"row_prev: {row_prev}, row_cnt: {row_cnt}")
     time.sleep(1)
     cursor.execute(sql)
     tot_read += len(cursor.fetchall())
     row_cnt = count_rows()
     if row_cnt == row_prev:
         equal += 1
-    if equal > 10:
+    if equal > 5:
         break
     row_prev = row_cnt
 

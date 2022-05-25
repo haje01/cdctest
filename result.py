@@ -8,7 +8,7 @@ with open(snakemake.input[0], 'rt') as f:
 tot_sel = tot_ins = 0
 with open(snakemake.output[0], 'wt') as fw:
     proc_ins = proc_sel = 0
-    # insert 결과
+    # insert, select 결과 파일들 순회
     for fn in snakemake.input[1:]:
         with open(fn, 'rt') as fr:
             # 프로세스별 결과 파일의 마지막 줄
@@ -17,13 +17,16 @@ with open(snakemake.output[0], 'wt') as fw:
             # 파싱
             elms = result.split()
             cnt = int(elms[1])
+            print(fn, elms[0])
             if elms[0] == "Insert":
                 proc_ins += 1
                 tot_ins += cnt
-            elif elms[1] == "Select":
+                fw.write(result)
+            elif elms[0] == "Select":
+                import pdb; pdb.set_trace()
                 proc_sel += 1
                 tot_sel += cnt
-            fw.write(result)
+                fw.write(result)
     fw.write("======================\n")
     elapsed = time.time() - st
     vel_ins = int(tot_ins / elapsed)
