@@ -5,12 +5,13 @@ from pathlib import Path
 
 import pymssql
 
+BATCH = 10000
+
 num_arg = len(sys.argv)
 assert num_arg in (2, 3)
 dev = num_arg == 2
 setup = sys.argv[1]
 pid = int(sys.argv[2]) if not dev else -1
-
 
 with open(setup, 'rt') as f:
     setup = json.loads(f.read())
@@ -37,28 +38,30 @@ def count_rows():
     return res['cnt']
 
 sql = f'''
-    SELECT TOP {100000} *
+    SELECT TOP {BATCH} *
     FROM [test].[dbo].[person]
     ORDER BY newid()
     '''
 
 st = time.time()
-cnt = i = 0
-prev = count_rows()
+tot_read = row_cnt = i = 0
+row_prev = count_rows()
 equal = 0
 while True:
     i += 1
     time.sleep(1)
-    print(f"Epoch: {i} - cnt: {cnt}, prev: {prev}")
+    print(f"Epoch: {i} - row_cnt: {row_cnt}, row_prev: {row_prev}")
     cursor.execute(sql)
-    cursor.fetchall()
-    cnt = count_rows()
-    if cnt == prev:
+    tot_read += len(cursor.fetchall())
+    row_cnt = count_rows()
+    if row_cnt == row_prev:
         equal += 1
     if equal > 10:
         break
-    prev = cnt
+    row_prev = row_cnt
 
 conn.close()
 
 elapsed = time.time() - st
+vel = tot_read / elapsed
+print(f"Select {tot_read} rows. {int(vel)} rows per seconds with batch of {BATCH}.")
