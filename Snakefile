@@ -1,6 +1,6 @@
-INSERTER = 10
-SELECTOR = 10
-BATCH = 1000
+INSERTER = 5
+SELECTOR = 5
+BATCH = 100
 EPOCH = 100
 
 rule setup:
@@ -127,8 +127,8 @@ rule destroy:
         "temp/destroy"
     shell:
         """
+        rm -fr temp
         cd deploy
         terraform destroy -var-file=test.tfvars -auto-approve
-        rm -fr temp
         touch ../{output}
         """
