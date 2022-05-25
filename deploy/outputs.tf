@@ -20,13 +20,20 @@ output "sqlserver_admin_passwd" {
   sensitive = true
 }
 
-output "debezium_public_ip" {
-  value = aws_instance.debezium.public_ip
-  # value = aws_eip.debezium.public_ip
+output "inserter_public_ip" {
+  value = aws_instance.inserter.public_ip
 }
 
-output "debezium_private_ip" {
-  value = aws_instance.debezium.private_ip
+output "inserter_private_ip" {
+  value = aws_instance.inserter.private_ip
+}
+
+output "selector_public_ip" {
+  value = aws_instance.selector.public_ip
+}
+
+output "selector_private_ip" {
+  value = aws_instance.selector.private_ip
 }
 
 output "db_user" {

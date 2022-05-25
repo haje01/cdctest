@@ -1,3 +1,5 @@
+import time
+
 INSERTER = 5
 SELECTOR = 5
 BATCH = 100
@@ -21,7 +23,13 @@ rule copy_deploy:
         "temp/copy_deploy"
     shell:
         """
-        ip=$(cat temp/setup.json | jq -r .debezium_public_ip.value)
+        # Inserter
+        ip=$(cat temp/setup.json | jq -r .inserter_public_ip.value)
+        pkey=$(cat temp/setup.json | jq -r .private_key_path.value)
+        ssh -o "StrictHostKeyChecking=no" ubuntu@$ip -i $pkey "sudo chown ubuntu:ubuntu -R dbztest && mkdir -p dbztest/temp && touch dbztest/temp/copy_deploy"
+        scp -i $pkey {input} ubuntu@$ip:dbztest/{input}
+        # Selector
+        ip=$(cat temp/setup.json | jq -r .selector_public_ip.value)
         pkey=$(cat temp/setup.json | jq -r .private_key_path.value)
         ssh -o "StrictHostKeyChecking=no" ubuntu@$ip -i $pkey "sudo chown ubuntu:ubuntu -R dbztest && mkdir -p dbztest/temp && touch dbztest/temp/copy_deploy"
         scp -i $pkey {input} ubuntu@$ip:dbztest/{input}
@@ -46,7 +54,7 @@ rule inserter:
         batch=BATCH
     shell:
         """
-        ip=$(cat temp/setup.json | jq -r .debezium_public_ip.value)
+        ip=$(cat temp/setup.json | jq -r .inserter_public_ip.value)
         pkey=$(cat temp/setup.json | jq -r .private_key_path.value)
         ssh ubuntu@$ip -i $pkey "cd dbztest && python3 inserter.py temp/setup.json {params.pid} {params.epoch} {params.batch} > {output}"
         scp -i $pkey ubuntu@$ip:dbztest/{output} {output}
@@ -68,7 +76,7 @@ rule selector:
         pid="{pid}"
     shell:
         """
-        ip=$(cat temp/setup.json | jq -r .debezium_public_ip.value)
+        ip=$(cat temp/setup.json | jq -r .selector_public_ip.value)
         pkey=$(cat temp/setup.json | jq -r .private_key_path.value)
         ssh ubuntu@$ip -i $pkey "cd dbztest && python3 selector.py temp/setup.json {params.pid} > {output}"
         scp -i $pkey ubuntu@$ip:dbztest/{output} {output}
@@ -85,20 +93,16 @@ rule reset_table:
         "reset_table.py"
 
 
-rule start_time:
-    """테스트 시작 시간."""
-    output:
-        "temp/start_time"
-    shell:
-        "date +%s > {output}"
-
-
 rule result:
     """테스트 결과."""
     input:
-        "temp/start_time",
         expand("temp/inserter_{pid}.txt", pid=(range(INSERTER))),
+        # select 를 동시에 하면 insert 성능이 저하
+        # 단일 노드 insert/select 1680 -> 800
+        # 전용 노드 insert/select 1680 -> 1000
         expand("temp/selector_{pid}.txt", pid=(range(SELECTOR)))
+    params:
+        start_time = time.time()
     output:
         "temp/result.txt"
     script:
@@ -111,8 +115,12 @@ rule clear:
         "temp/clear"
     shell:
         """
-        ip=$(cat temp/setup.json | jq -r .debezium_public_ip.value)
+        # Inserter
+        ip=$(cat temp/setup.json | jq -r .inserter_public_ip.value)
         pkey=$(cat temp/setup.json | jq -r .private_key_path.value)
+        ssh ubuntu@$ip -i $pkey "pkill python3" || true
+        # Selector
+        ip=$(cat temp/setup.json | jq -r .selector_public_ip.value)
         ssh ubuntu@$ip -i $pkey "pkill python3" || true
         rm -f temp/reset_table
         rm -f temp/inserter_*.txt

@@ -57,6 +57,8 @@ while True:
     row_cnt = count_rows()
     if row_cnt == row_prev:
         equal += 1
+    else:
+        equal = 0
     if equal > 5:
         break
     row_prev = row_cnt

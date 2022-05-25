@@ -6,8 +6,8 @@ variable "sqlserver_ami" {}
 variable "sqlserver_instance_type" {
   default = "m5.xlarge"
 }
-variable "debezium_ami" {}
-variable "debezium_instance_type" {
+variable "insel_ami" {}
+variable "insel_instance_type" {
   default = "t3.medium"
 }
 variable "work_cidr" {}

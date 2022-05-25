@@ -33,10 +33,20 @@ resource "aws_security_group" "sqlserver" {
   ingress {
     from_port = 1433
     to_port = 1433
-    description = "From Debezium to SQL Server"
+    description = "From Inserter to SQL Server"
     protocol = "tcp"
     security_groups = [
-      "${aws_security_group.debezium.id}"
+      "${aws_security_group.inserter.id}"
+    ]
+  }
+
+  ingress {
+    from_port = 1433
+    to_port = 1433
+    description = "From Selector to SQL Server"
+    protocol = "tcp"
+    security_groups = [
+      "${aws_security_group.selector.id}"
     ]
   }
 
@@ -144,9 +154,9 @@ Set-ExecutionPolicy Bypass -Scope Process -Force; [System.Net.ServicePointManage
   )
 }
 
-# Debezium 보안 그룹
-resource "aws_security_group" "debezium" {
-  name = "${var.name}-debezium"
+# Inserter 보안 그룹
+resource "aws_security_group" "inserter" {
+  name = "${var.name}-inserter"
 
   ingress {
     from_port = 22
@@ -168,18 +178,18 @@ resource "aws_security_group" "debezium" {
 
   tags = merge(
     {
-      Name = "${var.name}-debezium",
+      Name = "${var.name}-inserter",
       terraform = "true"
     },
     var.tags
   )
 }
 
-# Debezium 인스턴스 (Debezium + Kafka + Zookeeper)
-resource "aws_instance" "debezium" {
-  ami = var.debezium_ami
-  instance_type = var.debezium_instance_type
-  security_groups = [aws_security_group.debezium.name]
+# Inserter 인스턴스
+resource "aws_instance" "inserter" {
+  ami = var.insel_ami
+  instance_type = var.insel_instance_type
+  security_groups = [aws_security_group.inserter.name]
   key_name = var.key_pair_name
 
   user_data_replace_on_change = true
@@ -194,7 +204,64 @@ cd dbztest && pip3 install -r requirements.txt
 
   tags = merge(
     {
-      Name = "${var.name}-debezium",
+      Name = "${var.name}-inserter",
+      terraform = "true"
+    },
+    var.tags
+  )
+}
+
+# Selector 보안 그룹
+resource "aws_security_group" "selector" {
+  name = "${var.name}-selector"
+
+  ingress {
+    from_port = 22
+    to_port = 22
+    description = "From Dev PC to SSH"
+    protocol = "tcp"
+    cidr_blocks = var.work_cidr
+  }
+
+  egress {
+    protocol  = "-1"
+    from_port = 0
+    to_port   = 0
+
+    cidr_blocks = [
+      "0.0.0.0/0",
+    ]
+  }
+
+  tags = merge(
+    {
+      Name = "${var.name}-selector",
+      terraform = "true"
+    },
+    var.tags
+  )
+}
+
+# Inserter 인스턴스
+resource "aws_instance" "selector" {
+  ami = var.insel_ami
+  instance_type = var.insel_instance_type
+  security_groups = [aws_security_group.selector.name]
+  key_name = var.key_pair_name
+
+  user_data_replace_on_change = true
+  user_data = <<EOF
+#!/bin/bash
+sudo apt update
+sudo apt install -y python3-pip
+cd /home/ubuntu
+git clone https://github.com/haje01/dbztest.git
+cd dbztest && pip3 install -r requirements.txt
+  EOF
+
+  tags = merge(
+    {
+      Name = "${var.name}-selector",
       terraform = "true"
     },
     var.tags
