@@ -57,6 +57,7 @@ for j in range(epoch):
         rows.append(row)
     cursor.executemany("INSERT INTO person VALUES(%s, %s, %s, %s, %s, %s, %s, %s)",
         rows)
+    conn.commit()
 
 conn.close()
 
