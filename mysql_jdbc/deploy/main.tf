@@ -2,9 +2,9 @@ provider "aws" {
   region = var.region
 }
 
-# SQL Server 보안 그룹
-resource "aws_security_group" "sqlserver" {
-  name = "${var.name}-sqlserver"
+# MySQL 보안 그룹
+resource "aws_security_group" "mysql" {
+  name = "${var.name}-mysql"
 
   ingress {
     from_port = 22
@@ -15,25 +15,9 @@ resource "aws_security_group" "sqlserver" {
   }
 
   ingress {
-    from_port = 3389
-    to_port = 3389
-    description = "From Dev PC to Remote Desktop"
-    protocol = "tcp"
-    cidr_blocks = var.work_cidr
-  }
-
-  ingress {
-    from_port = 5985
-    to_port = 5985
-    description = "From Dev PC to WinRM"
-    protocol = "tcp"
-    cidr_blocks = var.work_cidr
-  }
-
-  ingress {
-    from_port = 1433
-    to_port = 1433
-    description = "From Inserter to SQL Server"
+    from_port = 3306
+    to_port = 3306
+    description = "From Inserter to MySQL"
     protocol = "tcp"
     security_groups = [
       "${aws_security_group.inserter.id}"
@@ -41,9 +25,9 @@ resource "aws_security_group" "sqlserver" {
   }
 
   ingress {
-    from_port = 1433
-    to_port = 1433
-    description = "From Selector to SQL Server"
+    from_port = 3306
+    to_port = 3306
+    description = "From Selector to MySQL"
     protocol = "tcp"
     security_groups = [
       "${aws_security_group.selector.id}"
@@ -51,9 +35,9 @@ resource "aws_security_group" "sqlserver" {
   }
 
   ingress {
-    from_port = 1433
-    to_port = 1433
-    description = "From Dev PC to SQL Server"
+    from_port = 3306
+    to_port = 3306
+    description = "From Dev PC to MySQL"
     protocol = "tcp"
     cidr_blocks = var.work_cidr
   }
@@ -70,13 +54,12 @@ resource "aws_security_group" "sqlserver" {
 
   tags = merge(
     {
-      Name = "${var.name}-sqlserver",
+      Name = "${var.name}-mysql",
       terraform = "true"
     },
     var.tags
   )
 }
-
 
 data "template_file" "initdb" {
   template = file("${path.module}/init.tpl")
@@ -86,68 +69,45 @@ data "template_file" "initdb" {
   }
 }
 
-# SQL Server 인스턴스
-resource "aws_instance" "sqlserver" {
-  ami = var.sqlserver_ami
-  instance_type = var.sqlserver_instance_type
-  security_groups = [aws_security_group.sqlserver.name]
+# MySQL 인스턴스
+resource "aws_instance" "mysql" {
+  ami = var.ubuntu_ami
+  instance_type = var.mysql_instance_type
+  security_groups = [aws_security_group.mysql.name]
   key_name = var.key_pair_name
-  get_password_data = true
-
-  connection {
-    type = "winrm"
-    host = self.public_ip
-    user = var.sqlserver_user
-    password = var.sqlserver_passwd
-    # private_key = file(var.private_key_path)
-    timeout = "1m"
-  }
 
   user_data_replace_on_change = true
   user_data = <<EOF
-<powershell>
-# WinRM 설정
-net user ${var.sqlserver_user} '${var.sqlserver_passwd}' /add /y
-net localgroup administrators ${var.sqlserver_user} /add
-winrm quickconfig -q
-winrm set winrm/config/winrs '@{MaxMemoryPerShellMB="300"}'
-winrm set winrm/config '@{MaxTimeoutms="1800000"}'
-winrm set winrm/config/service '@{AllowUnencrypted="true"}'
-winrm set winrm/config/service/auth '@{Basic="true"}'
-netsh advfirewall firewall add rule name="WinRM 5985" protocol=TCP dir=in localport=5985 action=allow
-netsh advfirewall firewall add rule name="WinRM 5986" protocol=TCP dir=in localport=5986 action=allow
-net stop winrm
-sc.exe config winrm start=auto
-net start winrm
-
-# 로그인 인증을 Mixed 로 변경
-Set-ItemProperty -Path 'HKLM:\\SOFTWARE\\Microsoft\\Microsoft SQL Server\\MSSQL14.MSSQLSERVER\\MSSQLServer' -Name LoginMode -Value 2
-Restart-Service -Force MSSQLSERVER
-
-# Chocolatey 설치
-Set-ExecutionPolicy Bypass -Scope Process -Force; [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072; iex ((New-Object System.Net.WebClient).DownloadString('https://chocolatey.org/install.ps1'))
-</powershell>
+#!/bin/bash
+sudo apt update
+sudo apt install -y mysql-server
   EOF
+
+  connection {
+    type = "ssh"
+    host = self.public_ip
+    user = "ubuntu"
+    private_key = file(var.private_key_path)
+    agent = false
+  }
 
   provisioner "file" {
     content = data.template_file.initdb.rendered
-    destination = "C:/Windows/Temp/init.sql"
+    destination = "/tmp/init.sql"
   }
 
   provisioner "remote-exec" {
     inline = [
+      # MySQL 기동 대기
+      "while ! sudo mysql -e 'SELECT 1' > /dev/null 2>&1 ; do sleep 1 ; done",
       # DB 및 유저 초기화
-      "sqlcmd -i C:\\Windows\\Temp\\init.sql",
-      # 로그인 인증을 Mixed 로 변경
-      # "Set-ItemProperty -Path 'HKLM:\\SOFTWARE\\Microsoft\\Microsoft SQL Server\\MSSQL14.MSSQLSERVER\\MSSQLServer' -Name LoginMode -Value 2",
-      # # 서비스 재시작
-      # "Restart-Service -Force MSSQLSERVER"
+      "sudo mysql < /tmp/init.sql",
     ]
   }
 
   tags = merge(
     {
-      Name = "${var.name}-sqlserver",
+      Name = "${var.name}-mysql",
       terraform = "true"
     },
     var.tags
@@ -187,7 +147,7 @@ resource "aws_security_group" "inserter" {
 
 # Inserter 인스턴스
 resource "aws_instance" "inserter" {
-  ami = var.insel_ami
+  ami = var.ubuntu_ami
   instance_type = var.insel_instance_type
   security_groups = [aws_security_group.inserter.name]
   key_name = var.key_pair_name
@@ -244,7 +204,7 @@ resource "aws_security_group" "selector" {
 
 # Inserter 인스턴스
 resource "aws_instance" "selector" {
-  ami = var.insel_ami
+  ami = var.ubuntu_ami
   instance_type = var.insel_instance_type
   security_groups = [aws_security_group.selector.name]
   key_name = var.key_pair_name

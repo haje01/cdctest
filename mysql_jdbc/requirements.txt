@@ -1,4 +1,4 @@
 snakemake
-pymssql
 mysql-connector-python
 faker
+paramiko
