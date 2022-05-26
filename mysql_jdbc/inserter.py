@@ -30,7 +30,7 @@ DATABASE = 'test'
 
 print(f"{pid} Connect SQL Server at {SERVER}")
 conn = connect(host=SERVER, user=USER, password=PASSWD, database=DATABASE)
-cursor = conn.cursor(as_dict=True
+cursor = conn.cursor()
 print("Done")
 
 fake = Faker()
@@ -55,7 +55,7 @@ for j in range(epoch):
             fake.phone_number()
         )
         rows.append(row)
-    cursor.executemany("INSERT INTO person VALUES(%d, %d, %s, %s, %s, %s, %s, %s)",
+    cursor.executemany("INSERT INTO person VALUES(%s, %s, %s, %s, %s, %s, %s, %s)",
         rows)
 
 conn.close()
