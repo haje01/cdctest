@@ -1,7 +1,7 @@
 import time
 
-INSERTER = 5
-SELECTOR = 5
+INSERTER = 1
+SELECTOR = 1
 BATCH = 100
 EPOCH = 100
 

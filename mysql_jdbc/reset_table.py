@@ -3,7 +3,7 @@ import sys
 import json
 from pathlib import Path
 
-from mysql.connector import connect
+from mysql.connector import connect, DatabaseError
 
 
 with open(snakemake.input[0], 'rt') as f:
@@ -15,7 +15,20 @@ PASSWD = tfout['db_passwd']['value']
 DATABASE = 'test'
 
 print(f"Connect SQL Server at {SERVER}")
-conn = connect(host=SERVER, user=USER, password=PASSWD, database=DATABASE)
+retry = 30
+while retry > 0:
+    retry -= 1
+    try:
+        conn = connect(host=SERVER, user=USER, password=PASSWD, db=DATABASE)
+    except DatabaseError as e:
+        if "Can't connect to MySQL" in str(e) and retry > 0:
+            time.sleep(1)
+            print("Wait for MySQL connection.")
+        else:
+            raise e
+    else:
+        break
+
 cursor = conn.cursor()
 print("Done")
 

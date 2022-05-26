@@ -25,7 +25,7 @@ PASSWD = setup['db_passwd']['value']
 DATABASE = 'test'
 
 print(f"{pid} Connect SQL Server at {SERVER}")
-conn = connect(host=SERVER, user=USER, password=PASSWD, database=DATABASE)
+conn = connect(host=SERVER, user=USER, password=PASSWD, db=DATABASE)
 cursor = conn.cursor()
 print("Done")
 
