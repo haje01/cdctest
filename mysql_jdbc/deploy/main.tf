@@ -161,7 +161,8 @@ resource "aws_instance" "inserter" {
 #!/bin/bash
 sudo apt update
 sudo apt install -y python3-pip
-su ubuntu && cd
+su ubuntu
+cd /home/ubuntu
 git clone https://github.com/haje01/dbztest.git
 cd dbztest && pip3 install -r requirements.txt
 sleep 10
@@ -219,7 +220,8 @@ resource "aws_instance" "selector" {
 #!/bin/bash
 sudo apt update
 sudo apt install -y python3-pip
-su ubuntu && cd
+su ubuntu
+cd /home/ubuntu
 git clone https://github.com/haje01/dbztest.git
 cd dbztest && pip3 install -r requirements.txt
 sleep 10
@@ -283,8 +285,9 @@ resource "aws_instance" "kafka" {
   user_data_replace_on_change = true
   user_data = <<EOF
 #!/bin/bash
-su ubuntu && cd
 sudo apt update
+su ubuntu
+cd /home/ubuntu
 wget -O- https://apt.corretto.aws/corretto.key | sudo apt-key add -
 sudo add-apt-repository -y 'deb https://apt.corretto.aws stable main'
 sudo apt-get update; sudo apt-get install -y java-11-amazon-corretto-jdk

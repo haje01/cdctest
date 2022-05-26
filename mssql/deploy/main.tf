@@ -192,7 +192,8 @@ resource "aws_instance" "inserter" {
 #!/bin/bash
 sudo apt update
 sudo apt install -y python3-pip
-su ubuntu && cd
+su ubuntu
+cd /home/ubuntu
 git clone https://github.com/haje01/dbztest.git
 cd dbztest && pip3 install -r requirements.txt
   EOF
@@ -249,7 +250,8 @@ resource "aws_instance" "selector" {
 #!/bin/bash
 sudo apt update
 sudo apt install -y python3-pip
-su ubuntu && cd
+su ubuntu
+cd /home/ubuntu
 git clone https://github.com/haje01/dbztest.git
 cd dbztest && pip3 install -r requirements.txt
 sleep 5
