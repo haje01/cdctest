@@ -26,21 +26,22 @@ DATABASE = 'test'
 
 print(f"{pid} Connect SQL Server at {SERVER}")
 conn = connect(host=SERVER, user=USER, password=PASSWD, database=DATABASE)
-cursor = conn.cursor(as_dict=True)
+cursor = conn.cursor()
 print("Done")
 
 def count_rows():
     cursor.execute('''
     SELECT COUNT(*) cnt
-    FROM [test].[dbo].[person]
+    FROM test.person
     ''')
     res = cursor.fetchone()
-    return res['cnt']
+    print(res)
+    return res[0]
 
 sql = f'''
-    SELECT TOP {BATCH} *
-    FROM [test].[dbo].[person]
-    ORDER BY newid()
+    SELECT * FROM (
+        SELECT * FROM test.person ORDER BY pid, sid DESC LIMIT {BATCH}
+    ) sub
     '''
 
 st = time.time()
