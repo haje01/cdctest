@@ -18,9 +18,8 @@ with open(setup, 'rt') as f:
 
 print(f"Dev: {dev}")
 print(f"Batch: {BATCH}")
-ip = setup['sqlserver_public_ip'] if dev else setup['sqlserver_private_ip']
+ip = setup['mysql_public_ip'] if dev else setup['mysql_private_ip']
 SERVER = ip['value']
-# SERVER = setup['sqlserver_public_ip']['value']
 USER = setup['db_user']['value']
 PASSWD = setup['db_passwd']['value']
 DATABASE = 'test'

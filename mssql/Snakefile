@@ -32,7 +32,7 @@ rule copy_setup:
         ip=$(cat temp/setup.json | jq -r .selector_public_ip.value)
         pkey=$(cat temp/setup.json | jq -r .private_key_path.value)
         ssh -o "StrictHostKeyChecking=no" ubuntu@$ip -i $pkey "cd dbztest/mssql && sudo chown ubuntu:ubuntu -R . && mkdir -p temp && touch temp/copy_setup"
-        scp -i $pkey {input} ubuntu@$ip:dbztest/{input}
+        scp -i $pkey {input} ubuntu@$ip:dbztest/mssql/{input}
         touch {output}
         """
 

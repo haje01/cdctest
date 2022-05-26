@@ -30,7 +30,7 @@ DATABASE = 'test'
 
 print(f"{pid} Connect SQL Server at {SERVER}")
 conn = connect(host=SERVER, user=USER, password=PASSWD, database=DATABASE)
-cursor = conn.cursor(as_dict=True
+cursor = conn.cursor()
 print("Done")
 
 fake = Faker()
