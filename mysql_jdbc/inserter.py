@@ -3,7 +3,7 @@ import sys
 import json
 from pathlib import Path
 
-from mysql.connector import connect, Error
+from mysql.connector import connect
 from faker import Faker
 from faker.providers import internet, date_time, company, phone_number
 
@@ -22,16 +22,15 @@ print(f"Dev: {dev}")
 print(f"Epoch: {epoch}")
 print(f"Batch: {batch}")
 
-ip = setup['sqlserver_public_ip'] if dev else setup['sqlserver_private_ip']
+ip = setup['mysql_public_ip'] if dev else setup['mysql_private_ip']
 SERVER = ip['value']
-# SERVER = setup['sqlserver_public_ip']['value']
 USER = setup['db_user']['value']
 PASSWD = setup['db_passwd']['value']
 DATABASE = 'test'
 
 print(f"{pid} Connect SQL Server at {SERVER}")
-conn = pymssql.connect(SERVER, USER, PASSWD, DATABASE)
-cursor = conn.cursor(as_dict=True)
+conn = connect(host=SERVER, user=USER, password=PASSWD, database=DATABASE)
+cursor = conn.cursor(as_dict=True
 print("Done")
 
 fake = Faker()
@@ -58,7 +57,6 @@ for j in range(epoch):
         rows.append(row)
     cursor.executemany("INSERT INTO person VALUES(%d, %d, %s, %s, %s, %s, %s, %s)",
         rows)
-    conn.commit()
 
 conn.close()
 

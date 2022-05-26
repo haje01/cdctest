@@ -3,26 +3,25 @@ import sys
 import json
 from pathlib import Path
 
-import pymssql
+from mysql.connector import connect
+
 
 with open(snakemake.input[0], 'rt') as f:
     tfout = json.loads(f.read())
 
-SERVER = tfout['sqlserver_public_ip']['value']
-# SERVER = tfout['sqlserver_public_ip']['value']
+SERVER = tfout['mysql_public_ip']['value']
 USER = tfout['db_user']['value']
 PASSWD = tfout['db_passwd']['value']
 DATABASE = 'test'
 
 print(f"Connect SQL Server at {SERVER}")
-conn = pymssql.connect(SERVER, USER, PASSWD, DATABASE)
-cursor = conn.cursor(as_dict=True)
+conn = connect(host=SERVER, user=USER, password=PASSWD, database=DATABASE)
+cursor = conn.cursor()
 print("Done")
 
 # 테이블 생성
 sql = '''
-IF OBJECT_ID('person', 'U') IS NOT NULL
-    DROP TABLE person
+DROP TABLE IF EXISTS person;
 CREATE TABLE person (
     pid INT NOT NULL,
     sid INT NOT NULL,
@@ -36,7 +35,6 @@ CREATE TABLE person (
 )
 '''
 cursor.execute(sql)
-conn.commit()
 conn.close()
 
 Path(snakemake.output[0]).touch()

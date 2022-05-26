@@ -3,7 +3,7 @@ import sys
 import json
 from pathlib import Path
 
-import pymssql
+from mysql.connector import connect
 
 BATCH = 10000
 
@@ -26,7 +26,7 @@ PASSWD = setup['db_passwd']['value']
 DATABASE = 'test'
 
 print(f"{pid} Connect SQL Server at {SERVER}")
-conn = pymssql.connect(SERVER, USER, PASSWD, DATABASE)
+conn = connect(host=SERVER, user=USER, password=PASSWD, database=DATABASE)
 cursor = conn.cursor(as_dict=True)
 print("Done")
 

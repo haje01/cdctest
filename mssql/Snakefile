@@ -15,23 +15,23 @@ rule setup:
         terraform output -json > ../{output}
         """
 
-rule copy_deploy:
-    """디플로이 정보 복사."""
+rule copy_setup:
+    """설치 정보 복사."""
     input:
         "temp/setup.json"
     output:
-        "temp/copy_deploy"
+        "temp/copy_setup"
     shell:
         """
         # Inserter
         ip=$(cat temp/setup.json | jq -r .inserter_public_ip.value)
         pkey=$(cat temp/setup.json | jq -r .private_key_path.value)
-        ssh -o "StrictHostKeyChecking=no" ubuntu@$ip -i $pkey "sudo chown ubuntu:ubuntu -R dbztest && mkdir -p dbztest/temp && touch dbztest/temp/copy_deploy"
+        ssh -o "StrictHostKeyChecking=no" ubuntu@$ip -i $pkey "cd dbztest/mssql && sudo chown ubuntu:ubuntu -R . && mkdir -p temp && touch temp/copy_setup"
         scp -i $pkey {input} ubuntu@$ip:dbztest/{input}
         # Selector
         ip=$(cat temp/setup.json | jq -r .selector_public_ip.value)
         pkey=$(cat temp/setup.json | jq -r .private_key_path.value)
-        ssh -o "StrictHostKeyChecking=no" ubuntu@$ip -i $pkey "sudo chown ubuntu:ubuntu -R dbztest && mkdir -p dbztest/temp && touch dbztest/temp/copy_deploy"
+        ssh -o "StrictHostKeyChecking=no" ubuntu@$ip -i $pkey "cd dbztest/mssql && sudo chown ubuntu:ubuntu -R . && mkdir -p temp && touch temp/copy_setup"
         scp -i $pkey {input} ubuntu@$ip:dbztest/{input}
         touch {output}
         """
@@ -44,7 +44,7 @@ rule inserter:
     """
     input:
         "temp/setup.json",
-        "temp/copy_deploy",
+        "temp/copy_setup",
         "temp/reset_table"
     output:
         "temp/inserter_{pid}.txt"
@@ -56,7 +56,7 @@ rule inserter:
         """
         ip=$(cat temp/setup.json | jq -r .inserter_public_ip.value)
         pkey=$(cat temp/setup.json | jq -r .private_key_path.value)
-        ssh ubuntu@$ip -i $pkey "cd dbztest && python3 inserter.py temp/setup.json {params.pid} {params.epoch} {params.batch} > {output}"
+        ssh ubuntu@$ip -i $pkey "cd dbztest/mssql && python3 inserter.py temp/setup.json {params.pid} {params.epoch} {params.batch} > {output}"
         scp -i $pkey ubuntu@$ip:dbztest/{output} {output}
         """
 
@@ -69,7 +69,7 @@ rule selector:
     """
     input:
         "temp/setup.json",
-        "temp/copy_deploy"
+        "temp/copy_setup"
     output:
         "temp/selector_{pid}.txt"
     params:
@@ -78,7 +78,7 @@ rule selector:
         """
         ip=$(cat temp/setup.json | jq -r .selector_public_ip.value)
         pkey=$(cat temp/setup.json | jq -r .private_key_path.value)
-        ssh ubuntu@$ip -i $pkey "cd dbztest && python3 selector.py temp/setup.json {params.pid} > {output}"
+        ssh ubuntu@$ip -i $pkey "cd dbztest/mssql && python3 selector.py temp/setup.json {params.pid} > {output}"
         scp -i $pkey ubuntu@$ip:dbztest/{output} {output}
         """
 

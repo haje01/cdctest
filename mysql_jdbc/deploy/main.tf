@@ -81,6 +81,10 @@ resource "aws_instance" "mysql" {
 #!/bin/bash
 sudo apt update
 sudo apt install -y mysql-server
+sudo sed -i "s/bind-address.*/bind-address = 0.0.0.0/" /etc/mysql/mysql.conf.d/mysqld.cnf
+sudo service mysql stop
+sudo service mysql start
+.cnf
   EOF
 
   connection {
