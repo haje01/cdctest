@@ -29,7 +29,7 @@ USER = setup['db_user']['value']
 PASSWD = setup['db_passwd']['value']
 DATABASE = 'test'
 
-print(f"{pid} Connect SQL Server at {SERVER}")
+print(f"Inserter {pid} connect SQL Server at {SERVER}")
 conn = pymssql.connect(SERVER, USER, PASSWD, DATABASE)
 cursor = conn.cursor(as_dict=True)
 print("Done")

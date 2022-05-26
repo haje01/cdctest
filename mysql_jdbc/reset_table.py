@@ -14,15 +14,15 @@ USER = tfout['db_user']['value']
 PASSWD = tfout['db_passwd']['value']
 DATABASE = 'test'
 
-print(f"Connect SQL Server at {SERVER}")
-retry = 30
-while retry > 0:
-    retry -= 1
+print(f"Connect MySQL at {SERVER}")
+retry = 10
+while True:
     try:
         conn = connect(host=SERVER, user=USER, password=PASSWD, db=DATABASE)
     except DatabaseError as e:
-        if "Can't connect to MySQL" in str(e) and retry > 0:
-            time.sleep(1)
+        retry -= 1
+        if "Can't connect to MySQL server" in str(e) and retry > 0:
+            time.sleep(2)
             print("Wait for MySQL connection.")
         else:
             raise e

@@ -26,12 +26,12 @@ rule copy_setup:
         # Inserter
         ip=$(cat temp/setup.json | jq -r .inserter_public_ip.value)
         pkey=$(cat temp/setup.json | jq -r .private_key_path.value)
-        ssh -o "StrictHostKeyChecking=no" ubuntu@$ip -i $pkey "cd dbztest/mssql && sudo chown ubuntu:ubuntu -R . && mkdir -p temp && touch temp/copy_setup"
+        ssh -o "StrictHostKeyChecking=no" ubuntu@$ip -i $pkey "cd dbztest/mssql && sudo chown ubuntu:ubuntu -R . && mkdir -p temp && mkdir -p temp"
         scp -i $pkey {input} ubuntu@$ip:dbztest/{input}
         # Selector
         ip=$(cat temp/setup.json | jq -r .selector_public_ip.value)
         pkey=$(cat temp/setup.json | jq -r .private_key_path.value)
-        ssh -o "StrictHostKeyChecking=no" ubuntu@$ip -i $pkey "cd dbztest/mssql && sudo chown ubuntu:ubuntu -R . && mkdir -p temp && touch temp/copy_setup"
+        ssh -o "StrictHostKeyChecking=no" ubuntu@$ip -i $pkey "cd dbztest/mssql && sudo chown ubuntu:ubuntu -R . && mkdir -p temp && touch -p temp"
         scp -i $pkey {input} ubuntu@$ip:dbztest/mssql/{input}
         touch {output}
         """

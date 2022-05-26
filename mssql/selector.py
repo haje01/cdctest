@@ -7,6 +7,9 @@ import pymssql
 
 BATCH = 10000
 
+# Inserter 시동 대기
+time.sleep(3)
+
 num_arg = len(sys.argv)
 assert num_arg in (2, 3)
 dev = num_arg == 2
@@ -25,7 +28,7 @@ USER = setup['db_user']['value']
 PASSWD = setup['db_passwd']['value']
 DATABASE = 'test'
 
-print(f"{pid} Connect SQL Server at {SERVER}")
+print(f"Selector {pid} connect SQL Server at {SERVER}")
 conn = pymssql.connect(SERVER, USER, PASSWD, DATABASE)
 cursor = conn.cursor(as_dict=True)
 print("Done")
