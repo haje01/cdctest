@@ -7,9 +7,6 @@ from mysql.connector import connect
 
 BATCH = 10000
 
-# Inserter 시동 대기
-time.sleep(3)
-
 num_arg = len(sys.argv)
 assert num_arg in (2, 3)
 dev = num_arg == 2

@@ -161,9 +161,10 @@ resource "aws_instance" "inserter" {
 #!/bin/bash
 sudo apt update
 sudo apt install -y python3-pip
-cd /home/ubuntu
+su ubuntu && cd
 git clone https://github.com/haje01/dbztest.git
 cd dbztest && pip3 install -r requirements.txt
+sleep 10
   EOF
 
   tags = merge(
@@ -206,7 +207,7 @@ resource "aws_security_group" "selector" {
   )
 }
 
-# Inserter 인스턴스
+# Selector 인스턴스
 resource "aws_instance" "selector" {
   ami = var.ubuntu_ami
   instance_type = var.insel_instance_type
@@ -218,14 +219,85 @@ resource "aws_instance" "selector" {
 #!/bin/bash
 sudo apt update
 sudo apt install -y python3-pip
-cd /home/ubuntu
+su ubuntu && cd
 git clone https://github.com/haje01/dbztest.git
 cd dbztest && pip3 install -r requirements.txt
+sleep 10
   EOF
 
   tags = merge(
     {
       Name = "${var.name}-selector",
+      terraform = "true"
+    },
+    var.tags
+  )
+}
+
+# Kafka 보안 그룹
+resource "aws_security_group" "kafka" {
+  name = "${var.name}-kafka"
+
+  ingress {
+    from_port = 22
+    to_port = 22
+    description = "From Dev PC to SSH"
+    protocol = "tcp"
+    cidr_blocks = var.work_cidr
+  }
+
+  ingress {
+    from_port = 9092
+    to_port = 9092
+    description = "From Dev PC to kafka"
+    protocol = "tcp"
+    cidr_blocks = var.work_cidr
+  }
+
+  egress {
+    protocol  = "-1"
+    from_port = 0
+    to_port   = 0
+
+    cidr_blocks = [
+      "0.0.0.0/0",
+    ]
+  }
+
+  tags = merge(
+    {
+      Name = "${var.name}-kafka",
+      terraform = "true"
+    },
+    var.tags
+  )
+}
+
+# Kafka 인스턴스
+resource "aws_instance" "kafka" {
+  ami = var.ubuntu_ami
+  instance_type = var.kafka_instance_type
+  security_groups = [aws_security_group.kafka.name]
+  key_name = var.key_pair_name
+
+  user_data_replace_on_change = true
+  user_data = <<EOF
+#!/bin/bash
+su ubuntu && cd
+sudo apt update
+wget -O- https://apt.corretto.aws/corretto.key | sudo apt-key add -
+sudo add-apt-repository -y 'deb https://apt.corretto.aws stable main'
+sudo apt-get update; sudo apt-get install -y java-11-amazon-corretto-jdk
+wget https://archive.apache.org/dist/kafka/3.0.0/kafka_2.13-3.0.0.tgz
+tar xzf kafka_2.13-3.0.0.tgz
+rm kafka_2.13-3.0.0.tgz
+screen -S zookeeper -dm bash -c "cd kafka_2.13-3.0.0 && bin/zookeeper-server-start.sh config/zookeeper.properties"
+screen -S kafka -dm bash -c "cd kafka_2.13-3.0.0 && bin/kafka-server-start.sh config/server.properties"
+  EOF
+
+  tags = merge(
+    {
+      Name = "${var.name}-kafka",
       terraform = "true"
     },
     var.tags

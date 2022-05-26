@@ -1,3 +1,0 @@
-pymssql
-faker
-snakemake

@@ -192,7 +192,7 @@ resource "aws_instance" "inserter" {
 #!/bin/bash
 sudo apt update
 sudo apt install -y python3-pip
-cd /home/ubuntu
+su ubuntu && cd
 git clone https://github.com/haje01/dbztest.git
 cd dbztest && pip3 install -r requirements.txt
   EOF
@@ -237,7 +237,7 @@ resource "aws_security_group" "selector" {
   )
 }
 
-# Inserter 인스턴스
+# Selector 인스턴스
 resource "aws_instance" "selector" {
   ami = var.insel_ami
   instance_type = var.insel_instance_type
@@ -249,9 +249,10 @@ resource "aws_instance" "selector" {
 #!/bin/bash
 sudo apt update
 sudo apt install -y python3-pip
-cd /home/ubuntu
+su ubuntu && cd
 git clone https://github.com/haje01/dbztest.git
 cd dbztest && pip3 install -r requirements.txt
+sleep 5
   EOF
 
   tags = merge(

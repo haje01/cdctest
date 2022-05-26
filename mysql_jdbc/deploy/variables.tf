@@ -9,6 +9,9 @@ variable "mysql_instance_type" {
 variable "insel_instance_type" {
   default = "t3.medium"
 }
+variable "kafka_instance_type" {
+  default = "t3.medium"
+}
 variable "work_cidr" {}
 variable "key_pair_name" {}
 variable "private_key_path" {}

@@ -1,4 +1,0 @@
-snakemake
-mysql-connector-python
-faker
-paramiko
