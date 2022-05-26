@@ -35,7 +35,6 @@ def count_rows():
     FROM test.person
     ''')
     res = cursor.fetchone()
-    print(res)
     return res[0]
 
 sql = f'''
