@@ -57,7 +57,7 @@ rule inserter:
         ip=$(cat temp/setup.json | jq -r .inserter_public_ip.value)
         pkey=$(cat temp/setup.json | jq -r .private_key_path.value)
         ssh ubuntu@$ip -i $pkey "cd dbztest/mssql && python3 inserter.py temp/setup.json {params.pid} {params.epoch} {params.batch} > {output}"
-        scp -i $pkey ubuntu@$ip:dbztest/{output} {output}
+        scp -i $pkey ubuntu@$ip:dbztest/mssql/{output} {output}
         """
 
 
@@ -79,7 +79,7 @@ rule selector:
         ip=$(cat temp/setup.json | jq -r .selector_public_ip.value)
         pkey=$(cat temp/setup.json | jq -r .private_key_path.value)
         ssh ubuntu@$ip -i $pkey "cd dbztest/mssql && python3 selector.py temp/setup.json {params.pid} > {output}"
-        scp -i $pkey ubuntu@$ip:dbztest/{output} {output}
+        scp -i $pkey ubuntu@$ip:dbztest/mssql/{output} {output}
         """
 
 

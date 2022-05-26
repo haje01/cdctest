@@ -32,14 +32,14 @@ print("Done")
 def count_rows():
     cursor.execute('''
     SELECT COUNT(*) cnt
-    FROM test.person
+    FROM person
     ''')
     res = cursor.fetchone()
     return res[0]
 
 sql = f'''
     SELECT * FROM (
-        SELECT * FROM test.person ORDER BY pid, sid DESC LIMIT {BATCH}
+        SELECT * FROM person ORDER BY pid, sid DESC LIMIT {BATCH}
     ) sub
     '''
 
