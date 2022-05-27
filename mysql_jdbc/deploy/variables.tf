@@ -20,3 +20,4 @@ variable "db_passwd" {}
 variable "tags" {
     type = map(string)
 }
+variable "kafka_connect_jdbc_path" {}

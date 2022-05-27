@@ -91,9 +91,9 @@ resource "aws_instance" "mysql" {
 
   provisioner "remote-exec" {
     inline = [
-      "sudo apt update",
+      "sudo apt update -qq",
       "sudo apt --fix-broken install",
-      "sudo apt install -y mysql-server",
+      "sudo apt install -qq -y mysql-server",
       "sleep 5",
       "sudo sed -i 's/bind-address.*/bind-address = 0.0.0.0/' /etc/mysql/mysql.conf.d/mysqld.cnf",
       "sudo service mysql stop",
@@ -164,10 +164,10 @@ resource "aws_instance" "inserter" {
   provisioner "remote-exec" {
     inline = [
       "sudo add-apt-repository -y universe",
-      "sudo apt update",
-      "sudo apt install -y python3-pip",
-      "git clone https://github.com/haje01/dbztest.git",
-      "cd dbztest && pip3 install --progress-bar off -r requirements.txt"
+      "sudo apt update -qq",
+      "sudo apt install -qq -y python3-pip",
+      "git clone --quiet https://github.com/haje01/cdctest.git",
+      "cd cdctest && pip3 install -q -r requirements.txt"
     ]
   }
 
@@ -229,10 +229,10 @@ resource "aws_instance" "selector" {
   provisioner "remote-exec" {
     inline = [
       "sudo add-apt-repository -y universe",
-      "sudo apt update",
-      "sudo apt install -y python3-pip",
-      "git clone https://github.com/haje01/dbztest.git",
-      "cd dbztest && pip3 install --progress-bar off -r requirements.txt"
+      "sudo apt update -qq",
+      "sudo apt install -qq -y python3-pip",
+      "git clone --quiet https://github.com/haje01/cdctest.git",
+      "cd cdctest && pip3 install -q -r requirements.txt"
     ]
   }
 
@@ -299,10 +299,16 @@ connection {
     agent = false
   }
 
+  provisioner "file" {
+    source = var.kafka_connect_jdbc_path
+    destination = "/tmp/${basename(var.kafka_connect_jdbc_path)}"
+  }
+
   provisioner "remote-exec" {
     inline = [
-      "sudo apt update",
-      "sudo apt -y install openjdk-8-jdk",
+      "sudo apt update -qq",
+      # Kafka 설치
+      "sudo apt -qq -y install openjdk-8-jdk",
       "echo 'export JAVA_HOME=/usr/lib/jvm/java-8-openjdk-amd64' >> /etc/profile",
       "echo 'export PATH=$PATH:$JAVA_HOME/bin' >> /etc/profile",
       "wget -nv https://archive.apache.org/dist/kafka/3.0.0/kafka_2.13-3.0.0.tgz",
@@ -311,7 +317,11 @@ connection {
       "cd kafka_2.13-3.0.0",
       "screen -S zookeeper -dm bash -c 'JAVA_HOME=/usr/lib/jvm/java-8-openjdk-amd64; sudo bin/zookeeper-server-start.sh config/zookeeper.properties; exec bash'",
       "screen -S kafka -dm bash -c 'JAVA_HOME=/usr/lib/jvm/java-8-openjdk-amd64; sudo bin/kafka-server-start.sh config/server.properties; exec bash'",
-      "sleep 3"  # screen 세션이 죽지 않도록
+      # "sleep 3",  # screen 세션이 죽지 않도록
+      # Kafka Connector 설치
+      "mv /tmp/${basename(var.kafka_connect_jdbc_path)} /opt/kafka_2.13-3.0.0/connectors",
+      "cd /opt/kafka_2.13-3.0.0/connectors",
+      "unzip ${basename(var.kafka_connect_jdbc_path)}"
     ]
   }
 

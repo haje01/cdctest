@@ -201,10 +201,10 @@ resource "aws_instance" "inserter" {
   provisioner "remote-exec" {
     inline = [
       "sudo add-apt-repository -y universe",
-      "sudo apt update",
-      "sudo apt install -y python3-pip",
-      "git clone https://github.com/haje01/dbztest.git",
-      "cd dbztest && pip3 install --progress-bar off -r requirements.txt"
+      "sudo apt update -qq",
+      "sudo apt install -qq -y python3-pip",
+      "git clone --quiet https://github.com/haje01/cdctest.git",
+      "cd cdctest && pip3 install -q -r requirements.txt"
     ]
   }
 
@@ -266,10 +266,10 @@ resource "aws_instance" "selector" {
   provisioner "remote-exec" {
     inline = [
       "sudo add-apt-repository -y universe",
-      "sudo apt update",
-      "sudo apt install -y python3-pip",
-      "git clone https://github.com/haje01/dbztest.git",
-      "cd dbztest && pip3 install --progress-bar off -r requirements.txt"
+      "sudo apt update -qq",
+      "sudo apt install -qq -y python3-pip",
+      "git clone --quiet https://github.com/haje01/cdctest.git",
+      "cd cdctest && pip3 install -q -r requirements.txt"
     ]
   }
 

@@ -26,13 +26,13 @@ rule copy_setup:
         # Inserter
         ip=$(cat temp/setup.json | jq -r .inserter_public_ip.value)
         pkey=$(cat temp/setup.json | jq -r .private_key_path.value)
-        ssh -o "StrictHostKeyChecking=no" ubuntu@$ip -i $pkey "cd dbztest/mysql_jdbc && mkdir -p temp"
-        scp -i $pkey {input} ubuntu@$ip:dbztest/mysql_jdbc/{input}
+        ssh -o "StrictHostKeyChecking=no" ubuntu@$ip -i $pkey "cd cdctest/mysql_jdbc && mkdir -p temp"
+        scp -i $pkey {input} ubuntu@$ip:cdctest/mysql_jdbc/{input}
         # Selector
         ip=$(cat temp/setup.json | jq -r .selector_public_ip.value)
         pkey=$(cat temp/setup.json | jq -r .private_key_path.value)
-        ssh -o "StrictHostKeyChecking=no" ubuntu@$ip -i $pkey "cd dbztest/mysql_jdbc && mkdir -p temp"
-        scp -i $pkey {input} ubuntu@$ip:dbztest/mysql_jdbc/{input}
+        ssh -o "StrictHostKeyChecking=no" ubuntu@$ip -i $pkey "cd cdctest/mysql_jdbc && mkdir -p temp"
+        scp -i $pkey {input} ubuntu@$ip:cdctest/mysql_jdbc/{input}
         touch {output}
         """
 
@@ -56,8 +56,8 @@ rule inserter:
         """
         ip=$(cat temp/setup.json | jq -r .inserter_public_ip.value)
         pkey=$(cat temp/setup.json | jq -r .private_key_path.value)
-        ssh ubuntu@$ip -i $pkey "cd dbztest/mysql_jdbc && python3 inserter.py temp/setup.json {params.pid} {params.epoch} {params.batch} > {output}"
-        scp -i $pkey ubuntu@$ip:dbztest/mysql_jdbc/{output} {output}
+        ssh ubuntu@$ip -i $pkey "cd cdctest/mysql_jdbc && python3 inserter.py temp/setup.json {params.pid} {params.epoch} {params.batch} > {output}"
+        scp -i $pkey ubuntu@$ip:cdctest/mysql_jdbc/{output} {output}
         """
 
 
@@ -78,8 +78,8 @@ rule selector:
         """
         ip=$(cat temp/setup.json | jq -r .selector_public_ip.value)
         pkey=$(cat temp/setup.json | jq -r .private_key_path.value)
-        ssh ubuntu@$ip -i $pkey "cd dbztest/mysql_jdbc && python3 selector.py temp/setup.json {params.pid} > {output}"
-        scp -i $pkey ubuntu@$ip:dbztest/mysql_jdbc/{output} {output}
+        ssh ubuntu@$ip -i $pkey "cd cdctest/mysql_jdbc && python3 selector.py temp/setup.json {params.pid} > {output}"
+        scp -i $pkey ubuntu@$ip:cdctest/mysql_jdbc/{output} {output}
         """
 
 
@@ -119,11 +119,11 @@ rule clear:
         ip=$(cat temp/setup.json | jq -r .inserter_public_ip.value)
         pkey=$(cat temp/setup.json | jq -r .private_key_path.value)
         ssh ubuntu@$ip -i $pkey "pkill python3" || true
-        # ssh ubuntu@$ip -i $pkey "rm -f dbztest/mysql_jdbc/temp/inserter_*.txt"
+        # ssh ubuntu@$ip -i $pkey "rm -f cdctest/mysql_jdbc/temp/inserter_*.txt"
         # Selector
         ip=$(cat temp/setup.json | jq -r .selector_public_ip.value)
         ssh ubuntu@$ip -i $pkey "pkill python3" || true
-        # ssh ubuntu@$ip -i $pkey "rm -f dbztest/mysql_jdbc/temp/selector_*.txt"
+        # ssh ubuntu@$ip -i $pkey "rm -f cdctest/mysql_jdbc/temp/selector_*.txt"
         rm -f temp/reset_table
         rm -f temp/inserter_*.txt
         rm -f temp/selector_*.txt
