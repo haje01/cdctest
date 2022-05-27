@@ -97,7 +97,7 @@ resource "aws_instance" "sqlserver" {
   user_data_replace_on_change = true
   user_data = <<EOF
 <powershell>
-# WinRM 설정
+# WinRM 설정 (TODO: 안쓰면 제거)
 net user ${var.sqlserver_user} '${var.sqlserver_passwd}' /add /y
 net localgroup administrators ${var.sqlserver_user} /add
 winrm quickconfig -q
@@ -117,6 +117,9 @@ Restart-Service -Force MSSQLSERVER
 
 # Chocolatey 설치
 Set-ExecutionPolicy Bypass -Scope Process -Force; [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072; iex ((New-Object System.Net.WebClient).DownloadString('https://chocolatey.org/install.ps1'))
+
+# DB 및 유저 초기화
+sqlcmd -i C:\\Windows\\Temp\\init.sql
 </powershell>
   EOF
 
@@ -133,12 +136,12 @@ Set-ExecutionPolicy Bypass -Scope Process -Force; [System.Net.ServicePointManage
     destination = "C:/Windows/Temp/init.sql"
   }
 
-  provisioner "remote-exec" {
-    inline = [
-      # DB 및 유저 초기화
-      "sqlcmd -i C:\\Windows\\Temp\\init.sql",
-    ]
-  }
+  # provisioner "remote-exec" {
+  #   inline = [
+  #     # DB 및 유저 초기화
+  #     "sqlcmd -i C:\\Windows\\Temp\\init.sql",
+  #   ]
+  # }
 
   tags = merge(
     {
@@ -187,16 +190,23 @@ resource "aws_instance" "inserter" {
   security_groups = [aws_security_group.inserter.name]
   key_name = var.key_pair_name
 
-  user_data_replace_on_change = true
-  user_data = <<EOF
-#!/bin/bash
-sudo apt update
-sudo apt install -y python3-pip
-su ubuntu
-cd /home/ubuntu
-git clone https://github.com/haje01/dbztest.git
-cd dbztest && pip3 install -r requirements.txt
-  EOF
+  connection {
+    type = "ssh"
+    host = self.public_ip
+    user = "ubuntu"
+    private_key = file(var.private_key_path)
+    agent = false
+  }
+
+  provisioner "remote-exec" {
+    inline = [
+      "sudo add-apt-repository -y universe",
+      "sudo apt update",
+      "sudo apt install -y python3-pip",
+      "git clone https://github.com/haje01/dbztest.git",
+      "cd dbztest && pip3 install --progress-bar off -r requirements.txt"
+    ]
+  }
 
   tags = merge(
     {
@@ -245,17 +255,23 @@ resource "aws_instance" "selector" {
   security_groups = [aws_security_group.selector.name]
   key_name = var.key_pair_name
 
-  user_data_replace_on_change = true
-  user_data = <<EOF
-#!/bin/bash
-sudo apt update
-sudo apt install -y python3-pip
-su ubuntu
-cd /home/ubuntu
-git clone https://github.com/haje01/dbztest.git
-cd dbztest && pip3 install -r requirements.txt
-sleep 5
-  EOF
+  connection {
+    type = "ssh"
+    host = self.public_ip
+    user = "ubuntu"
+    private_key = file(var.private_key_path)
+    agent = false
+  }
+
+  provisioner "remote-exec" {
+    inline = [
+      "sudo add-apt-repository -y universe",
+      "sudo apt update",
+      "sudo apt install -y python3-pip",
+      "git clone https://github.com/haje01/dbztest.git",
+      "cd dbztest && pip3 install --progress-bar off -r requirements.txt"
+    ]
+  }
 
   tags = merge(
     {

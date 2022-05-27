@@ -76,17 +76,6 @@ resource "aws_instance" "mysql" {
   security_groups = [aws_security_group.mysql.name]
   key_name = var.key_pair_name
 
-  user_data_replace_on_change = true
-  user_data = <<EOF
-#!/bin/bash
-sudo apt update
-sudo apt install -y mysql-server
-sudo sed -i "s/bind-address.*/bind-address = 0.0.0.0/" /etc/mysql/mysql.conf.d/mysqld.cnf
-sudo service mysql stop
-sudo service mysql start
-.cnf
-  EOF
-
   connection {
     type = "ssh"
     host = self.public_ip
@@ -102,10 +91,18 @@ sudo service mysql start
 
   provisioner "remote-exec" {
     inline = [
+      "sudo apt update",
+      "sudo apt --fix-broken install",
+      "sudo apt install -y mysql-server",
+      "sleep 5",
+      "sudo sed -i 's/bind-address.*/bind-address = 0.0.0.0/' /etc/mysql/mysql.conf.d/mysqld.cnf",
+      "sudo service mysql stop",
+      "sudo service mysql start",
       # MySQL 기동 대기
       "while ! sudo mysql -e 'SELECT 1' > /dev/null 2>&1 ; do sleep 1 ; done",
+      # "sleep 5",
       # DB 및 유저 초기화
-      "sudo mysql < /tmp/init.sql",
+      "sudo mysql < /tmp/init.sql"
     ]
   }
 
@@ -156,17 +153,23 @@ resource "aws_instance" "inserter" {
   security_groups = [aws_security_group.inserter.name]
   key_name = var.key_pair_name
 
-  user_data_replace_on_change = true
-  user_data = <<EOF
-#!/bin/bash
-sudo apt update
-sudo apt install -y python3-pip
-su ubuntu
-cd /home/ubuntu
-git clone https://github.com/haje01/dbztest.git
-cd dbztest && pip3 install -r requirements.txt
-sleep 10
-  EOF
+  connection {
+    type = "ssh"
+    host = self.public_ip
+    user = "ubuntu"
+    private_key = file(var.private_key_path)
+    agent = false
+  }
+
+  provisioner "remote-exec" {
+    inline = [
+      "sudo add-apt-repository -y universe",
+      "sudo apt update",
+      "sudo apt install -y python3-pip",
+      "git clone https://github.com/haje01/dbztest.git",
+      "cd dbztest && pip3 install --progress-bar off -r requirements.txt"
+    ]
+  }
 
   tags = merge(
     {
@@ -215,17 +218,23 @@ resource "aws_instance" "selector" {
   security_groups = [aws_security_group.selector.name]
   key_name = var.key_pair_name
 
-  user_data_replace_on_change = true
-  user_data = <<EOF
-#!/bin/bash
-sudo apt update
-sudo apt install -y python3-pip
-su ubuntu
-cd /home/ubuntu
-git clone https://github.com/haje01/dbztest.git
-cd dbztest && pip3 install -r requirements.txt
-sleep 10
-  EOF
+  connection {
+    type = "ssh"
+    host = self.public_ip
+    user = "ubuntu"
+    private_key = file(var.private_key_path)
+    agent = false
+  }
+
+  provisioner "remote-exec" {
+    inline = [
+      "sudo add-apt-repository -y universe",
+      "sudo apt update",
+      "sudo apt install -y python3-pip",
+      "git clone https://github.com/haje01/dbztest.git",
+      "cd dbztest && pip3 install --progress-bar off -r requirements.txt"
+    ]
+  }
 
   tags = merge(
     {
@@ -282,21 +291,29 @@ resource "aws_instance" "kafka" {
   security_groups = [aws_security_group.kafka.name]
   key_name = var.key_pair_name
 
-  user_data_replace_on_change = true
-  user_data = <<EOF
-#!/bin/bash
-sudo apt update
-su ubuntu
-cd /home/ubuntu
-wget -O- https://apt.corretto.aws/corretto.key | sudo apt-key add -
-sudo add-apt-repository -y 'deb https://apt.corretto.aws stable main'
-sudo apt-get update; sudo apt-get install -y java-11-amazon-corretto-jdk
-wget https://archive.apache.org/dist/kafka/3.0.0/kafka_2.13-3.0.0.tgz
-tar xzf kafka_2.13-3.0.0.tgz
-rm kafka_2.13-3.0.0.tgz
-screen -S zookeeper -dm bash -c "cd kafka_2.13-3.0.0 && bin/zookeeper-server-start.sh config/zookeeper.properties"
-screen -S kafka -dm bash -c "cd kafka_2.13-3.0.0 && bin/kafka-server-start.sh config/server.properties"
-  EOF
+connection {
+    type = "ssh"
+    host = self.public_ip
+    user = "ubuntu"
+    private_key = file(var.private_key_path)
+    agent = false
+  }
+
+  provisioner "remote-exec" {
+    inline = [
+      "sudo apt update",
+      "sudo apt -y install openjdk-8-jdk",
+      "echo 'export JAVA_HOME=/usr/lib/jvm/java-8-openjdk-amd64' >> /etc/profile",
+      "echo 'export PATH=$PATH:$JAVA_HOME/bin' >> /etc/profile",
+      "wget -nv https://archive.apache.org/dist/kafka/3.0.0/kafka_2.13-3.0.0.tgz",
+      "tar xzf kafka_2.13-3.0.0.tgz",
+      "rm kafka_2.13-3.0.0.tgz",
+      "cd kafka_2.13-3.0.0",
+      "screen -S zookeeper -dm bash -c 'JAVA_HOME=/usr/lib/jvm/java-8-openjdk-amd64; sudo bin/zookeeper-server-start.sh config/zookeeper.properties; exec bash'",
+      "screen -S kafka -dm bash -c 'JAVA_HOME=/usr/lib/jvm/java-8-openjdk-amd64; sudo bin/kafka-server-start.sh config/server.properties; exec bash'",
+      "sleep 3"  # screen 세션이 죽지 않도록
+    ]
+  }
 
   tags = merge(
     {
