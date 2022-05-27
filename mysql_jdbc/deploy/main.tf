@@ -62,7 +62,7 @@ resource "aws_security_group" "mysql" {
 }
 
 data "template_file" "initdb" {
-  template = file("${path.module}/init.tpl")
+  template = file("${path.module}/initdb.tpl")
   vars = {
     user = var.db_user,
     passwd = var.db_passwd
@@ -91,16 +91,16 @@ resource "aws_instance" "mysql" {
 
   provisioner "remote-exec" {
     inline = [
-      "sudo apt update -qq",
-      "sudo apt --fix-broken install",
-      "sudo apt install -qq -y mysql-server",
+      "cloud-init status --wait",
+      "sudo apt update",
+      "sudo apt install -y mysql-server",
       "sleep 5",
       "sudo sed -i 's/bind-address.*/bind-address = 0.0.0.0/' /etc/mysql/mysql.conf.d/mysqld.cnf",
       "sudo service mysql stop",
       "sudo service mysql start",
       # MySQL 기동 대기
-      "while ! sudo mysql -e 'SELECT 1' > /dev/null 2>&1 ; do sleep 1 ; done",
-      # "sleep 5",
+      # "while ! sudo mysql -e 'SELECT 1' > /dev/null 2>&1 ; do sleep 1 ; done",
+      "sleep 5",
       # DB 및 유저 초기화
       "sudo mysql < /tmp/init.sql"
     ]
@@ -163,9 +163,9 @@ resource "aws_instance" "inserter" {
 
   provisioner "remote-exec" {
     inline = [
-      "sudo add-apt-repository -y universe",
-      "sudo apt update -qq",
-      "sudo apt install -qq -y python3-pip",
+      "cloud-init status --wait",
+      "sudo apt update",
+      "sudo apt install -y python3-pip",
       "git clone --quiet https://github.com/haje01/cdctest.git",
       "cd cdctest && pip3 install -q -r requirements.txt"
     ]
@@ -228,9 +228,9 @@ resource "aws_instance" "selector" {
 
   provisioner "remote-exec" {
     inline = [
-      "sudo add-apt-repository -y universe",
-      "sudo apt update -qq",
-      "sudo apt install -qq -y python3-pip",
+      "cloud-init status --wait",
+      "sudo apt update",
+      "sudo apt install -y python3-pip",
       "git clone --quiet https://github.com/haje01/cdctest.git",
       "cd cdctest && pip3 install -q -r requirements.txt"
     ]
@@ -243,6 +243,16 @@ resource "aws_instance" "selector" {
     },
     var.tags
   )
+}
+
+# Kafka Connector 등록
+data "template_file" "initsrc" {
+  template = file("${path.module}/initsrc.tpl")
+  vars = {
+    host = aws_instance.mysql.public_ip,
+    user = var.db_user,
+    passwd = var.db_passwd
+  }
 }
 
 # Kafka 보안 그룹
@@ -299,29 +309,52 @@ connection {
     agent = false
   }
 
+  # Kafka Connector 복사
   provisioner "file" {
-    source = var.kafka_connect_jdbc_path
-    destination = "/tmp/${basename(var.kafka_connect_jdbc_path)}"
+    source = var.kafka_connector_path
+    destination = "/tmp/${basename(var.kafka_connector_path)}"
+  }
+
+# MySQL Connector 복사
+  provisioner "file" {
+    source = var.mysql_connector_path
+    destination = "/tmp/${basename(var.mysql_connector_path)}"
+  }
+
+  # Kafka Source Connector 등록 스크립트
+  provisioner "file" {
+    content = data.template_file.initsrc.rendered
+    destination = "/tmp/initsrc.sh"
   }
 
   provisioner "remote-exec" {
     inline = [
-      "sudo apt update -qq",
+      "cloud-init status --wait",
+      "sudo apt update",
+      "sudo apt install -y unzip",
+
       # Kafka 설치
-      "sudo apt -qq -y install openjdk-8-jdk",
-      "echo 'export JAVA_HOME=/usr/lib/jvm/java-8-openjdk-amd64' >> /etc/profile",
-      "echo 'export PATH=$PATH:$JAVA_HOME/bin' >> /etc/profile",
+      "sudo apt install -y openjdk-8-jdk",
+      "echo 'export JAVA_HOME=/usr/lib/jvm/java-8-openjdk-amd64' >> ~/.bashrc",
+      "echo 'export PATH=$PATH:$JAVA_HOME/bin' >> ~/.bashrc",
       "wget -nv https://archive.apache.org/dist/kafka/3.0.0/kafka_2.13-3.0.0.tgz",
       "tar xzf kafka_2.13-3.0.0.tgz",
       "rm kafka_2.13-3.0.0.tgz",
       "cd kafka_2.13-3.0.0",
       "screen -S zookeeper -dm bash -c 'JAVA_HOME=/usr/lib/jvm/java-8-openjdk-amd64; sudo bin/zookeeper-server-start.sh config/zookeeper.properties; exec bash'",
       "screen -S kafka -dm bash -c 'JAVA_HOME=/usr/lib/jvm/java-8-openjdk-amd64; sudo bin/kafka-server-start.sh config/server.properties; exec bash'",
-      # "sleep 3",  # screen 세션이 죽지 않도록
+      "screen -S kafka-connect -dm bash -c 'JAVA_HOME=/usr/lib/jvm/java-8-openjdk-amd64; sudo bin/connect-distributed.sh config/connect-distributed.properties; exec bash'",
+
       # Kafka Connector 설치
-      "mv /tmp/${basename(var.kafka_connect_jdbc_path)} /opt/kafka_2.13-3.0.0/connectors",
-      "cd /opt/kafka_2.13-3.0.0/connectors",
-      "unzip ${basename(var.kafka_connect_jdbc_path)}"
+      "mkdir -p connectors",
+      "mv /tmp/${basename(var.kafka_connector_path)} connectors/",
+      "cd connectors/",
+      "unzip ${basename(var.kafka_connector_path)}",
+      "rm ${basename(var.kafka_connector_path)}",
+      "sed -i \"s/#plugin.path=/plugin.path=\\/home\\/ubuntu\\/kafka_2.13-3.0.0\\/connectors/\" ../config/connect-distributed.properties",
+
+      # MySQL Connector 설치
+      "mv /tmp/${basename(var.mysql_connector_path)} connectors/${basename(var.kafka_connector_path)}/bin"
     ]
   }
 

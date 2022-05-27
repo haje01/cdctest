@@ -24,6 +24,7 @@ sql = '''
 IF OBJECT_ID('person', 'U') IS NOT NULL
     DROP TABLE person
 CREATE TABLE person (
+    id int IDENTITY(1,1) PRIMARY KEY,
     pid INT NOT NULL,
     sid INT NOT NULL,
     name VARCHAR(40),
@@ -32,7 +33,6 @@ CREATE TABLE person (
     birth DATE,
     company VARCHAR(40),
     phone VARCHAR(40),
-    PRIMARY KEY(pid, sid)
 )
 '''
 cursor.execute(sql)

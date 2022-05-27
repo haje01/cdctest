@@ -36,6 +36,7 @@ print("Done")
 sql = '''
 DROP TABLE IF EXISTS person;
 CREATE TABLE person (
+    id  INT NOT NULL AUTO_INCREMENT,
     pid INT NOT NULL,
     sid INT NOT NULL,
     name VARCHAR(40),
@@ -44,7 +45,7 @@ CREATE TABLE person (
     birth DATE,
     company VARCHAR(40),
     phone VARCHAR(40),
-    PRIMARY KEY(pid, sid)
+    PRIMARY KEY(id)
 )
 '''
 cursor.execute(sql)
