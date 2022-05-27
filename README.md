@@ -1,3 +1,5 @@
-# dbztest
+# cdctest
 
-Debezium Test for SQL Server
+CDC (Change Data Capture) Test
+- Debezium
+- Kafka JDBC Connector
