@@ -55,7 +55,7 @@ for j in range(epoch):
             fake.phone_number()
         )
         rows.append(row)
-    cursor.executemany("INSERT INTO test.person VALUES(%s, %s, %s, %s, %s, %s, %s, %s)",
+    cursor.executemany("INSERT INTO test.person(pid, sid, name, address, ip, birth, company, phone) VALUES(%s, %s, %s, %s, %s, %s, %s, %s)",
         rows)
     conn.commit()
 

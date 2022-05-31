@@ -37,6 +37,16 @@ resource "aws_security_group" "mysql" {
   ingress {
     from_port = 3306
     to_port = 3306
+    description = "From Kafka to MySQL"
+    protocol = "tcp"
+    security_groups = [
+      "${aws_security_group.kafka.id}"
+    ]
+  }
+
+  ingress {
+    from_port = 3306
+    to_port = 3306
     description = "From Dev PC to MySQL"
     protocol = "tcp"
     cidr_blocks = var.work_cidr
@@ -245,11 +255,11 @@ resource "aws_instance" "selector" {
   )
 }
 
-# Kafka Connector 등록
-data "template_file" "initsrc" {
-  template = file("${path.module}/initsrc.tpl")
+# Kafka JDBC Connector 등록
+data "template_file" "initconn" {
+  template = file("${path.module}/initconn.tpl")
   vars = {
-    host = aws_instance.mysql.public_ip,
+    host = aws_instance.mysql.private_ip,
     user = var.db_user,
     passwd = var.db_passwd
   }
@@ -311,20 +321,20 @@ connection {
 
   # Kafka Connector 복사
   provisioner "file" {
-    source = var.kafka_connector_path
-    destination = "/tmp/${basename(var.kafka_connector_path)}"
+    source = var.kafka_jdbc_connect
+    destination = "/tmp/${basename(var.kafka_jdbc_connect)}"
   }
 
-# MySQL Connector 복사
+  # MySQL JDBC Driver 복사
   provisioner "file" {
-    source = var.mysql_connector_path
-    destination = "/tmp/${basename(var.mysql_connector_path)}"
+    source = var.mysql_jdbc_driver
+    destination = "/tmp/${basename(var.mysql_jdbc_driver)}"
   }
 
-  # Kafka Source Connector 등록 스크립트
+  # Kafka JDBC Connector 등록 스크립트
   provisioner "file" {
-    content = data.template_file.initsrc.rendered
-    destination = "/tmp/initsrc.sh"
+    content = data.template_file.initconn.rendered
+    destination = "/tmp/initconn.sh"
   }
 
   provisioner "remote-exec" {
@@ -345,16 +355,16 @@ connection {
       "screen -S kafka -dm bash -c 'JAVA_HOME=/usr/lib/jvm/java-8-openjdk-amd64; sudo bin/kafka-server-start.sh config/server.properties; exec bash'",
       "screen -S kafka-connect -dm bash -c 'JAVA_HOME=/usr/lib/jvm/java-8-openjdk-amd64; sudo bin/connect-distributed.sh config/connect-distributed.properties; exec bash'",
 
-      # Kafka Connector 설치
+      # Kafka JDBC Connector 설치
       "mkdir -p connectors",
-      "mv /tmp/${basename(var.kafka_connector_path)} connectors/",
+      "mv /tmp/${basename(var.kafka_jdbc_connect)} connectors/",
       "cd connectors/",
-      "unzip ${basename(var.kafka_connector_path)}",
-      "rm ${basename(var.kafka_connector_path)}",
+      "unzip ${basename(var.kafka_jdbc_connect)}",
+      "rm ${basename(var.kafka_jdbc_connect)}",
       "sed -i \"s/#plugin.path=/plugin.path=\\/home\\/ubuntu\\/kafka_2.13-3.0.0\\/connectors/\" ../config/connect-distributed.properties",
 
-      # MySQL Connector 설치
-      "mv /tmp/${basename(var.mysql_connector_path)} connectors/${basename(var.kafka_connector_path)}/bin"
+      # MySQL JDBC Driver 설치
+      "sudo apt install -y /tmp/${basename(var.mysql_jdbc_driver)}",
     ]
   }
 

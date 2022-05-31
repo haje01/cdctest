@@ -17,8 +17,8 @@ variable "key_pair_name" {}
 variable "private_key_path" {}
 variable "db_user" {}
 variable "db_passwd" {}
-variable "kafka_connector_path" {}
-variable "mysql_connector_path" {}
+variable "kafka_jdbc_connect" {}
+variable "mysql_jdbc_driver" {}
 variable "tags" {
     type = map(string)
 }
