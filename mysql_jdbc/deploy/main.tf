@@ -256,8 +256,8 @@ resource "aws_instance" "selector" {
 }
 
 # Kafka JDBC Connector 등록
-data "template_file" "initconn" {
-  template = file("${path.module}/initconn.tpl")
+data "template_file" "regconn" {
+  template = file("${path.module}/regconn.tpl")
   vars = {
     host = aws_instance.mysql.private_ip,
     user = var.db_user,
@@ -333,8 +333,24 @@ connection {
 
   # Kafka JDBC Connector 등록 스크립트
   provisioner "file" {
-    content = data.template_file.initconn.rendered
-    destination = "/tmp/initconn.sh"
+    content = data.template_file.regconn.rendered
+    destination = "/tmp/regconn.sh"
+  }
+
+  provisioner "file" {
+    # 설치 후 바로는 커넥터 등록이 잘 안되어 재시도 하게
+    content = <<EOT
+#!/bin/bash
+while ! curl -s localhost:8083/connectors >> /dev/null 2>&1 ; do sleep 5 ; done
+cons=$(curl -s localhost:8083/connectors)
+while [ "$cons" != "[\"my-source-connect\"]" ]
+do
+  sleep 5
+  bash /tmp/regconn.sh
+  cons=$(curl -s localhost:8083/connectors)
+done
+EOT
+    destination = "/tmp/regretry.sh"
   }
 
   provisioner "remote-exec" {
@@ -351,9 +367,7 @@ connection {
       "tar xzf kafka_2.13-3.0.0.tgz",
       "rm kafka_2.13-3.0.0.tgz",
       "cd kafka_2.13-3.0.0",
-      "screen -S zookeeper -dm bash -c 'JAVA_HOME=/usr/lib/jvm/java-8-openjdk-amd64; sudo bin/zookeeper-server-start.sh config/zookeeper.properties; exec bash'",
-      "screen -S kafka -dm bash -c 'JAVA_HOME=/usr/lib/jvm/java-8-openjdk-amd64; sudo bin/kafka-server-start.sh config/server.properties; exec bash'",
-      "screen -S kafka-connect -dm bash -c 'JAVA_HOME=/usr/lib/jvm/java-8-openjdk-amd64; sudo bin/connect-distributed.sh config/connect-distributed.properties; exec bash'",
+      "echo 'export PATH=$PATH:~/kafka_2.13-3.0.0/bin' >> ~/.bashrc",
 
       # Kafka JDBC Connector 설치
       "mkdir -p connectors",
@@ -362,9 +376,20 @@ connection {
       "unzip ${basename(var.kafka_jdbc_connect)}",
       "rm ${basename(var.kafka_jdbc_connect)}",
       "sed -i \"s/#plugin.path=/plugin.path=\\/home\\/ubuntu\\/kafka_2.13-3.0.0\\/connectors/\" ../config/connect-distributed.properties",
+      "cd ..",
 
       # MySQL JDBC Driver 설치
       "sudo apt install -y /tmp/${basename(var.mysql_jdbc_driver)}",
+      # "cp -s /usr/share/java/mysql-connector-java-*.jar ~/kafka_2.13-3.0.0/libs/"
+      "cp /usr/share/java/mysql-connector-java-*.jar ~/kafka_2.13-3.0.0/connectors/confluentinc-kafka-connect-jdbc-10.4.1/lib",
+
+      # 실행
+      "screen -S zookeeper -dm bash -c 'JAVA_HOME=/usr/lib/jvm/java-8-openjdk-amd64; sudo bin/zookeeper-server-start.sh config/zookeeper.properties; exec bash'",
+      "screen -S kafka -dm bash -c 'JAVA_HOME=/usr/lib/jvm/java-8-openjdk-amd64; sudo bin/kafka-server-start.sh config/server.properties; exec bash'",
+      "screen -S kafka-connect -dm bash -c 'JAVA_HOME=/usr/lib/jvm/java-8-openjdk-amd64; sudo bin/connect-distributed.sh config/connect-distributed.properties; exec bash'",
+
+      # Connector 등록
+      "bash /tmp/regretry.sh",
     ]
   }
 

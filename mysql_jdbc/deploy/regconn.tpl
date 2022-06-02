@@ -5,9 +5,9 @@
 # "value.converter": "io.confluent.connect.avro.AvroConverter",
 # "key.converter.schema.registry.url": ""
 # "value.converter.schema.registry.url": ""
-
-curl --location --request POST 'http://localhost:8083/connectors' \
-    --header 'Content-Type: application/json' \
+echo "start"
+curl -vs -X POST 'http://localhost:8083/connectors' \
+    -H 'Content-Type: application/json' \
     --data-raw '{
     "name" : "my-source-connect",
     "config" : {
@@ -22,3 +22,4 @@ curl --location --request POST 'http://localhost:8083/connectors' \
         "tasks.max" : "1"
     }
 }'
+echo "finished"

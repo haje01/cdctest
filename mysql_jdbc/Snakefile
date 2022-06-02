@@ -16,7 +16,11 @@ rule setup:
         """
 
 rule copy_setup:
-    """설치 정보 복사."""
+    """설치 정보 복사.
+
+    로컬에서 수행한 설치 결과 파일을 insert / select 하는 노드로 복사.
+
+    """
     input:
         "temp/setup.json"
     output:
@@ -35,6 +39,26 @@ rule copy_setup:
         scp -i $pkey {input} ubuntu@$ip:cdctest/mysql_jdbc/{input}
         touch {output}
         """
+
+
+# rule reg_conn:
+#     """
+#     Kafka JDBC Connector 등록.
+
+#     먼저 테이블 초기화 필요
+
+#     """
+#     input:
+#         "temp/reset_table"
+#     output:
+#         "temp/reg_conn"
+#     shell:
+#         """
+#         ip=$(cat temp/setup.json | jq -r .kafka_public_ip.value)
+#         pkey=$(cat temp/setup.json | jq -r .private_key_path.value)
+#         ssh ubuntu@$ip -i $pkey "bash /tmp/regconn.sh" > {output}
+#         """
+
 
 rule inserter:
     """더미 데이터 인서트.
