@@ -261,7 +261,8 @@ data "template_file" "regconn" {
   vars = {
     host = aws_instance.mysql.private_ip,
     user = var.db_user,
-    passwd = var.db_passwd
+    passwd = var.db_passwd,
+    port = var.db_port
   }
 }
 

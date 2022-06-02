@@ -36,6 +36,13 @@ output "selector_private_ip" {
   value = aws_instance.selector.private_ip
 }
 
+output "kafka_public_ip" {
+  value = aws_instance.kafka.public_ip
+}
+
+output "kafka_private_ip" {
+  value = aws_instance.kafka.private_ip
+}
 output "db_user" {
   value = var.db_user
 }

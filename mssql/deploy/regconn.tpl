@@ -12,7 +12,7 @@ curl -vs -X POST 'http://localhost:8083/connectors' \
     "name" : "my-source-connect",
     "config" : {
         "connector.class" : "io.confluent.connect.jdbc.JdbcSourceConnector",
-        "connection.url":"jdbc:mysql://${host}:${port}/test",
+        "connection.url":"jdbc:sqlserver://${host}:${port};databaseName=test;encrypt=true;trustServerCertificate=true;",
         "connection.user":"${user}",
         "connection.password":"${passwd}",
         "mode": "incrementing",
