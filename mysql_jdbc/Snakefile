@@ -56,8 +56,8 @@ rule create_topic:
         """
         ip=$(cat temp/setup.json | jq -r .consumer_public_ip.value)
         pkey=$(cat temp/setup.json | jq -r .private_key_path.value)
-        kafk_ip=$(cat temp/setup.json | jq -r .kafka_private_ip.value)
-        ssh ubuntu@$ip -i $pkey "kafka-topic.sh --create --topic my_topic_person --bootstrap-server $kafk_ip:9092 cd cdctest/mysql_jdbc && python3 inserter.py temp/setup.json {params.pid} {params.epoch} {params.batch} --partitions 12 > {output}"
+        kafka_ip=$(cat temp/setup.json | jq -r .kafka_private_ip.value)
+        ssh -o "StrictHostKeyChecking=no" ubuntu@$ip -i $pkey "/home/ubuntu/kafka_2.13-3.0.0/bin/kafka-topics.sh --create --topic my_topic_person --bootstrap-server $kafka_ip:9092 --partitions 12 --replication-factor 1" > {output}
         """
 
 rule inserter:
@@ -72,7 +72,7 @@ rule inserter:
         "temp/reset_table",
         "temp/create_topic"
     output:
-        "temp/inserter_{pid}.txt"
+        "temp/inserter_{pid}"
     params:
         pid="{pid}",
         epoch=EPOCH,
@@ -96,7 +96,7 @@ rule selector:
         "temp/setup.json",
         "temp/copy_setup"
     output:
-        "temp/selector_{pid}.txt"
+        "temp/selector_{pid}"
     params:
         pid="{pid}"
     shell:
@@ -121,12 +121,12 @@ rule reset_table:
 rule pump:
     """DB insert 와 select 수행."""
     input:
-        expand("temp/inserter_{pid}.txt", pid=(range(INSERTER))),
-        expand("temp/selector_{pid}.txt", pid=(range(SELECTOR)))
+        expand("temp/inserter_{pid}", pid=(range(INSERTER))),
+        expand("temp/selector_{pid}", pid=(range(SELECTOR)))
     params:
         start_time = time.time()
     output:
-        "temp/pump.txt"
+        "temp/pump"
     script:
         "pump.py"
 
@@ -135,9 +135,9 @@ rule consume:
     """DB insert 결과를 카프카 토픽 컨슘으로 확인."""
     input:
         "temp/setup.json",
-        "temp/pump.txt"
+        "temp/pump"
     output:
-        "temp/consume.txt"
+        "temp/consume"
     shell:
         """
         ip=$(cat temp/setup.json | jq -r .consumer_public_ip.value)
@@ -157,15 +157,15 @@ rule clear:
         ip=$(cat temp/setup.json | jq -r .inserter_public_ip.value)
         pkey=$(cat temp/setup.json | jq -r .private_key_path.value)
         ssh ubuntu@$ip -i $pkey "pkill python3" || true
-        # ssh ubuntu@$ip -i $pkey "rm -f cdctest/mysql_jdbc/temp/inserter_*.txt"
+        # ssh ubuntu@$ip -i $pkey "rm -f cdctest/mysql_jdbc/temp/inserter_*"
         # Selector
         ip=$(cat temp/setup.json | jq -r .selector_public_ip.value)
         ssh ubuntu@$ip -i $pkey "pkill python3" || true
-        # ssh ubuntu@$ip -i $pkey "rm -f cdctest/mysql_jdbc/temp/selector_*.txt"
+        # ssh ubuntu@$ip -i $pkey "rm -f cdctest/mysql_jdbc/temp/selector_*"
         rm -f temp/reset_table
-        rm -f temp/inserter_*.txt
-        rm -f temp/selector_*.txt
-        rm -f temp/pump.txt
+        rm -f temp/inserter_*
+        rm -f temp/selector_*
+        rm -f temp/pump
         rm -f temp/start_time
         touch {output}
         """
