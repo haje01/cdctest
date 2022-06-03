@@ -134,10 +134,12 @@ rule pump:
 rule consume:
     """DB insert 결과를 카프카 토픽 컨슘으로 확인."""
     input:
-        "temp/setup.json",
+        "temp/copy_setup",
         "temp/pump"
     output:
-        "temp/consume"
+        "temp/consume_{pid}"
+    params:
+        pid="{pid}",
     shell:
         """
         ip=$(cat temp/setup.json | jq -r .consumer_public_ip.value)
