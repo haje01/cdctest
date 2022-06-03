@@ -2,8 +2,9 @@ import sys
 
 from kafka import KafkaConsumer
 
-assert len(sys.argv) == 2
-max_cnt = int(sys.argv[1])
+max_cnt = None
+if len(sys.argv) == 2:
+    max_cnt = int(sys.argv[1])
 
 consumer = KafkaConsumer('my_topic_person',
                          group_id='my-group3',
@@ -16,8 +17,11 @@ print("connected")
 cnt = 0
 for msg in consumer:
     cnt += 1
-    if cnt == max_cnt:
-        break
-    # print(f'{msg.topic}:{msg.partition}:{msg.offset} key={msg.key} value={msg.value}')
+    if max_cnt is not None:
+        if cnt == max_cnt:
+            break
+    else:
+        print(f'{msg.topic}:{msg.partition}:{msg.offset} key={msg.key} value={msg.value}')
 
-print(cnt)
+if max_cnt is not None:
+    print(cnt)
