@@ -366,11 +366,11 @@ connection {
     destination = "/tmp/${basename(var.kafka_jdbc_connect)}"
   }
 
-  # SQL Server JDBC Driver 복사
-  provisioner "file" {
-    source = var.sqlserver_jdbc_driver
-    destination = "/tmp/${basename(var.sqlserver_jdbc_driver)}"
-  }
+  # # SQL Server JDBC Driver 복사
+  # provisioner "file" {
+  #   source = var.sqlserver_jdbc_driver
+  #   destination = "/tmp/${basename(var.sqlserver_jdbc_driver)}"
+  # }
 
   # Kafka JDBC Connector 등록 스크립트
   provisioner "file" {
@@ -419,8 +419,8 @@ EOT
       "sed -i \"s/#plugin.path=/plugin.path=\\/home\\/ubuntu\\/kafka_2.13-3.0.0\\/connectors/\" ../config/connect-distributed.properties",
       "cd ..",
 
-      # SQL Server JDBC Driver 설치
-      "cp /tmp/${basename(var.sqlserver_jdbc_driver)} ~/kafka_2.13-3.0.0/connectors/confluentinc-kafka-connect-jdbc-10.4.1/lib",
+      # SQL Server JDBC Driver 설치 (confluentinc-kafka-connect-jdbc 에 이미 포함?!)
+      # "cp /tmp/${basename(var.sqlserver_jdbc_driver)} ~/kafka_2.13-3.0.0/connectors/confluentinc-kafka-connect-jdbc-10.4.1/lib",
 
       # 실행
       "screen -S zookeeper -dm bash -c 'JAVA_HOME=/usr/lib/jvm/java-8-openjdk-amd64; sudo bin/zookeeper-server-start.sh config/zookeeper.properties; exec bash'",

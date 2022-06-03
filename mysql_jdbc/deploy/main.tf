@@ -286,6 +286,16 @@ resource "aws_security_group" "kafka" {
     cidr_blocks = var.work_cidr
   }
 
+  ingress {
+    from_port = 9092
+    to_port = 9092
+    description = "From Consumer to kafka"
+    protocol = "tcp"
+    security_groups = [
+      "${aws_security_group.consumer.id}"
+    ]
+  }
+
   egress {
     protocol  = "-1"
     from_port = 0
@@ -368,6 +378,8 @@ EOT
       "tar xzf kafka_2.13-3.0.0.tgz",
       "rm kafka_2.13-3.0.0.tgz",
       "cd kafka_2.13-3.0.0",
+      "sed -i \"s/#advertised.listeners=PLAINTEXT:\\/\\/your.host.name/advertised.listeners=PLAINTEXT:\\/\\/${self.private_ip}/\" config/server.properties",
+
       "echo 'export PATH=$PATH:~/kafka_2.13-3.0.0/bin' >> ~/.bashrc",
 
       # Kafka JDBC Connector 설치
@@ -397,6 +409,85 @@ EOT
   tags = merge(
     {
       Name = "${var.name}-kafka",
+      terraform = "true"
+    },
+    var.tags
+  )
+}
+
+# Consumer 보안 그룹
+resource "aws_security_group" "consumer" {
+  name = "${var.name}-consumer"
+
+  ingress {
+    from_port = 22
+    to_port = 22
+    description = "From Dev PC to SSH"
+    protocol = "tcp"
+    cidr_blocks = var.work_cidr
+  }
+
+  egress {
+    protocol  = "-1"
+    from_port = 0
+    to_port   = 0
+
+    cidr_blocks = [
+      "0.0.0.0/0",
+    ]
+  }
+
+  tags = merge(
+    {
+      Name = "${var.name}-consumer",
+      terraform = "true"
+    },
+    var.tags
+  )
+}
+
+# Consumer 인스턴스
+resource "aws_instance" "consumer" {
+  ami = var.ubuntu_ami
+  instance_type = var.insel_instance_type
+  security_groups = [aws_security_group.consumer.name]
+  key_name = var.key_pair_name
+
+  connection {
+    type = "ssh"
+    host = self.public_ip
+    user = "ubuntu"
+    private_key = file(var.private_key_path)
+    agent = false
+  }
+
+  provisioner "remote-exec" {
+    inline = [
+      "cloud-init status --wait",
+      "sudo apt update",
+
+      # Kafka 설치
+      "sudo apt install -y openjdk-8-jdk",
+      "echo 'export JAVA_HOME=/usr/lib/jvm/java-8-openjdk-amd64' >> ~/.bashrc",
+      "echo 'export PATH=$PATH:$JAVA_HOME/bin' >> ~/.bashrc",
+      "wget -nv https://archive.apache.org/dist/kafka/3.0.0/kafka_2.13-3.0.0.tgz",
+      "tar xzf kafka_2.13-3.0.0.tgz",
+      "rm kafka_2.13-3.0.0.tgz",
+      "cd kafka_2.13-3.0.0",
+      "echo 'export PATH=$PATH:~/kafka_2.13-3.0.0/bin' >> ~/.bashrc",
+
+      # 코드 설치
+      "cloud-init status --wait",
+      "sudo apt update",
+      "sudo apt install -y python3-pip",
+      "git clone --quiet https://github.com/haje01/cdctest.git",
+      "cd cdctest && pip3 install -q -r requirements.txt"
+    ]
+  }
+
+  tags = merge(
+    {
+      Name = "${var.name}-consumer",
       terraform = "true"
     },
     var.tags

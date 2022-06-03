@@ -37,28 +37,28 @@ rule copy_setup:
         pkey=$(cat temp/setup.json | jq -r .private_key_path.value)
         ssh -o "StrictHostKeyChecking=no" ubuntu@$ip -i $pkey "cd cdctest/mysql_jdbc && mkdir -p temp"
         scp -i $pkey {input} ubuntu@$ip:cdctest/mysql_jdbc/{input}
+        # Consumer
+        ip=$(cat temp/setup.json | jq -r .selector_public_ip.value)
+        pkey=$(cat temp/setup.json | jq -r .private_key_path.value)
+        ssh -o "StrictHostKeyChecking=no" ubuntu@$ip -i $pkey "cd cdctest/mysql_jdbc && mkdir -p temp"
+        scp -i $pkey {input} ubuntu@$ip:cdctest/mysql_jdbc/{input}
         touch {output}
         """
 
 
-# rule reg_conn:
-#     """
-#     Kafka JDBC Connector 등록.
-
-#     먼저 테이블 초기화 필요
-
-#     """
-#     input:
-#         "temp/reset_table"
-#     output:
-#         "temp/reg_conn"
-#     shell:
-#         """
-#         ip=$(cat temp/setup.json | jq -r .kafka_public_ip.value)
-#         pkey=$(cat temp/setup.json | jq -r .private_key_path.value)
-#         ssh ubuntu@$ip -i $pkey "bash /tmp/regconn.sh" > {output}
-#         """
-
+rule create_topic:
+    """DB 내용을 저장할 토픽 생성."""
+    input:
+        "temp/setup.json",
+    output:
+        "temp/create_topic"
+    shell:
+        """
+        ip=$(cat temp/setup.json | jq -r .consumer_public_ip.value)
+        pkey=$(cat temp/setup.json | jq -r .private_key_path.value)
+        kafk_ip=$(cat temp/setup.json | jq -r .kafka_private_ip.value)
+        ssh ubuntu@$ip -i $pkey "kafka-topic.sh --create --topic my_topic_person --bootstrap-server $kafk_ip:9092 cd cdctest/mysql_jdbc && python3 inserter.py temp/setup.json {params.pid} {params.epoch} {params.batch} --partitions 12 > {output}"
+        """
 
 rule inserter:
     """더미 데이터 인서트.
@@ -69,7 +69,8 @@ rule inserter:
     input:
         "temp/setup.json",
         "temp/copy_setup",
-        "temp/reset_table"
+        "temp/reset_table",
+        "temp/create_topic"
     output:
         "temp/inserter_{pid}.txt"
     params:
@@ -117,20 +118,33 @@ rule reset_table:
         "reset_table.py"
 
 
-rule result:
-    """테스트 결과."""
+rule pump:
+    """DB insert 와 select 수행."""
     input:
         expand("temp/inserter_{pid}.txt", pid=(range(INSERTER))),
-        # select 를 동시에 하면 insert 성능이 저하
-        # 단일 노드 insert/select 1680 -> 800
-        # 전용 노드 insert/select 1680 -> 1000
         expand("temp/selector_{pid}.txt", pid=(range(SELECTOR)))
     params:
         start_time = time.time()
     output:
-        "temp/result.txt"
+        "temp/pump.txt"
     script:
-        "result.py"
+        "pump.py"
+
+
+rule consume:
+    """DB insert 결과를 카프카 토픽 컨슘으로 확인."""
+    input:
+        "temp/setup.json",
+        "temp/pump.txt"
+    output:
+        "temp/consume.txt"
+    shell:
+        """
+        ip=$(cat temp/setup.json | jq -r .consumer_public_ip.value)
+        pkey=$(cat temp/setup.json | jq -r .private_key_path.value)
+        ssh ubuntu@$ip -i $pkey "cd cdctest/mysql_jdbc && python3 consumer.py temp/setup.json > {output}"
+        scp -i $pkey ubuntu@$ip:cdctest/mysql_jdbc/{output} {output}
+        """
 
 
 rule clear:
@@ -151,7 +165,7 @@ rule clear:
         rm -f temp/reset_table
         rm -f temp/inserter_*.txt
         rm -f temp/selector_*.txt
-        rm -f temp/result.txt
+        rm -f temp/pump.txt
         rm -f temp/start_time
         touch {output}
         """

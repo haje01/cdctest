@@ -93,20 +93,17 @@ rule reset_table:
         "reset_table.py"
 
 
-rule result:
-    """테스트 결과."""
+rule pump:
+    """DB insert 와 select 를 수행."""
     input:
         expand("temp/inserter_{pid}.txt", pid=(range(INSERTER))),
-        # select 를 동시에 하면 insert 성능이 저하
-        # 단일 노드 insert/select 1680 -> 800
-        # 전용 노드 insert/select 1680 -> 1000
         expand("temp/selector_{pid}.txt", pid=(range(SELECTOR)))
     params:
         start_time = time.time()
     output:
-        "temp/result.txt"
+        "temp/pump.txt"
     script:
-        "result.py"
+        "pump.py"
 
 
 rule clear:
@@ -125,7 +122,7 @@ rule clear:
         rm -f temp/reset_table
         rm -f temp/inserter_*.txt
         rm -f temp/selector_*.txt
-        rm -f temp/result.txt
+        rm -f temp/pump.txt
         rm -f temp/start_time
         touch {output}
         """
