@@ -477,8 +477,6 @@ resource "aws_instance" "consumer" {
       "echo 'export PATH=$PATH:~/kafka_2.13-3.0.0/bin' >> ~/.bashrc",
 
       # 코드 설치
-      "cloud-init status --wait",
-      "sudo apt update",
       "sudo apt install -y python3-pip",
       "git clone --quiet https://github.com/haje01/cdctest.git",
       "cd cdctest && pip3 install -q -r requirements.txt"
