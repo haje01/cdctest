@@ -256,15 +256,15 @@ resource "aws_instance" "selector" {
 }
 
 # Kafka JDBC Connector 등록
-data "template_file" "regconn" {
-  template = file("${path.module}/regconn.tpl")
-  vars = {
-    host = aws_instance.mysql.private_ip,
-    user = var.db_user,
-    passwd = var.db_passwd,
-    port = var.db_port
-  }
-}
+# data "template_file" "regconn" {
+#   template = file("${path.module}/regconn.tpl")
+#   vars = {
+#     host = aws_instance.mysql.private_ip,
+#     user = var.db_user,
+#     passwd = var.db_passwd,
+#     port = var.db_port
+#   }
+# }
 
 # Kafka 보안 그룹
 resource "aws_security_group" "kafka" {
@@ -281,15 +281,17 @@ resource "aws_security_group" "kafka" {
   ingress {
     from_port = 9092
     to_port = 9092
-    description = "From Dev PC to kafka"
+    description = "From Consumer to kafka"
     protocol = "tcp"
-    cidr_blocks = var.work_cidr
+    security_groups = [
+      "${aws_security_group.consumer.id}"
+    ]
   }
 
   ingress {
-    from_port = 9092
-    to_port = 9092
-    description = "From Consumer to kafka"
+    from_port = 8083
+    to_port = 8083
+    description = "From Consumer to kafka API"
     protocol = "tcp"
     security_groups = [
       "${aws_security_group.consumer.id}"
@@ -343,26 +345,26 @@ connection {
   }
 
   # Kafka JDBC Connector 등록 스크립트
-  provisioner "file" {
-    content = data.template_file.regconn.rendered
-    destination = "/tmp/regconn.sh"
-  }
+  # provisioner "file" {
+  #   content = data.template_file.regconn.rendered
+  #   destination = "/tmp/regconn.sh"
+  # }
 
-  provisioner "file" {
-    # 설치 후 바로는 커넥터 등록이 잘 안되어 재시도 하게
-    content = <<EOT
-#!/bin/bash
-while ! curl -s localhost:8083/connectors >> /dev/null 2>&1 ; do sleep 5 ; done
-cons=$(curl -s localhost:8083/connectors)
-while [ "$cons" != "[\"my-source-connect\"]" ]
-do
-  sleep 5
-  bash /tmp/regconn.sh
-  cons=$(curl -s localhost:8083/connectors)
-done
-EOT
-    destination = "/tmp/regretry.sh"
-  }
+#   provisioner "file" {
+#     # 설치 후 바로는 커넥터 등록이 잘 안되어 재시도 하게
+#     content = <<EOT
+# #!/bin/bash
+# while ! curl -s localhost:8083/connectors >> /dev/null 2>&1 ; do sleep 5 ; done
+# cons=$(curl -s localhost:8083/connectors)
+# while [ "$cons" != "[\"my-source-connect\"]" ]
+# do
+#   sleep 5
+#   bash /tmp/regconn.sh
+#   cons=$(curl -s localhost:8083/connectors)
+# done
+# EOT
+#     destination = "/tmp/regretry.sh"
+#   }
 
   provisioner "remote-exec" {
     inline = [
@@ -372,15 +374,16 @@ EOT
 
       # Kafka 설치
       "sudo apt install -y openjdk-8-jdk",
-      "echo 'export JAVA_HOME=/usr/lib/jvm/java-8-openjdk-amd64' >> ~/.bashrc",
-      "echo 'export PATH=$PATH:$JAVA_HOME/bin' >> ~/.bashrc",
+      "echo 'export JAVA_HOME=/usr/lib/jvm/java-8-openjdk-amd64' >> ~/.myenv",
+      "echo 'export PATH=$PATH:$JAVA_HOME/bin' >> ~/.myenv",
       "wget -nv https://archive.apache.org/dist/kafka/3.0.0/kafka_2.13-3.0.0.tgz",
       "tar xzf kafka_2.13-3.0.0.tgz",
       "rm kafka_2.13-3.0.0.tgz",
       "cd kafka_2.13-3.0.0",
       "sed -i \"s/#advertised.listeners=PLAINTEXT:\\/\\/your.host.name/advertised.listeners=PLAINTEXT:\\/\\/${self.private_ip}/\" config/server.properties",
 
-      "echo 'export PATH=$PATH:~/kafka_2.13-3.0.0/bin' >> ~/.bashrc",
+      "echo 'export PATH=$PATH:~/kafka_2.13-3.0.0/bin' >> ~/.myenv",
+      "cat ~/.myenv >> ~/.bashrc",
 
       # Kafka JDBC Connector 설치
       "mkdir -p connectors",
@@ -393,16 +396,17 @@ EOT
 
       # MySQL JDBC Driver 설치
       "sudo apt install -y /tmp/${basename(var.mysql_jdbc_driver)}",
-      # "cp -s /usr/share/java/mysql-connector-java-*.jar ~/kafka_2.13-3.0.0/libs/"
       "cp /usr/share/java/mysql-connector-java-*.jar ~/kafka_2.13-3.0.0/connectors/confluentinc-kafka-connect-jdbc-10.4.1/lib",
 
       # 실행
+      "pwd > /tmp/pwd",
       "screen -S zookeeper -dm bash -c 'JAVA_HOME=/usr/lib/jvm/java-8-openjdk-amd64; sudo bin/zookeeper-server-start.sh config/zookeeper.properties; exec bash'",
       "screen -S kafka -dm bash -c 'JAVA_HOME=/usr/lib/jvm/java-8-openjdk-amd64; sudo bin/kafka-server-start.sh config/server.properties; exec bash'",
       "screen -S kafka-connect -dm bash -c 'JAVA_HOME=/usr/lib/jvm/java-8-openjdk-amd64; sudo bin/connect-distributed.sh config/connect-distributed.properties; exec bash'",
+      "while ! curl -s localhost:8083/connectors >> /dev/null 2>&1 ; do sleep 5 ; done",
 
       # Connector 등록
-      "bash /tmp/regretry.sh",
+      # "bash /tmp/regretry.sh",
     ]
   }
 
@@ -468,13 +472,14 @@ resource "aws_instance" "consumer" {
 
       # Kafka 설치
       "sudo apt install -y openjdk-8-jdk",
-      "echo 'export JAVA_HOME=/usr/lib/jvm/java-8-openjdk-amd64' >> ~/.bashrc",
-      "echo 'export PATH=$PATH:$JAVA_HOME/bin' >> ~/.bashrc",
+      "echo 'export JAVA_HOME=/usr/lib/jvm/java-8-openjdk-amd64' >> ~/.myenv",
+      "echo 'export PATH=$PATH:$JAVA_HOME/bin' >> ~/.myenv",
       "wget -nv https://archive.apache.org/dist/kafka/3.0.0/kafka_2.13-3.0.0.tgz",
       "tar xzf kafka_2.13-3.0.0.tgz",
       "rm kafka_2.13-3.0.0.tgz",
       "cd kafka_2.13-3.0.0",
-      "echo 'export PATH=$PATH:~/kafka_2.13-3.0.0/bin' >> ~/.bashrc",
+      "echo 'export PATH=$PATH:~/kafka_2.13-3.0.0/bin' >> ~/.myenv",
+      "cat ~/.myenv >> ~/.bashrc",
 
       # 코드 설치
       "sudo apt install -y python3-pip",

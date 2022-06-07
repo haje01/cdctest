@@ -177,16 +177,21 @@ rule clear:
         ip=$(cat temp/setup.json | jq -r .inserter_public_ip.value)
         pkey=$(cat temp/setup.json | jq -r .private_key_path.value)
         ssh ubuntu@$ip -i $pkey "pkill python3" || true
-        # ssh ubuntu@$ip -i $pkey "rm -f cdctest/mysql_jdbc/temp/inserter_*"
         # Selector
         ip=$(cat temp/setup.json | jq -r .selector_public_ip.value)
         ssh ubuntu@$ip -i $pkey "pkill python3" || true
-        # ssh ubuntu@$ip -i $pkey "rm -f cdctest/mysql_jdbc/temp/selector_*"
+        # Delete Topic
+        ip=$(cat temp/setup.json | jq -r .consumer_public_ip.value)
+        pkey=$(cat temp/setup.json | jq -r .private_key_path.value)
+        kafka_ip=$(cat temp/setup.json | jq -r .kafka_private_ip.value)
+        ssh -o "StrictHostKeyChecking=no" ubuntu@$ip -i $pkey "/home/ubuntu/kafka_2.13-3.0.0/bin/kafka-topics.sh --delete --topic my_topic_person --bootstrap-server $kafka_ip:9092" > {output}
+
         rm -f temp/reset_table
+        rm -f temp/delete_topic
         rm -f temp/inserter_*
         rm -f temp/selector_*
         rm -f temp/pump
-        rm -f temp/start_time
+        rm -f temp/consume_*
         touch {output}
         """
 

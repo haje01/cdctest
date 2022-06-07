@@ -3,3 +3,6 @@ pymssql
 mysql-connector-python
 faker
 kafka-python
+pytest
+pytest-shell
+paramiko
