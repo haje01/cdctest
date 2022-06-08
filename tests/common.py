@@ -5,9 +5,12 @@
 """
 import os
 import json
+import re
+import binascii
 
 import paramiko
 import pytest
+from kafka import KafkaConsumer
 
 SSH_PKEY = os.environ['CDCTEST_SSH_PKEY']
 SETUP_PATH = '../mysql_jdbc/temp/setup.json'
@@ -33,17 +36,34 @@ def SSH(host):
     return ssh
 
 
-def _exec(ssh, cmd, env=None):
-    """SSH 로 명령 실행"""
-    _, stdout, stderr = ssh.exec_command(". ~/.myenv && " + cmd, environment=env)
+def _exec(ssh, cmd, stderr_type="stderr", ignore_err=False):
+    """SSH 로 명령 실행
+
+    Args:
+        ssh: 명령을 실행할 Paramiko SSH 객체
+        cmd (str): 명령
+        stderr_type (str): 표준 에러 출력을 어떻게 다룰 것인지
+            - stderr: 에러 출력 (기본)
+            - stdout: 표준 출력
+            - ignore: 무시
+        ignore_err (bool): 에러가 있어도 무시
+
+    """
+    _, stdout, stderr = ssh.exec_command(". ~/.myenv && " + cmd)
     es = stdout.channel.recv_exit_status()
     out = stdout.read().decode('utf8')
     err = stderr.read().decode('utf8')
-    if es != 0:
-        if err == '':
-            err = out
-        ssh_addr = ssh.get_transport().getpeername()[0]
-        raise Exception(f'[@{ssh_addr}] {cmd} <--- {err}')
+    if stderr_type == "stdout":
+        out = err
+        err = ''
+    elif stderr_type == "ignore":
+        err = ''
+    elif es != 0 and err == '':
+        err = out
+    if not ignore_err:
+        if err != '':
+            ssh_addr = ssh.get_transport().getpeername()[0]
+            raise Exception(f'[@{ssh_addr}] {cmd} <--- {err}')
     return out
 
 
@@ -52,7 +72,7 @@ def list_topics(node_ssh, kafka_addr, skip_internal=True):
 
     Args:
         node_ssh: 명령을 실행할 노드로의 Paramiko SSH 객체
-        kafka_addr (str): 카프카 브로커 주소
+        kafka_addr (str): 카프카 브로커 Private 주소
         skip_internal: 내부 토픽 생략 여부. 기본 True
 
     Returns:
@@ -71,7 +91,7 @@ def create_topic(node_ssh, kafka_addr, topic, partitions=12, replications=1):
 
     Args:
         node_ssh: 명령을 실행할 노드로의 Paramiko SSH 객체
-        kafka_addr (str): 카프카 브로커 주소
+        kafka_addr (str): 카프카 브로커 Private 주소
         topic (str): 생성할 토픽 이름
 
     """
@@ -83,7 +103,7 @@ def claim_topic(node_ssh, kafka_addr, topic, partitions=12, replications=1):
 
     Args:
         node_ssh: 명령을 실행할 노드로의 Paramiko SSH 객체
-        kafka_addr (str): 카프카 브로커 주소
+        kafka_addr (str): 카프카 브로커 Private 주소
         topic (str): 생성할 토픽 이름
 
     """
@@ -110,7 +130,7 @@ def delete_topic(node_ssh, kafka_addr, topic):
 
     Args:
         node_ssh: 명령을 실행할 노드로의 Paramiko SSH 객체
-        kafka_addr (str): 카프카 브로커 주소
+        kafka_addr (str): 카프카 브로커 Private 주소
         topic (str): 삭제할 토픽 이름
 
     """
@@ -130,16 +150,42 @@ def reset_topic(node_ssh, kafka_addr, topic, partitions=12, replications=1):
     create_topic(node_ssh, kafka_addr, topic, partitions, replications)
 
 
-def register_src_conn(node_ssh, kafka_addr, conn_name, db_type, db_addr, db_port, db_user, db_passwd, tables, topic_prefix, poll_interval=5000):
+def count_topic_message(node_ssh, kafka_addr, topic, from_begin=True, timeout=10000):
+    """토픽의 메시지 수를 카운팅.
+
+    Args:
+        node_ssh: 명령을 실행할 노드로의 Paramiko SSH 객체
+        kafka_addr (str): 카프카 브로커 Private 주소
+        topic (str): 토픽명
+        from_begin (bool): 토픽의 첫 메시지부터
+        timeout (int): 컨슘 타임아웃
+
+    """
+
+    cmd = f'''kafka-console-consumer.sh --bootstrap-server {kafka_addr}:9092 --topic {topic} --timeout-ms {timeout}'''
+    if from_begin:
+        cmd += ' --from-beginning'
+    cmd += ' | tail -n 10 | grep Processed'
+    ret = _exec(node_ssh, cmd, stderr_type="stdout")
+    msg = ret.strip().split('\n')[-1]
+    match = re.search(r'Processed a total of (\d+) messages', msg)
+    if match is not None:
+        cnt = int(match.groups()[0])
+    return cnt
+
+
+def register_sconn(node_ssh, kafka_addr, db_type, db_addr,
+        db_port, db_user, db_passwd, db_name, tables, topic_prefix,
+        poll_interval=5000):
     """카프카 JDBC Source 커넥터 등록.
 
     Args:
         node_ssh: 명령을 실행할 노드로의 Paramiko SSH 객체
-        kafka_addr (str): 카프카 브로커 주소
-        conn_name (str): 커넥터 이름
+        kafka_addr (str): 카프카 브로커 Private 주소
         db_type (str): 커넥션 URL 용 DBMS 타입. mysql 또는 sqlserver
-        db_addr (str): DB 주소
+        db_addr (str): DB 주소 (Private IP)
         db_port (int): DB 포트
+        db_name (str): 사용할 DB 이름
         db_user (str): DB 유저
         db_passwd (str): DB 유저 암호
         tables (str): 대상 테이블 이름. 하나 이상인 경우 ',' 로 구분
@@ -147,14 +193,24 @@ def register_src_conn(node_ssh, kafka_addr, conn_name, db_type, db_addr, db_port
         poll_interval (int): ms 단위 폴링 간격. 기본값 5000
 
     """
-    stmt = f'''
+    assert db_type in ('mysql', 'sqlserver')
+    if db_type == 'sqlserver':
+        db_url = f"jdbc:sqlserver://{db_addr}:{db_port};databaseName={db_name};encrypt=true;trustServerCertificate=true;"
+    else:
+        db_url = f"jdbc:mysql://{db_addr}:{db_port}/{db_name}"
+
+    hash = binascii.hexlify(os.urandom(3)).decode('utf8')
+    conn_name = f'my-sconn-{hash}'
+    print(f"register_sconn {conn_name}")
+
+    cmd = f'''
 curl -vs -X POST 'http://{kafka_addr}:8083/connectors' \
     -H 'Content-Type: application/json' \
     --data-raw '{{ \
     "name" : "{conn_name}", \
     "config" : {{ \
         "connector.class" : "io.confluent.connect.jdbc.JdbcSourceConnector", \
-        "connection.url":"jdbc:{db_type}://{db_addr}:{db_port};databaseName=test;encrypt=true;trustServerCertificate=true;", \
+        "connection.url":"{db_url}", \
         "connection.user":"{db_user}", \
         "connection.password":"{db_passwd}", \
         "mode": "incrementing", \
@@ -166,37 +222,41 @@ curl -vs -X POST 'http://{kafka_addr}:8083/connectors' \
     }} \
 }}'
 '''
-    ret = _exec(node_ssh, stmt)
+    ret = _exec(node_ssh, cmd, stderr_type="ignore")
     return json.loads(ret)
 
 
-def list_src_conns(node_ssh, kafka_addr):
+def list_sconns(node_ssh, kafka_addr):
     """등록된 카프카 커넥터 리스트.
 
     Returns:
         list: 등록된 커넥터 이름 리스트
 
     """
-    stmt = f'''curl http://{kafka_addr}:8083/connectors'''
-    ret = _exec(node_ssh, stmt)
+    cmd = f'''curl -s http://{kafka_addr}:8083/connectors'''
+    ret = _exec(node_ssh, cmd)
     conns = json.loads(ret)
     return conns
 
 
-def unregister_src_conn(node_ssh, kafka_addr, conn_name):
+def unregister_sconn(node_ssh, kafka_addr, conn_name):
     """카프카 JDBC Source 커넥터 해제.
 
     Args:
         node_ssh: 명령을 실행할 노드로의 Paramiko SSH 객체
-        kafka_addr (str): 카프카 브로커 주소
+        kafka_addr (str): 카프카 브로커 Private 주소
         conn_name (str): 커넥터 이름
 
     """
-    stmt = f'''curl -X DELETE http://{kafka_addr}:8083/connectors/{conn_name}'''
-    _exec(node_ssh, stmt)
+    print(f"unregister_sconn {conn_name}")
+    cmd = f'''curl -X DELETE http://{kafka_addr}:8083/connectors/{conn_name}'''
+    _exec(node_ssh, cmd, ignore_err=True)
 
 
-def unregister_all_src_conns(node_ssh, kafka_addr):
+def unregister_all_sconns(node_ssh, kafka_addr):
     """등록된 모든 카프카 Source 커넥터 해제."""
-    for sconn in list_src_conns(node_ssh, kafka_addr):
-        unregister_src_conn(node_ssh, kafka_addr, sconn)
+    print("unregister_all_sconns")
+    for sconn in list_sconns(node_ssh, kafka_addr):
+        unregister_sconn(node_ssh, kafka_addr, sconn)
+
+
