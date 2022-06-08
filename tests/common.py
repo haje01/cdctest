@@ -5,6 +5,7 @@
 """
 import os
 import json
+import pdb
 import re
 import binascii
 
@@ -27,12 +28,13 @@ def SSH(host):
     return ssh
 
 
-def _exec(ssh, cmd, stderr_type="stderr", ignore_err=False):
+def _exec(ssh, cmd, kafka_env=True, stderr_type="stderr", ignore_err=False):
     """SSH 로 명령 실행
 
     Args:
         ssh: 명령을 실행할 Paramiko SSH 객체
         cmd (str): 명령
+        kafka_env (bool): 카프카 환경 변수 설정 여부. 기본 True
         stderr_type (str): 표준 에러 출력을 어떻게 다룰 것인지
             - stderr: 에러 출력 (기본)
             - stdout: 표준 출력
@@ -40,7 +42,8 @@ def _exec(ssh, cmd, stderr_type="stderr", ignore_err=False):
         ignore_err (bool): 에러가 있어도 무시
 
     """
-    _, stdout, stderr = ssh.exec_command(". ~/.myenv && " + cmd)
+    env = ". ~/.myenv && " if kafka_env else ""
+    _, stdout, stderr = ssh.exec_command(env + cmd)
     es = stdout.channel.recv_exit_status()
     out = stdout.read().decode('utf8')
     err = stderr.read().decode('utf8')
@@ -165,6 +168,8 @@ def count_topic_message(node_ssh, kafka_addr, topic, from_begin=True, timeout=10
     match = re.search(r'Processed a total of (\d+) messages', msg)
     if match is not None:
         cnt = int(match.groups()[0])
+    else:
+        raise Exception(f"Not matching result: {msg}")
     return cnt
 
 
@@ -266,3 +271,7 @@ def topic(setup):
     delete_topic(ssh, kafka_ip, "my-topic-person")
 
 
+def remote_insert_fake(ins_ssh, pid, epoch, batch):
+    """원격 인서트 노드에서 가짜 데이터 insert"""
+    cmd = f"cd cdctest/mssql && python3 inserter.py temp/setup.json {pid} {epoch} {batch}"
+    return _exec(ins_ssh, cmd, False)

@@ -7,7 +7,7 @@ import pytest
 import pymssql
 
 from common import (SSH, register_sconn, unregister_sconn, list_sconns,
-    unregister_all_sconns, count_topic_message, topic
+    unregister_all_sconns, count_topic_message, topic, remote_insert_fake
 )
 
 sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
@@ -123,19 +123,21 @@ def test_sconn(setup):
 
 def test_ct_basic(setup, sconn):
     """기본적인 Change Tracking 테스트."""
-    consumer_ip = setup['consumer_public_ip']['value']
+    ins_ip = setup['inserter_public_ip']['value']
+    con_ip = setup['consumer_public_ip']['value']
     kafka_ip = setup['kafka_private_ip']['value']
-    ssh = SSH(consumer_ip)
+    ins_ssh = SSH(ins_ip)
+    con_ssh = SSH(con_ip)
 
-    # DB 테이블에 100 x 100 행 insert
-    mssql_insert_fake(setup, 100, 100)
+    # 인서트 노드에서 DB 테이블에 100 x 100 행 insert
+    remote_insert_fake(ins_ssh, 1, 100, 100)
 
     # 카프카 토픽 확인
-    cnt = count_topic_message(ssh, kafka_ip, 'my-topic-person')
+    cnt = count_topic_message(con_ssh, kafka_ip, 'my-topic-person')
     assert 10000 == cnt
 
-    # DB 테이블에 100 x 100 행 insert
-    # mssql_insert_fake(setup, 100, 100)
+    # 인서트 노드에서 DB 테이블에 100 x 100 행 insert
+    remote_insert_fake(ins_ssh, 1, 100, 100)
 
-    # cnt = count_topic_message(ssh, kafka_ip, 'my-topic-person')
-    # assert 20000 == cnt
+    cnt = count_topic_message(con_ssh, kafka_ip, 'my-topic-person')
+    assert 20000 == cnt
