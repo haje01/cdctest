@@ -16,15 +16,15 @@ def test_topic(setup):
     assert ['__consumer_offsets', 'connect-configs', 'connect-offsets', 'connect-status'] == topics
 
     # 토픽 생성
-    ret = create_topic(ssh, kafka_ip, 'my_topic')
-    assert 'Created topic my_topic' in ret
-    assert ['my_topic'] == list_topics(ssh, kafka_ip)
+    ret = create_topic(ssh, kafka_ip, 'my-topic')
+    assert 'Created topic my-topic' in ret
+    assert ['my-topic'] == list_topics(ssh, kafka_ip)
 
     # 토픽 및 파티션 정보
-    topic, partitions = describe_topic(ssh, kafka_ip, 'my_topic')
+    topic, partitions = describe_topic(ssh, kafka_ip, 'my-topic')
     assert topic[2] == 'PartitionCount: 12'
     assert len(partitions) == 12
 
     # 토픽 삭제
-    ret = delete_topic(ssh, kafka_ip, 'my_topic')
+    ret = delete_topic(ssh, kafka_ip, 'my-topic')
     assert ret == ''

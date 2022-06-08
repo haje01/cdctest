@@ -13,17 +13,8 @@ import pytest
 from kafka import KafkaConsumer
 
 SSH_PKEY = os.environ['CDCTEST_SSH_PKEY']
-SETUP_PATH = '../mysql_jdbc/temp/setup.json'
 # 내장 토픽 이름
 INTERNAL_TOPICS = ['__consumer_offsets', 'connect-configs', 'connect-offsets', 'connect-status']
-
-
-@pytest.fixture(scope="session")
-def setup():
-    """인프라 설치 정보."""
-    assert os.path.isfile(SETUP_PATH)
-    with open(SETUP_PATH, 'rt') as f:
-        return json.loads(f.read())
 
 
 def SSH(host):
@@ -79,6 +70,7 @@ def list_topics(node_ssh, kafka_addr, skip_internal=True):
         list: 토픽 이름 리스트
 
     """
+    print("list_topics")
     ret = _exec(node_ssh, f'kafka-topics.sh --list --bootstrap-server {kafka_addr}:9092')
     topics = ret.strip().split('\n')
     if skip_internal:
@@ -107,8 +99,10 @@ def claim_topic(node_ssh, kafka_addr, topic, partitions=12, replications=1):
         topic (str): 생성할 토픽 이름
 
     """
+    print(f"claim_topic: {topic}")
     topics = list_topics(node_ssh, kafka_addr)
     if topic not in topics:
+        print("  create topic")
         return _exec(node_ssh, f'kafka-topics.sh --create --topic {topic} --bootstrap-server {kafka_addr}:9092 --partitions {partitions} --replication-factor {replications}')
 
 
@@ -161,7 +155,7 @@ def count_topic_message(node_ssh, kafka_addr, topic, from_begin=True, timeout=10
         timeout (int): 컨슘 타임아웃
 
     """
-
+    print(f"count_topic_message: {topic}")
     cmd = f'''kafka-console-consumer.sh --bootstrap-server {kafka_addr}:9092 --topic {topic} --timeout-ms {timeout}'''
     if from_begin:
         cmd += ' --from-beginning'
@@ -258,5 +252,17 @@ def unregister_all_sconns(node_ssh, kafka_addr):
     print("unregister_all_sconns")
     for sconn in list_sconns(node_ssh, kafka_addr):
         unregister_sconn(node_ssh, kafka_addr, sconn)
+
+
+
+@pytest.fixture
+def topic(setup):
+    """테스트용 카프카 토픽 초기화."""
+    consumer_ip = setup['consumer_public_ip']['value']
+    kafka_ip = setup['kafka_private_ip']['value']
+    ssh = SSH(consumer_ip)
+    claim_topic(ssh, kafka_ip, "my-topic-person")
+    yield
+    delete_topic(ssh, kafka_ip, "my-topic-person")
 
 
