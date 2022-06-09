@@ -99,7 +99,7 @@ rule inserter:
         """
         ip=$(cat temp/setup.json | jq -r .inserter_public_ip.value)
         pkey=$(cat temp/setup.json | jq -r .private_key_path.value)
-        ssh ubuntu@$ip -i $pkey "cd cdctest/mysql_jdbc && python3 inserter.py temp/setup.json {params.pid} {params.epoch} {params.batch} > {output}"
+        ssh ubuntu@$ip -i $pkey "cd cdctest/mysql_jdbc && python3 inserter.py temp/setup.json --pid {params.pid} --epoch {params.epoch} --batch {params.batch} > {output}"
         scp -i $pkey ubuntu@$ip:cdctest/mysql_jdbc/{output} {output}
         """
 

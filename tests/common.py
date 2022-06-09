@@ -5,9 +5,9 @@
 """
 import os
 import json
-import pdb
 import re
 import binascii
+from subprocess import Popen
 
 import paramiko
 import pytest
@@ -28,7 +28,7 @@ def SSH(host):
     return ssh
 
 
-def _exec(ssh, cmd, kafka_env=True, stderr_type="stderr", ignore_err=False):
+def ssh_cmd(ssh, cmd, kafka_env=True, stderr_type="stderr", ignore_err=False):
     """SSH 로 명령 실행
 
     Args:
@@ -61,6 +61,37 @@ def _exec(ssh, cmd, kafka_env=True, stderr_type="stderr", ignore_err=False):
     return out
 
 
+def local_cmd(cmd):
+    """로컬에서 쉘 명령 실행."""
+    res = Popen(cmd, shell=True)
+    out = res.communicate()[0]
+    rc = res.returncode
+    return out, rc
+
+
+def scp_to_remote(src, dst_addr, dst_dir, private_key):
+    """로컬 파일을 원격지로 scp.
+
+    Args:
+        src (str): 원본 파일 경로
+        dst_addr (str): 대상 노드 주소
+        dst_dir (str): 대상 디렉토리
+        private_key (str): 프라이빗 키 경로
+
+    """
+    print(f'scp_to_remote: {src} to {dst_addr}:{dst_dir}')
+    assert not dst_dir.endswith('/')
+
+    dst_ssh = SSH(dst_addr)
+    # 대상 디렉토리 확보
+    ssh_cmd(dst_ssh, f'mkdir -p {dst_dir}', False)
+    # scp
+    src = os.path.abspath(src)
+    cmd = f'scp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null '\
+        '-i {private_key} {src} ubuntu@{dst_addr}:{dst_dir}'
+    return local_cmd(cmd)
+
+
 def list_topics(node_ssh, kafka_addr, skip_internal=True):
     """토픽 리스팅.
 
@@ -74,7 +105,7 @@ def list_topics(node_ssh, kafka_addr, skip_internal=True):
 
     """
     print("list_topics")
-    ret = _exec(node_ssh, f'kafka-topics.sh --list --bootstrap-server {kafka_addr}:9092')
+    ret = ssh_cmd(node_ssh, f'kafka-topics.sh --list --bootstrap-server {kafka_addr}:9092')
     topics = ret.strip().split('\n')
     if skip_internal:
         topics = [t for t in topics if t not in INTERNAL_TOPICS]
@@ -90,7 +121,7 @@ def create_topic(node_ssh, kafka_addr, topic, partitions=12, replications=1):
         topic (str): 생성할 토픽 이름
 
     """
-    return _exec(node_ssh, f'kafka-topics.sh --create --topic {topic} --bootstrap-server {kafka_addr}:9092 --partitions {partitions} --replication-factor {replications}')
+    return ssh_cmd(node_ssh, f'kafka-topics.sh --create --topic {topic} --bootstrap-server {kafka_addr}:9092 --partitions {partitions} --replication-factor {replications}')
 
 
 def claim_topic(node_ssh, kafka_addr, topic, partitions=12, replications=1):
@@ -106,7 +137,7 @@ def claim_topic(node_ssh, kafka_addr, topic, partitions=12, replications=1):
     topics = list_topics(node_ssh, kafka_addr)
     if topic not in topics:
         print("  create topic")
-        return _exec(node_ssh, f'kafka-topics.sh --create --topic {topic} --bootstrap-server {kafka_addr}:9092 --partitions {partitions} --replication-factor {replications}')
+        return ssh_cmd(node_ssh, f'kafka-topics.sh --create --topic {topic} --bootstrap-server {kafka_addr}:9092 --partitions {partitions} --replication-factor {replications}')
 
 
 def describe_topic(node_ssh, kafka_addr, topic):
@@ -116,7 +147,7 @@ def describe_topic(node_ssh, kafka_addr, topic):
         tuple: 토픽 정보, 토픽 파티션들 정보
 
     """
-    ret = _exec(node_ssh, f'kafka-topics.sh --describe --topic {topic} --bootstrap-server {kafka_addr}:9092')
+    ret = ssh_cmd(node_ssh, f'kafka-topics.sh --describe --topic {topic} --bootstrap-server {kafka_addr}:9092')
     items = ret.strip().split('\n')
     items = [item.split('\t') for item in items]
     return items[0], items[1:]
@@ -131,7 +162,7 @@ def delete_topic(node_ssh, kafka_addr, topic):
         topic (str): 삭제할 토픽 이름
 
     """
-    return _exec(node_ssh, f'kafka-topics.sh --delete --topic {topic}  --bootstrap-server {kafka_addr}:9092')
+    return ssh_cmd(node_ssh, f'kafka-topics.sh --delete --topic {topic}  --bootstrap-server {kafka_addr}:9092')
 
 
 def delete_all_topics(node_ssh, kafka_addr):
@@ -163,7 +194,7 @@ def count_topic_message(node_ssh, kafka_addr, topic, from_begin=True, timeout=10
     if from_begin:
         cmd += ' --from-beginning'
     cmd += ' | tail -n 10 | grep Processed'
-    ret = _exec(node_ssh, cmd, stderr_type="stdout")
+    ret = ssh_cmd(node_ssh, cmd, stderr_type="stdout")
     msg = ret.strip().split('\n')[-1]
     match = re.search(r'Processed a total of (\d+) messages', msg)
     if match is not None:
@@ -221,7 +252,7 @@ curl -vs -X POST 'http://{kafka_addr}:8083/connectors' \
     }} \
 }}'
 '''
-    ret = _exec(node_ssh, cmd, stderr_type="ignore")
+    ret = ssh_cmd(node_ssh, cmd, stderr_type="ignore")
     return json.loads(ret)
 
 
@@ -233,7 +264,7 @@ def list_sconns(node_ssh, kafka_addr):
 
     """
     cmd = f'''curl -s http://{kafka_addr}:8083/connectors'''
-    ret = _exec(node_ssh, cmd)
+    ret = ssh_cmd(node_ssh, cmd)
     conns = json.loads(ret)
     return conns
 
@@ -249,7 +280,7 @@ def unregister_sconn(node_ssh, kafka_addr, conn_name):
     """
     print(f"unregister_sconn {conn_name}")
     cmd = f'''curl -X DELETE http://{kafka_addr}:8083/connectors/{conn_name}'''
-    _exec(node_ssh, cmd, ignore_err=True)
+    ssh_cmd(node_ssh, cmd, ignore_err=True)
 
 
 def unregister_all_sconns(node_ssh, kafka_addr):
@@ -274,4 +305,4 @@ def topic(setup):
 def remote_insert_fake(ins_ssh, pid, epoch, batch):
     """원격 인서트 노드에서 가짜 데이터 insert"""
     cmd = f"cd cdctest/mssql && python3 inserter.py temp/setup.json {pid} {epoch} {batch}"
-    return _exec(ins_ssh, cmd, False)
+    return ssh_cmd(ins_ssh, cmd, False)
