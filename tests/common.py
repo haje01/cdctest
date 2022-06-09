@@ -7,7 +7,8 @@ import os
 import json
 import re
 import binascii
-from subprocess import Popen
+# from subprocess import Popen, PIPE, STDOUT
+import subprocess
 
 import paramiko
 import pytest
@@ -63,10 +64,7 @@ def ssh_cmd(ssh, cmd, kafka_env=True, stderr_type="stderr", ignore_err=False):
 
 def local_cmd(cmd):
     """로컬에서 쉘 명령 실행."""
-    res = Popen(cmd, shell=True)
-    out = res.communicate()[0]
-    rc = res.returncode
-    return out, rc
+    return subprocess.run(cmd, shell=True)
 
 
 def scp_to_remote(src, dst_addr, dst_dir, private_key):

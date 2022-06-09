@@ -12,7 +12,7 @@ parser = argparse.ArgumentParser(description="MySQL DB 에서 데이터 셀렉�
 )
 parser.add_argument('setup', type=argparse.FileType('r'), help="배포 결과 파일.")
 parser.add_argument('--db-name', type=str, default='test', help="MySQL 데이터베이스 이름")
-parser.add_argument('-b', '--batch', type=int, default=10000, help="한 번에 select 할 행수.")
+parser.add_argument('-b', '--batch', type=int, default=1000, help="한 번에 select 할 행수.")
 parser.add_argument('-p', '--pid', type=int, default=0, help="셀렉트 프로세스 ID.")
 parser.add_argument('-d', '--dev', action='store_true', default=False,
     help="개발 PC 에서 실행 여부.")
@@ -51,7 +51,7 @@ def select_fake(setup, db_name=parser.get_default('db_name'),
     db_user = setup['db_user']['value']
     db_passwd = setup['db_passwd']['value']
 
-    print(f"Selector {pid} connect SQL Server at {db_host}")
+    print(f"Selector {pid} connect MySQL at {db_host} batch {batch}")
     conn = connect(host=db_host, user=db_user, password=db_passwd, db=db_name)
     cursor = conn.cursor()
     print("Done")
@@ -68,7 +68,8 @@ def select_fake(setup, db_name=parser.get_default('db_name'),
     equal = 0
     while True:
         i += 1
-        print(f"row_prev: {row_prev}, row_cnt: {row_cnt}")
+        print(f"Selector {pid} row_prev: {row_prev}, row_cnt: {row_cnt} equal {equal}")
+        conn.commit()
         time.sleep(1)
         cursor.execute(sql)
         tot_read += len(cursor.fetchall())
@@ -77,7 +78,7 @@ def select_fake(setup, db_name=parser.get_default('db_name'),
             equal += 1
         else:
             equal = 0
-        if equal > 5:
+        if equal >= 5:
             break
         row_prev = row_cnt
 
@@ -85,7 +86,7 @@ def select_fake(setup, db_name=parser.get_default('db_name'),
 
     elapsed = time.time() - st
     vel = tot_read / elapsed
-    print(f"Select {tot_read} rows. {int(vel)} rows per seconds with batch of {batch}.")
+    print(f"Selector {pid} selects {tot_read} rows. {int(vel)} rows per seconds.")
 
 
 if __name__ == '__main__':

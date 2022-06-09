@@ -4,8 +4,6 @@
 
 """
 import time
-import sys
-import json
 from pathlib import Path
 
 import pymssql

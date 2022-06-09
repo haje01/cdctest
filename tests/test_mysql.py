@@ -136,10 +136,10 @@ def test_sconn(setup):
 
 def _local_select_proc(setup, pid):
     """로컬에서 가짜 데이터 셀렉트."""
-    print(f"Select process start: {pid}")
+    print(f"Select process {pid} start")
     cmd = f"cd ../mysql_jdbc && python selector.py temp/setup.json -p {pid} -d"
     local_cmd(cmd)
-    print(f"Select process done: {pid}")
+    print(f"Select process {pid} done")
 
 
 def _local_insert_proc(setup, pid, epoch, batch):
@@ -185,13 +185,14 @@ def test_ct_local_basic(setup, table, sconn):
     print("All select processes are done.")
 
 
-def _remote_select_proc(setup, pid, epoch, batch):
+def _remote_select_proc(setup, pid):
     """원격 셀렉트 노드에서 가짜 데이터 셀렉트 (원격 노드에 temp/setup.json 있어야 함)."""
     print(f"Select process start: {pid}")
     sel_ip = setup['selector_public_ip']['value']
     ssh = SSH(sel_ip)
     cmd = f"cd cdctest/mysql_jdbc && python3 selector.py temp/setup.json -p {pid}"
     ret = ssh_cmd(ssh, cmd, False)
+    print(ret)
     print(f"Select process done: {pid}")
     return ret
 
@@ -203,6 +204,7 @@ def _remote_insert_proc(setup, pid, epoch, batch):
     ssh = SSH(ins_ip)
     cmd = f"cd cdctest/mysql_jdbc && python3 inserter.py temp/setup.json -p {pid} -e {epoch} -b {batch}"
     ret = ssh_cmd(ssh, cmd, False)
+    print(ret)
     print(f"Insert process done: {pid}")
     return ret
 
