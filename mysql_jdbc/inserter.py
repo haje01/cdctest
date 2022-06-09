@@ -52,10 +52,10 @@ def insert_fake(setup, db_name=parser.get_default('db_name'),
     print(f"Inserter {pid} connect MySQL at {db_host}")
     conn = connect(host=db_host, user=db_user, password=db_passwd, db=db_name)
     cursor = conn.cursor()
-    print("Done")
+    print("Connect done.")
 
     st = time.time()
-    _insert_fake(conn, cursor, epoch, batch, pid)
+    _insert_fake(conn, cursor, epoch, batch, pid, 'mysql')
     conn.close()
 
     elapsed = time.time() - st

@@ -102,7 +102,7 @@ def list_topics(node_ssh, kafka_addr, skip_internal=True):
         list: 토픽 이름 리스트
 
     """
-    print("list_topics")
+    print("list_topics at kafka {kafka_addr}")
     ret = ssh_cmd(node_ssh, f'kafka-topics.sh --list --bootstrap-server {kafka_addr}:9092')
     topics = ret.strip().split('\n')
     if skip_internal:
@@ -131,7 +131,7 @@ def claim_topic(node_ssh, kafka_addr, topic, partitions=12, replications=1):
         topic (str): 생성할 토픽 이름
 
     """
-    print(f"claim_topic: {topic}")
+    print(f"claim_topic: {topic} at kafka {kafka_addr}")
     topics = list_topics(node_ssh, kafka_addr)
     if topic not in topics:
         print("  create topic")
@@ -179,6 +179,10 @@ def reset_topic(node_ssh, kafka_addr, topic, partitions=12, replications=1):
 def count_topic_message(node_ssh, kafka_addr, topic, from_begin=True, timeout=10000):
     """토픽의 메시지 수를 카운팅.
 
+    - 카프카 커넥트가 제대로 동작하지 않는 경우
+    - 계속 같은 수가 나와 조기 종료되는 문제 있음
+    - 이럴 때는 카프카 커넥트를 재시작해야 한다
+
     Args:
         node_ssh: 명령을 실행할 노드로의 Paramiko SSH 객체
         kafka_addr (str): 카프카 브로커 Private 주소
@@ -210,7 +214,7 @@ def register_sconn(node_ssh, kafka_addr, db_type, db_addr,
     Args:
         node_ssh: 명령을 실행할 노드로의 Paramiko SSH 객체
         kafka_addr (str): 카프카 브로커 Private 주소
-        db_type (str): 커넥션 URL 용 DBMS 타입. mysql 또는 sqlserver
+        db_type (str): 커넥션 URL 용 DBMS 타입. mysql 또는 mssql
         db_addr (str): DB 주소 (Private IP)
         db_port (int): DB 포트
         db_name (str): 사용할 DB 이름
@@ -221,8 +225,8 @@ def register_sconn(node_ssh, kafka_addr, db_type, db_addr,
         poll_interval (int): ms 단위 폴링 간격. 기본값 5000
 
     """
-    assert db_type in ('mysql', 'sqlserver')
-    if db_type == 'sqlserver':
+    assert db_type in ('mysql', 'mssql')
+    if db_type == 'mssql':
         db_url = f"jdbc:sqlserver://{db_addr}:{db_port};databaseName={db_name};encrypt=true;trustServerCertificate=true;"
     else:
         db_url = f"jdbc:mysql://{db_addr}:{db_port}/{db_name}"
@@ -292,9 +296,9 @@ def unregister_all_sconns(node_ssh, kafka_addr):
 @pytest.fixture
 def topic(setup):
     """테스트용 카프카 토픽 초기화."""
-    consumer_ip = setup['consumer_public_ip']['value']
+    cons_ip = setup['consumer_public_ip']['value']
     kafka_ip = setup['kafka_private_ip']['value']
-    ssh = SSH(consumer_ip)
+    ssh = SSH(cons_ip)
     claim_topic(ssh, kafka_ip, "my-topic-person")
     yield
     delete_topic(ssh, kafka_ip, "my-topic-person")

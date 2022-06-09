@@ -54,7 +54,7 @@ def select_fake(setup, db_name=parser.get_default('db_name'),
     print(f"Selector {pid} connect MySQL at {db_host} batch {batch}")
     conn = connect(host=db_host, user=db_user, password=db_passwd, db=db_name)
     cursor = conn.cursor()
-    print("Done")
+    print("Connect done.")
 
     sql = f'''
         SELECT * FROM (

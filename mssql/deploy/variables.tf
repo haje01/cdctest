@@ -3,8 +3,8 @@ variable region {
 }
 variable "name" {}
 variable "ubuntu_ami" {}
-variable "sqlserver_ami" {}
-variable "sqlserver_instance_type" {
+variable "mssql_ami" {}
+variable "mssql_instance_type" {
   default = "m5.xlarge"
 }
 variable "insel_instance_type" {
@@ -16,13 +16,13 @@ variable "kafka_instance_type" {
 variable "work_cidr" {}
 variable "key_pair_name" {}
 variable "private_key_path" {}
-variable "sqlserver_user" {}
-variable "sqlserver_passwd" {}
+variable "mssql_user" {}
+variable "mssql_passwd" {}
 variable "db_user" {}
 variable "db_passwd" {}
 variable "db_port" {}
 variable "kafka_jdbc_connect" {}
-variable "sqlserver_jdbc_driver" {}
+variable "mssql_jdbc_driver" {}
 variable "tags" {
     type = map(string)
 }

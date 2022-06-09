@@ -8,13 +8,13 @@ import pymssql
 with open(snakemake.input[0], 'rt') as f:
     tfout = json.loads(f.read())
 
-SERVER = tfout['sqlserver_public_ip']['value']
-# SERVER = tfout['sqlserver_public_ip']['value']
+SERVER = tfout['mssql_public_ip']['value']
+# SERVER = tfout['mssql_public_ip']['value']
 USER = tfout['db_user']['value']
 PASSWD = tfout['db_passwd']['value']
 DATABASE = 'test'
 
-print(f"Connect SQL Server at {SERVER}")
+print(f"Connect MSSQL at {SERVER}")
 conn = pymssql.connect(SERVER, USER, PASSWD, DATABASE)
 cursor = conn.cursor(as_dict=True)
 print("Done")

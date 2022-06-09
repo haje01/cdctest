@@ -14,6 +14,8 @@ from common import (SSH, register_sconn, unregister_sconn, list_sconns,
 
 SETUP_PATH = '../mysql_jdbc/temp/setup.json'
 NUM_INSEL_PROCS = 5
+DB_PORT = 3306
+
 
 @pytest.fixture(scope="session")
 def setup():
@@ -96,7 +98,7 @@ def sconn(setup, table, topic):
 
     unregister_all_sconns(ssh, kafka_ip)
     ret = register_sconn(ssh, kafka_ip, 'mysql',
-        db_addr, 3306, db_user, db_passwd, "test", "person",
+        db_addr, DB_PORT, db_user, db_passwd, "test", "person",
         "my-topic-")
     conn_name = ret['name']
     yield
@@ -121,7 +123,7 @@ def test_sconn(setup):
     assert ret == []
 
     # 커넥터 등록
-    ret = register_sconn(ssh, kafka_ip, 'mysql', db_addr, 3306,
+    ret = register_sconn(ssh, kafka_ip, 'mysql', db_addr, DB_PORT,
         db_user, db_passwd, "test", "person", "my-topic-")
     conn_name = ret['name']
     cfg = ret['config']
@@ -237,6 +239,8 @@ def test_ct_remote_basic(cp_setup, table, sconn):
 
     for p in ins_pros:
         p.join()
+    print("All insert processes are done.")
 
     for p in sel_pros:
         p.join()
+    print("All select processes are done.")

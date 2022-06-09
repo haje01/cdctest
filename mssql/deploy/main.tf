@@ -2,9 +2,9 @@ provider "aws" {
   region = var.region
 }
 
-# SQL Server 보안 그룹
-resource "aws_security_group" "sqlserver" {
-  name = "${var.name}-sqlserver"
+# MSSQL 보안 그룹
+resource "aws_security_group" "mssql" {
+  name = "${var.name}-mssql"
 
   ingress {
     from_port = 22
@@ -33,7 +33,7 @@ resource "aws_security_group" "sqlserver" {
   ingress {
     from_port = 1433
     to_port = 1433
-    description = "From Inserter to SQL Server"
+    description = "From Inserter to MSSQL"
     protocol = "tcp"
     security_groups = [
       "${aws_security_group.inserter.id}"
@@ -43,7 +43,7 @@ resource "aws_security_group" "sqlserver" {
   ingress {
     from_port = 1433
     to_port = 1433
-    description = "From Selector to SQL Server"
+    description = "From Selector to MSSQL"
     protocol = "tcp"
     security_groups = [
       "${aws_security_group.selector.id}"
@@ -53,7 +53,7 @@ resource "aws_security_group" "sqlserver" {
   ingress {
     from_port = 1433
     to_port = 1433
-    description = "From Kafka to SQL Server"
+    description = "From Kafka to MSSQL"
     protocol = "tcp"
     security_groups = [
       "${aws_security_group.kafka.id}"
@@ -63,7 +63,7 @@ resource "aws_security_group" "sqlserver" {
   ingress {
     from_port = 1433
     to_port = 1433
-    description = "From Dev PC to SQL Server"
+    description = "From Dev PC to MSSQL"
     protocol = "tcp"
     cidr_blocks = var.work_cidr
   }
@@ -80,7 +80,7 @@ resource "aws_security_group" "sqlserver" {
 
   tags = merge(
     {
-      Name = "${var.name}-sqlserver",
+      Name = "${var.name}-mssql",
       terraform = "true"
     },
     var.tags
@@ -97,28 +97,28 @@ data "template_file" "initdb" {
   }
 }
 
-# SQL Server 인스턴스
-resource "aws_instance" "sqlserver" {
-  ami = var.sqlserver_ami
-  instance_type = var.sqlserver_instance_type
-  security_groups = [aws_security_group.sqlserver.name]
+# MSSQL 인스턴스
+resource "aws_instance" "mssql" {
+  ami = var.mssql_ami
+  instance_type = var.mssql_instance_type
+  security_groups = [aws_security_group.mssql.name]
   key_name = var.key_pair_name
   get_password_data = true
 
   user_data_replace_on_change = true
   user_data = <<EOF
-<powershell>
-# WinRM 설정 (TODO: 안쓰면 제거)
-net user ${var.sqlserver_user} '${var.sqlserver_passwd}' /add /y
-net localgroup administrators ${var.sqlserver_user} /add
+# <powershell>
+# # WinRM 설정 (TODO: 안쓰면 제거)
+net user ${var.mssql_user} '${var.mssql_passwd}' /add /y
+net localgroup administrators ${var.mssql_user} /add
 winrm quickconfig -q
 winrm set winrm/config/winrs '@{MaxMemoryPerShellMB="300"}'
 winrm set winrm/config '@{MaxTimeoutms="1800000"}'
 winrm set winrm/config/service '@{AllowUnencrypted="true"}'
 winrm set winrm/config/service/auth '@{Basic="true"}'
 netsh advfirewall firewall add rule name="WinRM 5985" protocol=TCP dir=in localport=5985 action=allow
-netsh advfirewall firewall add rule name="WinRM 5986" protocol=TCP dir=in localport=5986 action=allow
-net stop winrm
+# netsh advfirewall firewall add rule name="WinRM 5986" protocol=TCP dir=in localport=5986 action=allow
+# net stop winrm
 sc.exe config winrm start=auto
 net start winrm
 
@@ -137,8 +137,8 @@ sqlcmd -i C:\\Windows\\Temp\\init.sql
   connection {
     type = "winrm"
     host = self.public_ip
-    user = var.sqlserver_user
-    password = var.sqlserver_passwd
+    user = var.mssql_user
+    password = var.mssql_passwd
     timeout = "1m"
   }
 
@@ -147,16 +147,16 @@ sqlcmd -i C:\\Windows\\Temp\\init.sql
     destination = "C:/Windows/Temp/init.sql"
   }
 
-  # provisioner "remote-exec" {
-  #   inline = [
-  #     # DB 및 유저 초기화
-  #     "sqlcmd -i C:\\Windows\\Temp\\init.sql",
-  #   ]
-  # }
+  provisioner "remote-exec" {
+    inline = [
+      # DB 및 유저 초기화
+      "sqlcmd -i C:\\Windows\\Temp\\init.sql",
+    ]
+  }
 
   tags = merge(
     {
-      Name = "${var.name}-sqlserver",
+      Name = "${var.name}-mssql",
       terraform = "true"
     },
     var.tags
@@ -299,7 +299,7 @@ resource "aws_instance" "selector" {
 # data "template_file" "regconn" {
 #   template = file("${path.module}/regconn.tpl")
 #   vars = {
-#     host = aws_instance.sqlserver.private_ip,
+#     host = aws_instance.mssql.private_ip,
 #     user = var.db_user,
 #     passwd = var.db_passwd,
 #     port = var.db_port
@@ -386,18 +386,18 @@ connection {
     destination = "/tmp/${basename(var.kafka_jdbc_connect)}"
   }
 
-  # # SQL Server JDBC Driver 복사
+  # # MSSQL JDBC Driver 복사
   # provisioner "file" {
-  #   source = var.sqlserver_jdbc_driver
-  #   destination = "/tmp/${basename(var.sqlserver_jdbc_driver)}"
+  #   source = var.mssql_jdbc_driver
+  #   destination = "/tmp/${basename(var.mssql_jdbc_driver)}"
   # }
 
   # Kafka JDBC Connector 등록 스크립트
   # provisioner "file" {
   #   content = data.template_file.regconn.rendered
   #   destination = "/tmp/regconn.sh"
-  # }
-
+  # # }
+#
 #   provisioner "file" {
 #     # 설치 후 바로는 커넥터 등록이 잘 안되어 재시도 하게
 #     content = <<EOT
@@ -439,16 +439,17 @@ connection {
       "sed -i \"s/#plugin.path=/plugin.path=\\/home\\/ubuntu\\/kafka_2.13-3.0.0\\/connectors/\" ../config/connect-distributed.properties",
       "cd ..",
 
-      # SQL Server JDBC Driver 설치 (confluentinc-kafka-connect-jdbc 에 이미 포함?!)
-      # "cp /tmp/${basename(var.sqlserver_jdbc_driver)} ~/kafka_2.13-3.0.0/connectors/confluentinc-kafka-connect-jdbc-10.4.1/lib",
+      # MSSQL JDBC Driver 설치 (confluentinc-kafka-connect-jdbc 에 이미 포함?!)
+      # "cp /tmp/${basename(var.mssql_jdbc_driver)} ~/kafka_2.13-3.0.0/connectors/confluentinc-kafka-connect-jdbc-10.4.1/lib",
 
       # 실행
       "screen -S zookeeper -dm bash -c 'JAVA_HOME=/usr/lib/jvm/java-8-openjdk-amd64; sudo bin/zookeeper-server-start.sh config/zookeeper.properties; exec bash'",
       "screen -S kafka -dm bash -c 'JAVA_HOME=/usr/lib/jvm/java-8-openjdk-amd64; sudo bin/kafka-server-start.sh config/server.properties; exec bash'",
       "screen -S kafka-connect -dm bash -c 'JAVA_HOME=/usr/lib/jvm/java-8-openjdk-amd64; sudo bin/connect-distributed.sh config/connect-distributed.properties; exec bash'",
+      "while ! curl -s localhost:8083/connectors >> /dev/null 2>&1 ; do sleep 5 ; done",
 
       # Connector 등록
-      "bash /tmp/regretry.sh",
+      # "bash /tmp/regretry.sh",
     ]
   }
 
