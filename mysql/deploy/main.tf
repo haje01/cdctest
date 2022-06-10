@@ -2,6 +2,11 @@ provider "aws" {
   region = var.region
 }
 
+resource "random_string" "db_passwd" {
+  length = 16
+  special = true
+}
+
 # MySQL 보안 그룹
 resource "aws_security_group" "mysql" {
   name = "${var.name}-mysql"
@@ -75,7 +80,7 @@ data "template_file" "initdb" {
   template = file("${path.module}/initdb.tpl")
   vars = {
     user = var.db_user,
-    passwd = var.db_passwd
+    passwd = random_string.db_passwd.result
   }
 }
 
@@ -261,7 +266,7 @@ resource "aws_instance" "selector" {
 #   vars = {
 #     host = aws_instance.mysql.private_ip,
 #     user = var.db_user,
-#     passwd = var.db_passwd,
+#     passwd = random_string.db_passwd.result,
 #     port = var.db_port
 #   }
 # }
@@ -334,8 +339,8 @@ connection {
 
   # Kafka Connector 복사
   provisioner "file" {
-    source = var.kafka_jdbc_connect
-    destination = "/tmp/${basename(var.kafka_jdbc_connect)}"
+    source = var.kafka_jdbc_connector
+    destination = "/tmp/${basename(var.kafka_jdbc_connector)}"
   }
 
   # MySQL JDBC Driver 복사
@@ -376,28 +381,32 @@ connection {
       "sudo apt install -y openjdk-8-jdk",
       "echo 'export JAVA_HOME=/usr/lib/jvm/java-8-openjdk-amd64' >> ~/.myenv",
       "echo 'export PATH=$PATH:$JAVA_HOME/bin' >> ~/.myenv",
-      "wget -nv https://archive.apache.org/dist/kafka/3.0.0/kafka_2.13-3.0.0.tgz",
-      "tar xzf kafka_2.13-3.0.0.tgz",
-      "rm kafka_2.13-3.0.0.tgz",
-      "cd kafka_2.13-3.0.0",
+      "wget -nv ${var.kafka_url}",
+      "kafka_file=${basename(var.kafka_url)}",
+      "kafka_dir=$(basename $kafka_file .tgz)",
+      "tar xzf $kafka_file",
+      "rm $kafka_file",
+      "cd $kafka_dir",
       "sed -i \"s/#advertised.listeners=PLAINTEXT:\\/\\/your.host.name/advertised.listeners=PLAINTEXT:\\/\\/${self.private_ip}/\" config/server.properties",
       # "echo 'delete.topic.enable=true' >> config/server.properties",
 
-      "echo 'export PATH=$PATH:~/kafka_2.13-3.0.0/bin' >> ~/.myenv",
+      "echo \"export PATH=$PATH:~/$kafka_dir/bin\" >> ~/.myenv",
       "cat ~/.myenv >> ~/.bashrc",
 
       # Kafka JDBC Connector 설치
       "mkdir -p connectors",
-      "mv /tmp/${basename(var.kafka_jdbc_connect)} connectors/",
+      "mv /tmp/${basename(var.kafka_jdbc_connector)} connectors/",
       "cd connectors/",
-      "unzip ${basename(var.kafka_jdbc_connect)}",
-      "rm ${basename(var.kafka_jdbc_connect)}",
-      "sed -i \"s/#plugin.path=/plugin.path=\\/home\\/ubuntu\\/kafka_2.13-3.0.0\\/connectors/\" ../config/connect-distributed.properties",
+      "unzip ${basename(var.kafka_jdbc_connector)}",
+      "rm ${basename(var.kafka_jdbc_connector)}",
+      "kjc_file=${basename(var.kafka_jdbc_connector)}",
+      "kjc_dir=$(basename $kjc_file .zip)",
+      "sed -i \"s/#plugin.path=/plugin.path=\\/home\\/ubuntu\\/$kafka_dir\\/connectors/\" ../config/connect-distributed.properties",
       "cd ..",
 
       # MySQL JDBC Driver 설치
       "sudo apt install -y /tmp/${basename(var.mysql_jdbc_driver)}",
-      "cp /usr/share/java/mysql-connector-java-*.jar ~/kafka_2.13-3.0.0/connectors/confluentinc-kafka-connect-jdbc-10.4.1/lib",
+      "cp /usr/share/java/mysql-connector-java-*.jar ~/$kafka_dir/connectors/$kjc_dir/lib",
 
       # 실행
       "pwd > /tmp/pwd",
@@ -475,11 +484,13 @@ resource "aws_instance" "consumer" {
       "sudo apt install -y openjdk-8-jdk",
       "echo 'export JAVA_HOME=/usr/lib/jvm/java-8-openjdk-amd64' >> ~/.myenv",
       "echo 'export PATH=$PATH:$JAVA_HOME/bin' >> ~/.myenv",
-      "wget -nv https://archive.apache.org/dist/kafka/3.0.0/kafka_2.13-3.0.0.tgz",
-      "tar xzf kafka_2.13-3.0.0.tgz",
-      "rm kafka_2.13-3.0.0.tgz",
-      "cd kafka_2.13-3.0.0",
-      "echo 'export PATH=$PATH:~/kafka_2.13-3.0.0/bin' >> ~/.myenv",
+      "wget -nv ${var.kafka_url}",
+      "kafka_file=${basename(var.kafka_url)}",
+      "kafka_dir=$(basename $kafka_file .tgz)",
+      "tar xzf $kafka_file",
+      "rm $kafka_file",
+      "cd $kafka_dir",
+      "echo \"export PATH=$PATH:~/$kafka_dir/bin\" >> ~/.myenv",
       "cat ~/.myenv >> ~/.bashrc",
 
       # 코드 설치

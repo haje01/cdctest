@@ -1,14 +1,13 @@
 import os
-import sys
 import json
 from multiprocessing import Process
-from threading import local
+import pdb
 
 import pytest
-from mysql.connector import connect, DatabaseError
+from mysql.connector import connect
 
-from common import (SSH, register_sconn, unregister_sconn, list_sconns,
-    unregister_all_sconns, count_topic_message, topic, ssh_cmd, local_cmd,
+from common import (SSH, register_socon, unregister_socon, list_socons,
+    unregister_all_socons, count_topic_message, topic, ssh_cmd, local_cmd,
     scp_to_remote
 )
 
@@ -51,7 +50,7 @@ def exec_many(cursor, stmt):
 def dbconcur(setup):
     db_addr = setup['mysql_public_ip']['value']
     db_user = setup['db_user']['value']
-    db_passwd = setup['db_passwd']['value']
+    db_passwd = setup['db_passwd']['value']['result']
     conn = connect(host=db_addr, user=db_user, password=db_passwd, database="test")
     cursor = conn.cursor()
     yield conn, cursor
@@ -86,18 +85,18 @@ CREATE TABLE person (
 
 
 @pytest.fixture
-def sconn(setup, table, topic):
+def socon(setup, table, topic):
     """테스트용 카프카 커넥터 초기화 (테이블과 토픽 먼저 생성)."""
     cons_ip = setup['consumer_public_ip']['value']
     kafka_ip = setup['kafka_private_ip']['value']
     db_addr = setup['mysql_private_ip']['value']
     db_user = setup['db_user']['value']
-    db_passwd = setup['db_passwd']['value']
+    db_passwd = setup['db_passwd']['value']['result']
 
     ssh = SSH(cons_ip)
 
-    unregister_all_sconns(ssh, kafka_ip)
-    ret = register_sconn(ssh, kafka_ip, 'mysql',
+    unregister_all_socons(ssh, kafka_ip)
+    ret = register_socon(ssh, kafka_ip, 'mysql',
         db_addr, DB_PORT, db_user, db_passwd, "test", "person",
         "my-topic-")
     try:
@@ -106,38 +105,38 @@ def sconn(setup, table, topic):
         raise Exception(str(ret))
     yield
 
-    unregister_sconn(ssh, kafka_ip, conn_name)
+    unregister_socon(ssh, kafka_ip, conn_name)
 
 
-def test_sconn(setup):
+def test_socon(setup):
     """카프카 JDBC Source 커넥트 테스트."""
     cons_ip = setup['consumer_public_ip']['value']
     kafka_ip = setup['kafka_private_ip']['value']
     db_addr = setup['mysql_public_ip']['value']
     db_user = setup['db_user']['value']
-    db_passwd = setup['db_passwd']['value']
+    db_passwd = setup['db_passwd']['value']['result']
 
     ssh = SSH(cons_ip)
 
     # 기존 등록된 소스 커넥터 모두 제거
-    unregister_all_sconns(ssh, kafka_ip)
+    unregister_all_socons(ssh, kafka_ip)
 
     # 현재 등록된 커넥터
-    ret = list_sconns(ssh, kafka_ip)
+    ret = list_socons(ssh, kafka_ip)
     assert ret == []
 
     # 커넥터 등록
-    ret = register_sconn(ssh, kafka_ip, 'mysql', db_addr, DB_PORT,
+    ret = register_socon(ssh, kafka_ip, 'mysql', db_addr, DB_PORT,
         db_user, db_passwd, "test", "person", "my-topic-")
     conn_name = ret['name']
     cfg = ret['config']
-    assert cfg['name'].startswith('my-sconn')
-    ret = list_sconns(ssh, kafka_ip)
+    assert cfg['name'].startswith('my-socon')
+    ret = list_socons(ssh, kafka_ip)
     assert ret == [conn_name]
 
     # 커넥터 해제
-    unregister_sconn(ssh, kafka_ip, conn_name)
-    ret = list_sconns(ssh, kafka_ip)
+    unregister_socon(ssh, kafka_ip, conn_name)
+    ret = list_socons(ssh, kafka_ip)
     assert ret == []
 
 def _local_select_proc(setup, pid):
@@ -156,8 +155,12 @@ def _local_insert_proc(setup, pid, epoch, batch):
     print(f"Insert process done: {pid}")
 
 
-def test_ct_local_basic(setup, table, sconn):
-    """로컬 insert / select 로 기본적인 Change Tracking 테스트."""
+def test_ct_local_basic(setup, table, socon):
+    """로컬 insert / select 로 기본적인 Change Tracking 테스트.
+
+    - 테스트 시작전 이전 토픽을 참고하는 것이 없어야 함. (delete_topic 에러 발생)
+
+    """
     cons_ip = setup['consumer_public_ip']['value']
     kafka_ip = setup['kafka_private_ip']['value']
     ssh = SSH(cons_ip)
@@ -179,7 +182,7 @@ def test_ct_local_basic(setup, table, sconn):
         p.start()
 
     # 카프카 토픽 확인 (timeout 되기전에 다 받아야 함)
-    cnt = count_topic_message(ssh, kafka_ip, 'my-topic-person')
+    cnt = count_topic_message(ssh, kafka_ip, 'my-topic-person', timeout=20)
     assert 10000 * NUM_INSEL_PROCS == cnt
 
     for p in ins_pros:
@@ -215,7 +218,7 @@ def _remote_insert_proc(setup, pid, epoch, batch):
     return ret
 
 
-def test_ct_remote_basic(cp_setup, table, sconn):
+def test_ct_remote_basic(cp_setup, table, socon):
     """원격 insert / select 로 기본적인 Change Tracking 테스트."""
     cons_ip = cp_setup['consumer_public_ip']['value']
     kafka_ip = cp_setup['kafka_private_ip']['value']
@@ -238,7 +241,7 @@ def test_ct_remote_basic(cp_setup, table, sconn):
         p.start()
 
     # 카프카 토픽 확인 (timeout 되기전에 다 받아야 함)
-    cnt = count_topic_message(ssh, kafka_ip, 'my-topic-person')
+    cnt = count_topic_message(ssh, kafka_ip, 'my-topic-person', timeout=20)
     assert 10000 * NUM_INSEL_PROCS == cnt
 
     for p in ins_pros:

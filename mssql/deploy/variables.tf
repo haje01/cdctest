@@ -17,11 +17,10 @@ variable "work_cidr" {}
 variable "key_pair_name" {}
 variable "private_key_path" {}
 variable "mssql_user" {}
-variable "mssql_passwd" {}
 variable "db_user" {}
-variable "db_passwd" {}
 variable "db_port" {}
-variable "kafka_jdbc_connect" {}
+variable "kafka_url" {}
+variable "kafka_jdbc_connector" {}
 variable "mssql_jdbc_driver" {}
 variable "tags" {
     type = map(string)

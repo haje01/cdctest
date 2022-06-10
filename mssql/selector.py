@@ -49,7 +49,7 @@ def select_fake(setup, db_name=parser.get_default('db_name'),
     mssql_ip_key = 'mssql_public_ip' if dev else 'mssql_private_ip'
     db_host = setup[mssql_ip_key]['value']
     db_user = setup['db_user']['value']
-    db_passwd = setup['db_passwd']['value']
+    db_passwd = setup['db_passwd']['value']['result']
 
     print(f"Selector {pid} connect MSSQL at {db_host} batch {batch}")
     conn = pymssql.connect(host=db_host, user=db_user, password=db_passwd, database=db_name)
@@ -120,7 +120,7 @@ if __name__ == '__main__':
 # SERVER = ip['value']
 # # SERVER = setup['mssql_public_ip']['value']
 # USER = setup['db_user']['value']
-# PASSWD = setup['db_passwd']['value']
+# PASSWD = setup['db_passwd']['value']['result']
 # DATABASE = 'test'
 
 # print(f"Selector {pid} connect SQL Server at {SERVER}")

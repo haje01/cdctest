@@ -12,7 +12,7 @@ output "mssql_user" {
 
 output "mssql_passwd" {
   sensitive = true
-  value = var.mssql_passwd
+  value = random_string.mssql_passwd
 }
 
 output "mssql_admin_passwd" {
@@ -54,7 +54,7 @@ output "db_user" {
 
 output "db_passwd" {
   sensitive = true
-  value = var.db_passwd
+  value = random_string.db_passwd
 }
 
 output "private_key_path" {

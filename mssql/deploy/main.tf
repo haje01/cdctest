@@ -2,6 +2,16 @@ provider "aws" {
   region = var.region
 }
 
+resource "random_string" "db_passwd" {
+  length = 16
+  special = true
+}
+
+resource "random_string" "mssql_passwd" {
+  length = 16
+  special = true
+}
+
 # MSSQL 보안 그룹
 resource "aws_security_group" "mssql" {
   name = "${var.name}-mssql"
@@ -92,7 +102,7 @@ data "template_file" "initdb" {
   template = file("${path.module}/initdb.tpl")
   vars = {
     user = var.db_user,
-    passwd = var.db_passwd,
+    passwd = random_string.db_passwd.result,
     port = var.db_port
   }
 }
@@ -109,7 +119,7 @@ resource "aws_instance" "mssql" {
   user_data = <<EOF
 # <powershell>
 # # WinRM 설정 (TODO: 안쓰면 제거)
-net user ${var.mssql_user} '${var.mssql_passwd}' /add /y
+net user ${var.mssql_user} '${random_string.mssql_passwd.result}' /add /y
 net localgroup administrators ${var.mssql_user} /add
 winrm quickconfig -q
 winrm set winrm/config/winrs '@{MaxMemoryPerShellMB="300"}'
@@ -138,7 +148,7 @@ sqlcmd -i C:\\Windows\\Temp\\init.sql
     type = "winrm"
     host = self.public_ip
     user = var.mssql_user
-    password = var.mssql_passwd
+    password = random_string.mssql_passwd.result
     timeout = "1m"
   }
 
@@ -301,7 +311,7 @@ resource "aws_instance" "selector" {
 #   vars = {
 #     host = aws_instance.mssql.private_ip,
 #     user = var.db_user,
-#     passwd = var.db_passwd,
+#     passwd = random_string.db_passwd.result,
 #     port = var.db_port
 #   }
 # }
@@ -382,8 +392,8 @@ connection {
 
   # Kafka Connector 복사
   provisioner "file" {
-    source = var.kafka_jdbc_connect
-    destination = "/tmp/${basename(var.kafka_jdbc_connect)}"
+    source = var.kafka_jdbc_connector
+    destination = "/tmp/${basename(var.kafka_jdbc_connector)}"
   }
 
   # # MSSQL JDBC Driver 복사
@@ -424,27 +434,31 @@ connection {
       "sudo apt install -y openjdk-8-jdk",
       "echo 'export JAVA_HOME=/usr/lib/jvm/java-8-openjdk-amd64' >> ~/.myenv",
       "echo 'export PATH=$PATH:$JAVA_HOME/bin' >> ~/.myenv",
-      "wget -nv https://archive.apache.org/dist/kafka/3.0.0/kafka_2.13-3.0.0.tgz",
-      "tar xzf kafka_2.13-3.0.0.tgz",
-      "rm kafka_2.13-3.0.0.tgz",
-      "cd kafka_2.13-3.0.0",
+      "wget -nv ${var.kafka_url}",
+      "kafka_file=${basename(var.kafka_url)}",
+      "kafka_dir=$(basename $kafka_file .tgz)",
+      "tar xzf $kafka_file",
+      "rm $kafka_file",
+      "cd $kafka_dir",
       "sed -i \"s/#advertised.listeners=PLAINTEXT:\\/\\/your.host.name/advertised.listeners=PLAINTEXT:\\/\\/${self.private_ip}/\" config/server.properties",
       # "echo 'delete.topic.enable=true' >> config/server.properties",
 
-      "echo 'export PATH=$PATH:~/kafka_2.13-3.0.0/bin' >> ~/.myenv",
+      "echo \"export PATH=$PATH:~/$kafka_dir/bin\" >> ~/.myenv",
       "cat ~/.myenv >> ~/.bashrc",
 
       # Kafka JDBC Connector 설치
       "mkdir -p connectors",
-      "mv /tmp/${basename(var.kafka_jdbc_connect)} connectors/",
+      "mv /tmp/${basename(var.kafka_jdbc_connector)} connectors/",
       "cd connectors/",
-      "unzip ${basename(var.kafka_jdbc_connect)}",
-      "rm ${basename(var.kafka_jdbc_connect)}",
-      "sed -i \"s/#plugin.path=/plugin.path=\\/home\\/ubuntu\\/kafka_2.13-3.0.0\\/connectors/\" ../config/connect-distributed.properties",
+      "unzip ${basename(var.kafka_jdbc_connector)}",
+      "rm ${basename(var.kafka_jdbc_connector)}",
+      "kjc_file=${basename(var.kafka_jdbc_connector)}",
+      "kjc_dir=$(basename $kjc_file .zip)",
+      "sed -i \"s/#plugin.path=/plugin.path=\\/home\\/ubuntu\\/$kafka_dir\\/connectors/\" ../config/connect-distributed.properties",
       "cd ..",
 
       # MSSQL JDBC Driver 설치 는 confluentinc-kafka-connect-jdbc 에 이미 포함되어 있기에 생략
-      # "cp /tmp/${basename(var.mssql_jdbc_driver)} ~/kafka_2.13-3.0.0/connectors/confluentinc-kafka-connect-jdbc-10.4.1/lib",
+      # "cp /tmp/${basename(var.mssql_jdbc_driver)} ~/$kafka_dir/connectors/$kjd_dir/lib",
 
       # 실행
       "screen -S zookeeper -dm bash -c 'JAVA_HOME=/usr/lib/jvm/java-8-openjdk-amd64; sudo bin/zookeeper-server-start.sh config/zookeeper.properties; exec bash'",
@@ -521,11 +535,13 @@ resource "aws_instance" "consumer" {
       "sudo apt install -y openjdk-8-jdk",
       "echo 'export JAVA_HOME=/usr/lib/jvm/java-8-openjdk-amd64' >> ~/.myenv",
       "echo 'export PATH=$PATH:$JAVA_HOME/bin' >> ~/.myenv",
-      "wget -nv https://archive.apache.org/dist/kafka/3.0.0/kafka_2.13-3.0.0.tgz",
-      "tar xzf kafka_2.13-3.0.0.tgz",
-      "rm kafka_2.13-3.0.0.tgz",
-      "cd kafka_2.13-3.0.0",
-      "echo 'export PATH=$PATH:~/kafka_2.13-3.0.0/bin' >> ~/.myenv",
+      "wget -nv ${var.kafka_url}",
+      "kafka_file=${basename(var.kafka_url)}",
+      "kafka_dir=$(basename $kafka_file .tgz)",
+      "tar xzf $kafka_file",
+      "rm $kafka_file",
+      "cd $kafka_dir",
+      "echo \"export PATH=$PATH:~/$kafka_dir/bin\" >> ~/.myenv",
       "cat ~/.myenv >> ~/.bashrc",
 
       # 코드 설치

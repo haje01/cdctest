@@ -40,7 +40,7 @@ output "db_user" {
 
 output "db_passwd" {
   sensitive = true
-  value = var.db_passwd
+  value = random_string.db_passwd
 }
 
 output "private_key_path" {

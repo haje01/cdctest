@@ -44,10 +44,11 @@ def insert_fake(setup, db_name=parser.get_default('db_name'),
     """
     if type(setup) is io.TextIOWrapper:
         setup = json.loads(setup.read())
+
     mysql_ip_key = 'mysql_public_ip' if dev else 'mysql_private_ip'
     db_host = setup[mysql_ip_key]['value']
     db_user = setup['db_user']['value']
-    db_passwd = setup['db_passwd']['value']
+    db_passwd = setup['db_passwd']['value']['result']
 
     print(f"Inserter {pid} connect MySQL at {db_host}")
     conn = connect(host=db_host, user=db_user, password=db_passwd, db=db_name)
