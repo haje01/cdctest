@@ -2,6 +2,7 @@ variable region {
   default = "ap-northeast-2"
 }
 variable "name" {}
+variable PKEY {}
 variable "ubuntu_ami" {}
 variable "mysql_instance_type" {
   default = "m5.large"

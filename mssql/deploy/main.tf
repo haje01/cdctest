@@ -2,10 +2,6 @@ provider "aws" {
   region = var.region
 }
 
-variable PKEY {
-  type = string
-}
-
 resource "random_string" "db_passwd" {
   length = 16
   special = true

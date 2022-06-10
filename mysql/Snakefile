@@ -30,16 +30,16 @@ rule copy_setup:
         # Inserter
         ip=$(cat temp/setup.json | jq -r .inserter_public_ip.value)
         pkey=$KFKTEST_SSH_PKEY
-        ssh -o "StrictHostKeyChecking=no" ubuntu@$ip -i $pkey "cd cdctest/mysql && mkdir -p temp"
-        scp -i $pkey {input} ubuntu@$ip:cdctest/mysql/{input}
+        ssh -o "StrictHostKeyChecking=no" ubuntu@$ip -i $pkey "cd kfkteste/mysql && mkdir -p temp"
+        scp -i $pkey {input} ubuntu@$ip:kfkteste/mysql/{input}
         # Selector
         ip=$(cat temp/setup.json | jq -r .selector_public_ip.value)
-        ssh -o "StrictHostKeyChecking=no" ubuntu@$ip -i $pkey "cd cdctest/mysql && mkdir -p temp"
-        scp -i $pkey {input} ubuntu@$ip:cdctest/mysql/{input}
+        ssh -o "StrictHostKeyChecking=no" ubuntu@$ip -i $pkey "cd kfkteste/mysql && mkdir -p temp"
+        scp -i $pkey {input} ubuntu@$ip:kfkteste/mysql/{input}
         # Consumer
         ip=$(cat temp/setup.json | jq -r .selector_public_ip.value)
-        ssh -o "StrictHostKeyChecking=no" ubuntu@$ip -i $pkey "cd cdctest/mysql && mkdir -p temp"
-        scp -i $pkey {input} ubuntu@$ip:cdctest/mysql/{input}
+        ssh -o "StrictHostKeyChecking=no" ubuntu@$ip -i $pkey "cd kfkteste/mysql && mkdir -p temp"
+        scp -i $pkey {input} ubuntu@$ip:kfkteste/mysql/{input}
         touch {output}
         """
 
@@ -97,8 +97,8 @@ rule inserter:
         """
         ip=$(cat temp/setup.json | jq -r .inserter_public_ip.value)
         pkey=$(cat temp/setup.json | jq -r .private_key_path.value)
-        ssh ubuntu@$ip -i $pkey "cd cdctest/mysql && python3 inserter.py temp/setup.json --pid {params.pid} --epoch {params.epoch} --batch {params.batch} > {output}"
-        scp -i $pkey ubuntu@$ip:cdctest/mysql/{output} {output}
+        ssh ubuntu@$ip -i $pkey "cd kfkteste/mysql && python3 inserter.py temp/setup.json --pid {params.pid} --epoch {params.epoch} --batch {params.batch} > {output}"
+        scp -i $pkey ubuntu@$ip:kfkteste/mysql/{output} {output}
         """
 
 
@@ -119,8 +119,8 @@ rule selector:
         """
         ip=$(cat temp/setup.json | jq -r .selector_public_ip.value)
         pkey=$(cat temp/setup.json | jq -r .private_key_path.value)
-        ssh ubuntu@$ip -i $pkey "cd cdctest/mysql && python3 selector.py temp/setup.json {params.pid} > {output}"
-        scp -i $pkey ubuntu@$ip:cdctest/mysql/{output} {output}
+        ssh ubuntu@$ip -i $pkey "cd kfkteste/mysql && python3 selector.py temp/setup.json {params.pid} > {output}"
+        scp -i $pkey ubuntu@$ip:kfkteste/mysql/{output} {output}
         """
 
 
@@ -160,8 +160,8 @@ rule consume:
         """
         ip=$(cat temp/setup.json | jq -r .consumer_public_ip.value)
         pkey=$(cat temp/setup.json | jq -r .private_key_path.value)
-        ssh ubuntu@$ip -i $pkey "cd cdctest/mysql && python3 consumer.py temp/setup.json > {output}"
-        scp -i $pkey ubuntu@$ip:cdctest/mysql/{output} {output}
+        ssh ubuntu@$ip -i $pkey "cd kfkteste/mysql && python3 consumer.py temp/setup.json > {output}"
+        scp -i $pkey ubuntu@$ip:kfkteste/mysql/{output} {output}
         """
 
 

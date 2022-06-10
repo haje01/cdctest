@@ -2,6 +2,7 @@ variable region {
   default = "ap-northeast-2"
 }
 variable "name" {}
+variable PKEY {}
 variable "ubuntu_ami" {}
 variable "mssql_ami" {}
 variable "mssql_instance_type" {
