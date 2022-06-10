@@ -4,7 +4,7 @@ Kafka 의 각종 기능을 테스트
 
 ## Kafka JDBC Connector 테스트
 
-- DB에서 Kafka 로 데이터 마이그레이션 테스트 
+- DB에서 Kafka 로 로그성 데이터 이동 테스트 
 - 대상 DBMS 는 MySQL 과 MSSQL
 
 ### 인프라 구축
