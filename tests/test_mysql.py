@@ -30,7 +30,7 @@ def cp_setup(setup):
     targets = ['consumer_public_ip', 'inserter_public_ip', 'selector_public_ip']
     for target in targets:
         ip = setup[target]['value']
-        scp_to_remote('../mysql/temp/setup.json', ip, '~/cdctest/mysql/temp')
+        scp_to_remote('../mysql/temp/setup.json', ip, '~/kfktest/mysql/temp')
     yield setup
 
 
@@ -198,7 +198,7 @@ def _remote_select_proc(setup, pid):
     print(f"Select process start: {pid}")
     sel_ip = setup['selector_public_ip']['value']
     ssh = SSH(sel_ip)
-    cmd = f"cd cdctest/mysql && python3 selector.py temp/setup.json -p {pid}"
+    cmd = f"cd kfktest/mysql && python3 selector.py temp/setup.json -p {pid}"
     ret = ssh_cmd(ssh, cmd, False)
     print(ret)
     print(f"Select process done: {pid}")
@@ -210,7 +210,7 @@ def _remote_insert_proc(setup, pid, epoch, batch):
     print(f"Insert process start: {pid}")
     ins_ip = setup['inserter_public_ip']['value']
     ssh = SSH(ins_ip)
-    cmd = f"cd cdctest/mysql && python3 inserter.py temp/setup.json -p {pid} -e {epoch} -b {batch}"
+    cmd = f"cd kfktest/mysql && python3 inserter.py temp/setup.json -p {pid} -e {epoch} -b {batch}"
     ret = ssh_cmd(ssh, cmd, False)
     print(ret)
     print(f"Insert process done: {pid}")
