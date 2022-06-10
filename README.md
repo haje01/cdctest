@@ -2,7 +2,12 @@
 
 Kafka 의 각종 기능을 테스트
 
-## 인프라 구축
+## Kafka JDBC Connector 테스트
+
+- DB에서 Kafka 로 데이터 마이그레이션 테스트 
+- 대상 DBMS 는 MySQL 과 MSSQL
+
+### 인프라 구축
 
 Terraform 으로 AWS 에 필요 인스턴스 생성
 
@@ -14,11 +19,6 @@ Terraform 으로 AWS 에 필요 인스턴스 생성
   - `kfktest/mssql` 디렉토리로 이동 후
   - `snakemake -f temp/setup.json -j` 로 생성
   - `snakemake -f tmep/destroy -j` 로 제거
-
-## Kafka JDBC Connector 테스트
-
-- DB에서 Kafka 로 데이터 마이그레이션 테스트 
-- 대상 DBMS 는 MySQL 과 MSSQL
 
 ### 테스트 방법
 `kfktest/tests` 디렉토리로 이동 후
