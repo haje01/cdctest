@@ -7,14 +7,14 @@ from threading import local
 import pytest
 import pymssql
 
-from common import (SSH, register_sconn, unregister_sconn, list_sconns,
-    unregister_all_sconns, count_topic_message, topic, ssh_cmd, local_cmd,
+from common import (SSH, register_socon, unregister_socon, list_socons,
+    unregister_all_socons, count_topic_message, topic, ssh_cmd, local_cmd,
     scp_to_remote
 )
 
 SETUP_PATH = '../mssql/temp/setup.json'
 NUM_INSEL_PROCS = 5
-DB_PORT = 3306
+DB_PORT = 1433
 
 
 @pytest.fixture(scope="session")
@@ -92,7 +92,7 @@ def table(dbconcur):
 
 
 @pytest.fixture
-def sconn(setup, table, topic):
+def socon(setup, table, topic):
     """테스트용 카프카 커넥터 초기화 (테이블과 토픽 먼저 생성)."""
     cons_ip = setup['consumer_public_ip']['value']
     kafka_ip = setup['kafka_private_ip']['value']
@@ -102,16 +102,20 @@ def sconn(setup, table, topic):
 
     ssh = SSH(cons_ip)
 
-    unregister_all_sconns(ssh, kafka_ip)
-    ret = register_sconn(ssh, kafka_ip, 'mssql',
+    unregister_all_socons(ssh, kafka_ip)
+    ret = register_socon(ssh, kafka_ip, 'mssql',
         db_addr, DB_PORT, db_user, db_passwd, "test", "person",
         "my-topic-")
-    conn_name = ret['name']
+    try:
+        conn_name = ret['name']
+    except Exception as e:
+        raise Exception(str(ret))
     yield
-    # unregister_sconn(ssh, kafka_ip, conn_name)
+
+    unregister_socon(ssh, kafka_ip, conn_name)
 
 
-def test_sconn(setup):
+def test_socon(setup):
     """카프카 JDBC Source 커넥트 테스트."""
     cons_ip = setup['consumer_public_ip']['value']
     kafka_ip = setup['kafka_private_ip']['value']
@@ -122,24 +126,24 @@ def test_sconn(setup):
     ssh = SSH(cons_ip)
 
     # 기존 등록된 소스 커넥터 모두 제거
-    unregister_all_sconns(ssh, kafka_ip)
+    unregister_all_socons(ssh, kafka_ip)
 
     # 현재 등록된 커넥터
-    ret = list_sconns(ssh, kafka_ip)
+    ret = list_socons(ssh, kafka_ip)
     assert ret == []
 
     # 커넥터 등록
-    ret = register_sconn(ssh, kafka_ip, 'mssql', db_addr, DB_PORT,
+    ret = register_socon(ssh, kafka_ip, 'mssql', db_addr, DB_PORT,
         db_user, db_passwd, "test", "person", "my-topic-")
     conn_name = ret['name']
     cfg = ret['config']
-    assert cfg['name'].startswith('my-sconn')
-    ret = list_sconns(ssh, kafka_ip)
+    assert cfg['name'].startswith('my-socon')
+    ret = list_socons(ssh, kafka_ip)
     assert ret == [conn_name]
 
     # 커넥터 해제
-    unregister_sconn(ssh, kafka_ip, conn_name)
-    ret = list_sconns(ssh, kafka_ip)
+    unregister_socon(ssh, kafka_ip, conn_name)
+    ret = list_socons(ssh, kafka_ip)
     assert ret == []
 
 
@@ -159,7 +163,7 @@ def _local_insert_proc(setup, pid, epoch, batch):
     print(f"Insert process done: {pid}")
 
 
-def test_ct_local_basic(setup, table, sconn):
+def test_ct_local_basic(setup, table, socon):
     """로컬 insert / select 로 기본적인 Change Tracking 테스트."""
     cons_ip = setup['consumer_public_ip']['value']
     kafka_ip = setup['kafka_private_ip']['value']
@@ -181,8 +185,8 @@ def test_ct_local_basic(setup, table, sconn):
         ins_pros.append(p)
         p.start()
 
-    # 카프카 토픽 확인 (timeout 되기전에 다 받아야 함)
-    cnt = count_topic_message(ssh, kafka_ip, 'my-topic-person')
+    # 카프카 토픽 확인 (timeout 되기 전에 다 받아야 함)
+    cnt = count_topic_message(ssh, kafka_ip, 'my-topic-person', timeout=10)
     assert 10000 * NUM_INSEL_PROCS == cnt
 
     for p in ins_pros:
@@ -218,7 +222,7 @@ def _remote_insert_proc(setup, pid, epoch, batch):
     return ret
 
 
-def test_ct_remote_basic(cp_setup, table, sconn):
+def test_ct_remote_basic(cp_setup, table, socon):
     """원격 insert / select 로 기본적인 Change Tracking 테스트."""
     cons_ip = cp_setup['consumer_public_ip']['value']
     kafka_ip = cp_setup['kafka_private_ip']['value']
@@ -241,7 +245,7 @@ def test_ct_remote_basic(cp_setup, table, sconn):
         p.start()
 
     # 카프카 토픽 확인 (timeout 되기전에 다 받아야 함)
-    cnt = count_topic_message(ssh, kafka_ip, 'my-topic-person')
+    cnt = count_topic_message(ssh, kafka_ip, 'my-topic-person', timeout=10)
     assert 10000 * NUM_INSEL_PROCS == cnt
 
     for p in ins_pros:
@@ -262,8 +266,8 @@ def test_ct_remote_basic(cp_setup, table, sconn):
 # import pytest
 # import pymssql
 
-# from common import (SSH, register_sconn, unregister_sconn, list_sconns,
-#     unregister_all_sconns, count_topic_message, topic, remote_insert_fake
+# from common import (SSH, register_socon, unregister_socon, list_socons,
+#     unregister_all_socons, count_topic_message, topic, remote_insert_fake
 # )
 
 # sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
@@ -295,7 +299,7 @@ def test_ct_remote_basic(cp_setup, table, sconn):
 
 
 # @pytest.fixture
-# def sconn(setup, table, topic):
+# def socon(setup, table, topic):
 #     """테스트용 카프카 커넥터 초기화 (테이블과 토픽 먼저 생성)."""
 #     consumer_ip = setup['consumer_public_ip']['value']
 #     kafka_ip = setup['kafka_private_ip']['value']
@@ -305,16 +309,16 @@ def test_ct_remote_basic(cp_setup, table, sconn):
 
 #     ssh = SSH(consumer_ip)
 
-#     unregister_all_sconns(ssh, kafka_ip)
-#     ret = register_sconn(ssh, kafka_ip, 'sqlserver',
+#     unregister_all_socons(ssh, kafka_ip)
+#     ret = register_socon(ssh, kafka_ip, 'sqlserver',
 #         db_addr, 1433, db_user, db_passwd, "test", "person",
 #         "my-topic-")
 #     conn_name = ret['name']
 #     yield
-#     unregister_sconn(ssh, kafka_ip, conn_name)
+#     unregister_socon(ssh, kafka_ip, conn_name)
 
 
-# def test_sconn(setup):
+# def test_socon(setup):
 #     """카프카 JDBC Source 커넥트 테스트."""
 #     consumer_ip = setup['consumer_public_ip']['value']
 #     kafka_ip = setup['kafka_private_ip']['value']
@@ -325,28 +329,28 @@ def test_ct_remote_basic(cp_setup, table, sconn):
 #     ssh = SSH(consumer_ip)
 
 #     # 기존 등록된 소스 커넥터 모두 제거
-#     unregister_all_sconns(ssh, kafka_ip)
+#     unregister_all_socons(ssh, kafka_ip)
 
 #     # 현재 등록된 커넥터
-#     ret = list_sconns(ssh, kafka_ip)
+#     ret = list_socons(ssh, kafka_ip)
 #     assert ret == []
 
 #     # 커넥터 등록
-#     ret = register_sconn(ssh, kafka_ip, 'sqlserver', db_addr, 1433,
+#     ret = register_socon(ssh, kafka_ip, 'sqlserver', db_addr, 1433,
 #         db_user, db_passwd, "test", "person", "my-topic-")
 #     conn_name = ret['name']
 #     cfg = ret['config']
-#     assert cfg['name'].startswith('my-sconn')
-#     ret = list_sconns(ssh, kafka_ip)
+#     assert cfg['name'].startswith('my-socon')
+#     ret = list_socons(ssh, kafka_ip)
 #     assert ret == [conn_name]
 
 #     # 커넥터 해제
-#     unregister_sconn(ssh, kafka_ip, conn_name)
-#     ret = list_sconns(ssh, kafka_ip)
+#     unregister_socon(ssh, kafka_ip, conn_name)
+#     ret = list_socons(ssh, kafka_ip)
 #     assert ret == []
 
 
-# def test_ct_basic(setup, sconn):
+# def test_ct_basic(setup, socon):
 #     """기본적인 Change Tracking 테스트."""
 #     ins_ip = setup['inserter_public_ip']['value']
 #     con_ip = setup['consumer_public_ip']['value']

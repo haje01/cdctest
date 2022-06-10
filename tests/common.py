@@ -151,16 +151,30 @@ def describe_topic(node_ssh, kafka_addr, topic):
     return items[0], items[1:]
 
 
-def delete_topic(node_ssh, kafka_addr, topic):
+def delete_topic(node_ssh, kafka_addr, topic, ignore_not_exist=False):
     """토픽 삭제.
+
+    토픽이 가끔 삭제되지 않는 이슈:
+    - 프로듀서/컨슈머가 이용중인 토픽을 지우려고 할 때 발생하는 듯
+    - 가급적 테스트 종료 후 충분한 시간이 지난 뒤 (재시작시 등) 지울 것
+    - 문제 발생시 zookeeper shell 로 지워주어야
 
     Args:
         node_ssh: 명령을 실행할 노드로의 Paramiko SSH 객체
         kafka_addr (str): 카프카 브로커 Private 주소
         topic (str): 삭제할 토픽 이름
+        ignore_not_exist (bool): 토픽이 존재하지 않는 경우 에러 무시
 
     """
-    return ssh_cmd(node_ssh, f'kafka-topics.sh --delete --topic {topic}  --bootstrap-server {kafka_addr}:9092')
+    try:
+        ret = ssh_cmd(node_ssh, f'kafka-topics.sh --delete --topic {topic}  --bootstrap-server {kafka_addr}:9092')
+        print(f"delete_topic '{topic}' - success")
+        return ret
+    except Exception as e:
+        if 'does not exist' in str(e) and ignore_not_exist:
+            print(f"delete_topic '{topic}' - not exist")
+        else:
+            raise e
 
 
 def delete_all_topics(node_ssh, kafka_addr):
@@ -172,11 +186,12 @@ def delete_all_topics(node_ssh, kafka_addr):
 
 def reset_topic(node_ssh, kafka_addr, topic, partitions=12, replications=1):
     """특정 토픽 초기화."""
-    delete_topic(node_ssh, kafka_addr, topic)
+    print(f"reset_topic '{topic}'")
+    delete_topic(node_ssh, kafka_addr, topic, True)
     create_topic(node_ssh, kafka_addr, topic, partitions, replications)
 
 
-def count_topic_message(node_ssh, kafka_addr, topic, from_begin=True, timeout=10000):
+def count_topic_message(node_ssh, kafka_addr, topic, from_begin=True, timeout=10):
     """토픽의 메시지 수를 카운팅.
 
     - 카프카 커넥트가 제대로 동작하지 않는 경우
@@ -187,12 +202,13 @@ def count_topic_message(node_ssh, kafka_addr, topic, from_begin=True, timeout=10
         node_ssh: 명령을 실행할 노드로의 Paramiko SSH 객체
         kafka_addr (str): 카프카 브로커 Private 주소
         topic (str): 토픽명
-        from_begin (bool): 토픽의 첫 메시지부터
-        timeout (int): 컨슘 타임아웃
+        from_begin (bool): 토픽의 첫 메시지부터. 기본값 True
+        timeout (int): 컨슘 타임아웃 초. 기본값 10초
+            너무 작은 값이면 카운팅이 끝나기 전에 종료될 수 있다.
 
     """
-    print(f"count_topic_message: {topic}")
-    cmd = f'''kafka-console-consumer.sh --bootstrap-server {kafka_addr}:9092 --topic {topic} --timeout-ms {timeout}'''
+    print(f"count_topic_message: topic {topic} timeout {timeout}")
+    cmd = f'''kafka-console-consumer.sh --bootstrap-server {kafka_addr}:9092 --topic {topic} --timeout-ms {timeout * 1000}'''
     if from_begin:
         cmd += ' --from-beginning'
     cmd += ' | tail -n 10 | grep Processed'
@@ -206,10 +222,13 @@ def count_topic_message(node_ssh, kafka_addr, topic, from_begin=True, timeout=10
     return cnt
 
 
-def register_sconn(node_ssh, kafka_addr, db_type, db_addr,
+def register_socon(node_ssh, kafka_addr, db_type, db_addr,
         db_port, db_user, db_passwd, db_name, tables, topic_prefix,
         poll_interval=5000):
     """카프카 JDBC Source 커넥터 등록.
+
+    설정에 관한 설명 참조:
+    https://www.confluent.io/blog/kafka-connect-deep-dive-jdbc-source-connector/
 
     Args:
         node_ssh: 명령을 실행할 노드로의 Paramiko SSH 객체
@@ -232,8 +251,8 @@ def register_sconn(node_ssh, kafka_addr, db_type, db_addr,
         db_url = f"jdbc:mysql://{db_addr}:{db_port}/{db_name}"
 
     hash = binascii.hexlify(os.urandom(3)).decode('utf8')
-    conn_name = f'my-sconn-{hash}'
-    print(f"register_sconn {conn_name}")
+    conn_name = f'my-socon-{hash}'
+    print(f"register_socon {conn_name}: {db_url}")
 
     cmd = f'''
 curl -vs -X POST 'http://{kafka_addr}:8083/connectors' \
@@ -245,6 +264,10 @@ curl -vs -X POST 'http://{kafka_addr}:8083/connectors' \
         "connection.url":"{db_url}", \
         "connection.user":"{db_user}", \
         "connection.password":"{db_passwd}", \
+        "auto.create": false, \
+        "auto.evolve": false, \
+        "delete.enabled": true, \
+        "transaction.isolation.mode": "READ_UNCOMMITTED", \
         "mode": "incrementing", \
         "incrementing.column.name" : "id", \
         "table.whitelist": "{tables}", \
@@ -258,8 +281,8 @@ curl -vs -X POST 'http://{kafka_addr}:8083/connectors' \
     return json.loads(ret)
 
 
-def list_sconns(node_ssh, kafka_addr):
-    """등록된 카프카 커넥터 리스트.
+def list_socons(node_ssh, kafka_addr):
+    """등록된 카프카 Source 커넥터 리스트.
 
     Returns:
         list: 등록된 커넥터 이름 리스트
@@ -271,7 +294,7 @@ def list_sconns(node_ssh, kafka_addr):
     return conns
 
 
-def unregister_sconn(node_ssh, kafka_addr, conn_name):
+def unregister_socon(node_ssh, kafka_addr, conn_name):
     """카프카 JDBC Source 커넥터 해제.
 
     Args:
@@ -280,17 +303,16 @@ def unregister_sconn(node_ssh, kafka_addr, conn_name):
         conn_name (str): 커넥터 이름
 
     """
-    print(f"unregister_sconn {conn_name}")
+    print(f"unregister_socon {conn_name}")
     cmd = f'''curl -X DELETE http://{kafka_addr}:8083/connectors/{conn_name}'''
     ssh_cmd(node_ssh, cmd, ignore_err=True)
 
 
-def unregister_all_sconns(node_ssh, kafka_addr):
+def unregister_all_socons(node_ssh, kafka_addr):
     """등록된 모든 카프카 Source 커넥터 해제."""
-    print("unregister_all_sconns")
-    for sconn in list_sconns(node_ssh, kafka_addr):
-        unregister_sconn(node_ssh, kafka_addr, sconn)
-
+    print("unregister_all_socons")
+    for socon in list_socons(node_ssh, kafka_addr):
+        unregister_socon(node_ssh, kafka_addr, socon)
 
 
 @pytest.fixture
@@ -299,9 +321,10 @@ def topic(setup):
     cons_ip = setup['consumer_public_ip']['value']
     kafka_ip = setup['kafka_private_ip']['value']
     ssh = SSH(cons_ip)
-    claim_topic(ssh, kafka_ip, "my-topic-person")
+    reset_topic(ssh, kafka_ip, "my-topic-person")
     yield
-    delete_topic(ssh, kafka_ip, "my-topic-person")
+    # 토픽을 참조하는 프로듀서/컨슈머가 있을 때 삭제 안되는 이슈로 다음 시작시 지우게
+    # delete_topic(ssh, kafka_ip, "my-topic-person")
 
 
 def remote_insert_fake(ins_ssh, pid, epoch, batch):

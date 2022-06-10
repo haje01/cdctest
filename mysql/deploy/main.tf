@@ -381,6 +381,7 @@ connection {
       "rm kafka_2.13-3.0.0.tgz",
       "cd kafka_2.13-3.0.0",
       "sed -i \"s/#advertised.listeners=PLAINTEXT:\\/\\/your.host.name/advertised.listeners=PLAINTEXT:\\/\\/${self.private_ip}/\" config/server.properties",
+      # "echo 'delete.topic.enable=true' >> config/server.properties",
 
       "echo 'export PATH=$PATH:~/kafka_2.13-3.0.0/bin' >> ~/.myenv",
       "cat ~/.myenv >> ~/.bashrc",

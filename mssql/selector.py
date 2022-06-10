@@ -70,12 +70,13 @@ def select_fake(setup, db_name=parser.get_default('db_name'),
     equal = 0
     while True:
         i += 1
-        print(f"Selector {pid} row_prev: {row_prev}, row_cnt: {row_cnt} equal {equal}")
         # conn.commit()
         time.sleep(1)
         cursor.execute(sql)
         tot_read += len(cursor.fetchall())
         row_cnt = count_rows(cursor)
+        print(f"Selector {pid} row_prev: {row_prev}, row_cnt: {row_cnt} equal {equal}")
+
         if row_cnt == row_prev:
             equal += 1
         else:

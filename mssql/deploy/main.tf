@@ -422,13 +422,17 @@ connection {
 
       # Kafka 설치
       "sudo apt install -y openjdk-8-jdk",
-      "echo 'export JAVA_HOME=/usr/lib/jvm/java-8-openjdk-amd64' >> ~/.bashrc",
-      "echo 'export PATH=$PATH:$JAVA_HOME/bin' >> ~/.bashrc",
+      "echo 'export JAVA_HOME=/usr/lib/jvm/java-8-openjdk-amd64' >> ~/.myenv",
+      "echo 'export PATH=$PATH:$JAVA_HOME/bin' >> ~/.myenv",
       "wget -nv https://archive.apache.org/dist/kafka/3.0.0/kafka_2.13-3.0.0.tgz",
       "tar xzf kafka_2.13-3.0.0.tgz",
       "rm kafka_2.13-3.0.0.tgz",
       "cd kafka_2.13-3.0.0",
-      "echo 'export PATH=$PATH:~/kafka_2.13-3.0.0/bin' >> ~/.bashrc",
+      "sed -i \"s/#advertised.listeners=PLAINTEXT:\\/\\/your.host.name/advertised.listeners=PLAINTEXT:\\/\\/${self.private_ip}/\" config/server.properties",
+      # "echo 'delete.topic.enable=true' >> config/server.properties",
+
+      "echo 'export PATH=$PATH:~/kafka_2.13-3.0.0/bin' >> ~/.myenv",
+      "cat ~/.myenv >> ~/.bashrc",
 
       # Kafka JDBC Connector 설치
       "mkdir -p connectors",
@@ -439,7 +443,7 @@ connection {
       "sed -i \"s/#plugin.path=/plugin.path=\\/home\\/ubuntu\\/kafka_2.13-3.0.0\\/connectors/\" ../config/connect-distributed.properties",
       "cd ..",
 
-      # MSSQL JDBC Driver 설치 (confluentinc-kafka-connect-jdbc 에 이미 포함?!)
+      # MSSQL JDBC Driver 설치 는 confluentinc-kafka-connect-jdbc 에 이미 포함되어 있기에 생략
       # "cp /tmp/${basename(var.mssql_jdbc_driver)} ~/kafka_2.13-3.0.0/connectors/confluentinc-kafka-connect-jdbc-10.4.1/lib",
 
       # 실행

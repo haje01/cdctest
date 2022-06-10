@@ -43,4 +43,5 @@ def _insert_fake(conn, cursor, epoch, batch, pid, db_type):
             rows.append(row)
         cursor.executemany(stmt, rows)
         conn.commit()
+        # time.sleep(0.8)
 
