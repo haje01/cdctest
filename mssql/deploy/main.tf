@@ -228,8 +228,8 @@ resource "aws_instance" "inserter" {
       "cloud-init status --wait",
       "sudo apt update",
       "sudo apt install -y python3-pip",
-      "git clone --quiet https://github.com/haje01/cdctest.git",
-      "cd cdctest && pip3 install -q -r requirements.txt"
+      "git clone --quiet https://github.com/haje01/kfktest.git",
+      "cd kfktest && pip3 install -q -r requirements.txt"
     ]
   }
 
@@ -294,8 +294,8 @@ resource "aws_instance" "selector" {
       "sudo add-apt-repository -y universe",
       "sudo apt update",
       "sudo apt install -y python3-pip",
-      "git clone --quiet https://github.com/haje01/cdctest.git",
-      "cd cdctest && pip3 install -q -r requirements.txt"
+      "git clone --quiet https://github.com/haje01/kfktest.git",
+      "cd kfktest && pip3 install -q -r requirements.txt"
     ]
   }
 
@@ -550,8 +550,8 @@ resource "aws_instance" "consumer" {
 
       # 코드 설치
       "sudo apt install -y python3-pip",
-      "git clone --quiet https://github.com/haje01/cdctest.git",
-      "cd cdctest && pip3 install -q -r requirements.txt"
+      "git clone --quiet https://github.com/haje01/kfktest.git",
+      "cd kfktest && pip3 install -q -r requirements.txt"
     ]
   }
 

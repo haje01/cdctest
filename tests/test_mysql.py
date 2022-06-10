@@ -6,9 +6,9 @@ import pdb
 import pytest
 from mysql.connector import connect
 
-from common import (SSH, SSH_PKEY, register_socon,
-    unregister_socon, list_socons, unregister_all_socons, count_topic_message,
-    topic, ssh_cmd, local_cmd, scp_to_remote
+from common import (SSH, register_socon, unregister_socon, list_socons,
+    unregister_all_socons, count_topic_message, topic, ssh_cmd, local_cmd,
+    scp_to_remote
 )
 
 SETUP_PATH = '../mysql/temp/setup.json'
@@ -30,8 +30,7 @@ def cp_setup(setup):
     targets = ['consumer_public_ip', 'inserter_public_ip', 'selector_public_ip']
     for target in targets:
         ip = setup[target]['value']
-        pkey = SSH_PKEY
-        scp_to_remote('../mysql/temp/setup.json', ip, '~/cdctest/mysql/temp', pkey)
+        scp_to_remote('../mysql/temp/setup.json', ip, '~/cdctest/mysql/temp')
     yield setup
 
 

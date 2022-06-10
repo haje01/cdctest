@@ -2,9 +2,12 @@
 
 Kafka 의 각종 기능을 테스트
 
-## Kafka JDBC Connector 테스트
+필요한 설정:
+- 환경 변수 `KFKTEST_SSH_PKEY` 에 AWS 에서 이용할 Private Key 경로를 지정
 
-- DB에서 Kafka 로 로그성 데이터 이동 테스트 
+## Kafka JDBC Source Connector 테스트
+
+- DB 에서 Kafka 로 로그성 데이터 가져오기
 - 대상 DBMS 는 MySQL 과 MSSQL
 
 ### 인프라 구축

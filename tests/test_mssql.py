@@ -7,9 +7,9 @@ from threading import local
 import pytest
 import pymssql
 
-from common import (SSH, SSH_PKEY, register_socon, unregister_socon,
-    list_socons, unregister_all_socons, count_topic_message, topic, ssh_cmd,
-    local_cmd, scp_to_remote
+from common import (SSH, register_socon, unregister_socon, list_socons,
+    unregister_all_socons, count_topic_message, topic, ssh_cmd, local_cmd,
+    scp_to_remote
 )
 
 SETUP_PATH = '../mssql/temp/setup.json'
@@ -31,8 +31,7 @@ def cp_setup(setup):
     targets = ['consumer_public_ip', 'inserter_public_ip', 'selector_public_ip']
     for target in targets:
         ip = setup[target]['value']
-        pkey = SSH_PKEY
-        scp_to_remote('../mssql/temp/setup.json', ip, '~/cdctest/mssql/temp', pkey)
+        scp_to_remote('../mssql/temp/setup.json', ip, '~/cdctest/mssql/temp')
     yield setup
 
 
