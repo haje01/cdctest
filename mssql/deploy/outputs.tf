@@ -16,7 +16,7 @@ output "mssql_passwd" {
 }
 
 output "mssql_admin_passwd" {
-  value = "${rsadecrypt(aws_instance.mssql.password_data,file(var.private_key_path))}"
+  value = "${rsadecrypt(aws_instance.mssql.password_data,file(env.KFKTEST_SSH_PKEY))}"
   sensitive = true
 }
 
@@ -55,8 +55,4 @@ output "db_user" {
 output "db_passwd" {
   sensitive = true
   value = random_string.db_passwd
-}
-
-output "private_key_path" {
-  value = var.private_key_path
 }

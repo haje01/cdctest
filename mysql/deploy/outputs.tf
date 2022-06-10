@@ -42,7 +42,3 @@ output "db_passwd" {
   sensitive = true
   value = random_string.db_passwd
 }
-
-output "private_key_path" {
-  value = var.private_key_path
-}

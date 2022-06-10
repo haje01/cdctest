@@ -14,7 +14,6 @@ variable "kafka_instance_type" {
 }
 variable "work_cidr" {}
 variable "key_pair_name" {}
-variable "private_key_path" {}
 variable "db_user" {}
 variable "db_port" {}
 variable "kafka_url" {}

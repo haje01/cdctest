@@ -14,7 +14,7 @@ import paramiko
 import pytest
 from kafka import KafkaConsumer
 
-SSH_PKEY = os.environ['CDCTEST_SSH_PKEY']
+SSH_PKEY = os.environ['KFKTEST_SSH_PKEY']
 # 내장 토픽 이름
 INTERNAL_TOPICS = ['__consumer_offsets', 'connect-configs', 'connect-offsets', 'connect-status']
 
@@ -67,14 +67,13 @@ def local_cmd(cmd):
     return subprocess.run(cmd, shell=True)
 
 
-def scp_to_remote(src, dst_addr, dst_dir, private_key):
+def scp_to_remote(src, dst_addr, dst_dir):
     """로컬 파일을 원격지로 scp.
 
     Args:
         src (str): 원본 파일 경로
         dst_addr (str): 대상 노드 주소
         dst_dir (str): 대상 디렉토리
-        private_key (str): 프라이빗 키 경로
 
     """
     print(f'scp_to_remote: {src} to {dst_addr}:{dst_dir}')
@@ -86,7 +85,7 @@ def scp_to_remote(src, dst_addr, dst_dir, private_key):
     # scp
     src = os.path.abspath(src)
     cmd = f'scp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null '\
-        '-i {private_key} {src} ubuntu@{dst_addr}:{dst_dir}'
+        '-i {SSH_PKEY} {src} ubuntu@{dst_addr}:{dst_dir}'
     return local_cmd(cmd)
 
 
@@ -329,5 +328,5 @@ def topic(setup):
 
 def remote_insert_fake(ins_ssh, pid, epoch, batch):
     """원격 인서트 노드에서 가짜 데이터 insert"""
-    cmd = f"cd cdctest/mssql && python3 inserter.py temp/setup.json {pid} {epoch} {batch}"
+    cmd = f"cd kfktest/mssql && python3 inserter.py temp/setup.json {pid} {epoch} {batch}"
     return ssh_cmd(ins_ssh, cmd, False)

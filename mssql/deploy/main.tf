@@ -2,6 +2,10 @@ provider "aws" {
   region = var.region
 }
 
+variable PKEY {
+  type = string
+}
+
 resource "random_string" "db_passwd" {
   length = 16
   special = true
@@ -215,7 +219,7 @@ resource "aws_instance" "inserter" {
     type = "ssh"
     host = self.public_ip
     user = "ubuntu"
-    private_key = file(var.private_key_path)
+    private_key = file(var.PKEY)
     agent = false
   }
 
@@ -280,7 +284,7 @@ resource "aws_instance" "selector" {
     type = "ssh"
     host = self.public_ip
     user = "ubuntu"
-    private_key = file(var.private_key_path)
+    private_key = file(var.PKEY)
     agent = false
   }
 
@@ -386,7 +390,7 @@ connection {
     type = "ssh"
     host = self.public_ip
     user = "ubuntu"
-    private_key = file(var.private_key_path)
+    private_key = file(var.PKEY)
     agent = false
   }
 
@@ -522,7 +526,7 @@ resource "aws_instance" "consumer" {
     type = "ssh"
     host = self.public_ip
     user = "ubuntu"
-    private_key = file(var.private_key_path)
+    private_key = file(var.PKEY)
     agent = false
   }
 

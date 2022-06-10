@@ -11,7 +11,7 @@ rule setup:
     shell:
         """
         cd deploy
-        terraform apply -var-file=test.tfvars -auto-approve
+        TF_VAR_PKEY=$KFKTEST_SSH_PKEY terraform apply -var-file=test.tfvars -auto-approve
         terraform output -json > ../{output}
         """
 
@@ -29,17 +29,15 @@ rule copy_setup:
         """
         # Inserter
         ip=$(cat temp/setup.json | jq -r .inserter_public_ip.value)
-        pkey=$(cat temp/setup.json | jq -r .private_key_path.value)
+        pkey=$KFKTEST_SSH_PKEY
         ssh -o "StrictHostKeyChecking=no" ubuntu@$ip -i $pkey "cd cdctest/mysql && mkdir -p temp"
         scp -i $pkey {input} ubuntu@$ip:cdctest/mysql/{input}
         # Selector
         ip=$(cat temp/setup.json | jq -r .selector_public_ip.value)
-        pkey=$(cat temp/setup.json | jq -r .private_key_path.value)
         ssh -o "StrictHostKeyChecking=no" ubuntu@$ip -i $pkey "cd cdctest/mysql && mkdir -p temp"
         scp -i $pkey {input} ubuntu@$ip:cdctest/mysql/{input}
         # Consumer
         ip=$(cat temp/setup.json | jq -r .selector_public_ip.value)
-        pkey=$(cat temp/setup.json | jq -r .private_key_path.value)
         ssh -o "StrictHostKeyChecking=no" ubuntu@$ip -i $pkey "cd cdctest/mysql && mkdir -p temp"
         scp -i $pkey {input} ubuntu@$ip:cdctest/mysql/{input}
         touch {output}
@@ -204,6 +202,6 @@ rule destroy:
         rm -fr temp
         mkdir temp
         cd deploy
-        terraform destroy -var-file=test.tfvars -auto-approve
+        TF_VAR_PKEY=$KFKTEST_SSH_PKEY terraform destroy -var-file=test.tfvars -auto-approve
         touch ../{output}
         """
