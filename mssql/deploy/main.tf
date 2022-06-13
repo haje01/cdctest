@@ -215,7 +215,7 @@ resource "aws_instance" "inserter" {
     type = "ssh"
     host = self.public_ip
     user = "ubuntu"
-    private_key = file(var.PKEY)
+    private_key = file(var.PRIVATE_KEY)
     agent = false
   }
 
@@ -280,7 +280,7 @@ resource "aws_instance" "selector" {
     type = "ssh"
     host = self.public_ip
     user = "ubuntu"
-    private_key = file(var.PKEY)
+    private_key = file(var.PRIVATE_KEY)
     agent = false
   }
 
@@ -386,7 +386,7 @@ connection {
     type = "ssh"
     host = self.public_ip
     user = "ubuntu"
-    private_key = file(var.PKEY)
+    private_key = file(var.PRIVATE_KEY)
     agent = false
   }
 
@@ -522,7 +522,7 @@ resource "aws_instance" "consumer" {
     type = "ssh"
     host = self.public_ip
     user = "ubuntu"
-    private_key = file(var.PKEY)
+    private_key = file(var.PRIVATE_KEY)
     agent = false
   }
 
@@ -545,6 +545,7 @@ resource "aws_instance" "consumer" {
       "cat ~/.myenv >> ~/.bashrc",
 
       # 코드 설치
+      "cd",
       "sudo apt install -y python3-pip",
       "git clone --quiet https://github.com/haje01/kfktest.git",
       "cd kfktest && pip3 install -q -r requirements.txt"

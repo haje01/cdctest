@@ -50,7 +50,7 @@ def exec_many(cursor, stmt):
 def dbconcur(setup):
     db_addr = setup['mssql_public_ip']['value']
     db_user = setup['db_user']['value']
-    db_passwd = setup['db_passwd']['value']
+    db_passwd = setup['db_passwd']['value']['result']
     conn = pymssql.connect(host=db_addr, user=db_user, password=db_passwd, database="test")
     cursor = conn.cursor()
     yield conn, cursor
@@ -97,7 +97,7 @@ def socon(setup, table, topic):
     kafka_ip = setup['kafka_private_ip']['value']
     db_addr = setup['mssql_private_ip']['value']
     db_user = setup['db_user']['value']
-    db_passwd = setup['db_passwd']['value']
+    db_passwd = setup['db_passwd']['value']['result']
 
     ssh = SSH(cons_ip)
 
@@ -120,7 +120,7 @@ def test_socon(setup):
     kafka_ip = setup['kafka_private_ip']['value']
     db_addr = setup['mssql_public_ip']['value']
     db_user = setup['db_user']['value']
-    db_passwd = setup['db_passwd']['value']
+    db_passwd = setup['db_passwd']['value']['result']
 
     ssh = SSH(cons_ip)
 
@@ -289,7 +289,7 @@ def test_ct_remote_basic(cp_setup, table, socon):
 #     print("fixture - dbconcur")
 #     db_addr = setup['sqlserver_public_ip']['value']
 #     db_user = setup['db_user']['value']
-#     db_passwd = setup['db_passwd']['value']
+#     db_passwd = setup['db_passwd']['value']['result']
 #     conn = pymssql.connect(db_addr, db_user, db_passwd, 'test')
 #     cursor = conn.cursor(as_dict=True)
 #     yield conn, cursor
@@ -304,7 +304,7 @@ def test_ct_remote_basic(cp_setup, table, socon):
 #     kafka_ip = setup['kafka_private_ip']['value']
 #     db_addr = setup['sqlserver_private_ip']['value']
 #     db_user = setup['db_user']['value']
-#     db_passwd = setup['db_passwd']['value']
+#     db_passwd = setup['db_passwd']['value']['result']
 
 #     ssh = SSH(consumer_ip)
 
@@ -323,7 +323,7 @@ def test_ct_remote_basic(cp_setup, table, socon):
 #     kafka_ip = setup['kafka_private_ip']['value']
 #     db_addr = setup['sqlserver_public_ip']['value']
 #     db_user = setup['db_user']['value']
-#     db_passwd = setup['db_passwd']['value']
+#     db_passwd = setup['db_passwd']['value']['result']
 
 #     ssh = SSH(consumer_ip)
 

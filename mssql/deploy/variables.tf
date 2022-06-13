@@ -2,7 +2,6 @@ variable region {
   default = "ap-northeast-2"
 }
 variable "name" {}
-variable PKEY {}
 variable "ubuntu_ami" {}
 variable "mssql_ami" {}
 variable "mssql_instance_type" {
@@ -11,6 +10,7 @@ variable "mssql_instance_type" {
 variable "insel_instance_type" {
   default = "t3.medium"
 }
+variable "PRIVATE_KEY" {}
 variable "kafka_instance_type" {
   default = "t3.medium"
 }

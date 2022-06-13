@@ -16,7 +16,7 @@ output "mssql_passwd" {
 }
 
 output "mssql_admin_passwd" {
-  value = "${rsadecrypt(aws_instance.mssql.password_data,file(env.KFKTEST_SSH_PKEY))}"
+  value = "${rsadecrypt(aws_instance.mssql.password_data,file(var.PRIVATE_KEY))}"
   sensitive = true
 }
 

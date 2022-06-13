@@ -11,12 +11,16 @@ rule setup:
     shell:
         """
         cd deploy
-        TF_VAR_PKEY=$KFKTEST_SSH_PKEY terraform apply -var-file=test.tfvars -auto-approve
+        TF_VAR_PRIVATE_KEY=$KFKTEST_SSH_PKEY terraform apply -var-file=test.tfvars -auto-approve
         terraform output -json > ../{output}
         """
 
 rule copy_setup:
-    """설치 정보 복사."""
+    """설치 정보 복사.
+
+    로컬에서 수행한 설치 결과 파일을 insert / select 하는 노드로 복사.
+
+    """
     input:
         "temp/setup.json"
     output:

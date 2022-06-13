@@ -85,7 +85,7 @@ def scp_to_remote(src, dst_addr, dst_dir):
     # scp
     src = os.path.abspath(src)
     cmd = f'scp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null '\
-        '-i {SSH_PKEY} {src} ubuntu@{dst_addr}:{dst_dir}'
+        f'-i {SSH_PKEY} {src} ubuntu@{dst_addr}:{dst_dir}'
     return local_cmd(cmd)
 
 

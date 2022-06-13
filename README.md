@@ -1,6 +1,6 @@
 # kfktest
 
-Kafka 의 각종 기능을 테스트
+다양한 상황에서 Kafka 의 기능을 테스트
 
 필요한 설정:
 - 환경 변수 `KFKTEST_SSH_PKEY` 에 AWS 에서 이용할 Private Key 경로를 지정
