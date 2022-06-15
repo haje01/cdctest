@@ -10,7 +10,7 @@ variable "mssql_instance_type" {
 variable "insel_instance_type" {
   default = "t3.medium"
 }
-variable "PRIVATE_KEY" {}
+variable "private_key" {}
 variable "kafka_instance_type" {
   default = "t3.medium"
 }
@@ -21,7 +21,7 @@ variable "db_user" {}
 variable "db_port" {}
 variable "kafka_url" {}
 variable "kafka_jdbc_connector" {}
-variable "mssql_jdbc_driver" {}
+variable "mysql_jdbc_driver" {}
 variable "tags" {
     type = map(string)
 }

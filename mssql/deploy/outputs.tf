@@ -16,36 +16,36 @@ output "mssql_passwd" {
 }
 
 output "mssql_admin_passwd" {
-  value = "${rsadecrypt(aws_instance.mssql.password_data,file(var.PRIVATE_KEY))}"
+  value = "${rsadecrypt(aws_instance.mssql.password_data,file(var.private_key))}"
   sensitive = true
 }
 
 output "inserter_public_ip" {
-  value = aws_instance.inserter.public_ip
+  value = module.inserter.public_ip
 }
 
 output "inserter_private_ip" {
-  value = aws_instance.inserter.private_ip
+  value = module.inserter.private_ip
 }
 
 output "selector_public_ip" {
-  value = aws_instance.selector.public_ip
+  value = module.selector.public_ip
 }
 
 output "selector_private_ip" {
-  value = aws_instance.selector.private_ip
+  value = module.selector.private_ip
 }
 
 output "kafka_public_ip" {
-  value = aws_instance.kafka.public_ip
+  value = module.kafka.public_ip
 }
 
 output "kafka_private_ip" {
-  value = aws_instance.kafka.private_ip
+  value = module.kafka.private_ip
 }
 
 output "consumer_public_ip" {
-  value = aws_instance.consumer.public_ip
+  value = module.consumer.public_ip
 }
 
 output "db_user" {

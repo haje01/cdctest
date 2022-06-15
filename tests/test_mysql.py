@@ -1,7 +1,6 @@
 import os
 import json
 from multiprocessing import Process
-import pdb
 
 import pytest
 from mysql.connector import connect
@@ -181,7 +180,7 @@ def test_ct_local_basic(setup, table, socon):
         p.start()
 
     # 카프카 토픽 확인 (timeout 되기전에 다 받아야 함)
-    cnt = count_topic_message(ssh, kafka_ip, 'my-topic-person', timeout=20)
+    cnt = count_topic_message(ssh, kafka_ip, 'my-topic-person', timeout=25)
     assert 10000 * NUM_INSEL_PROCS == cnt
 
     for p in ins_pros:
@@ -240,7 +239,7 @@ def test_ct_remote_basic(cp_setup, table, socon):
         p.start()
 
     # 카프카 토픽 확인 (timeout 되기전에 다 받아야 함)
-    cnt = count_topic_message(ssh, kafka_ip, 'my-topic-person', timeout=20)
+    cnt = count_topic_message(ssh, kafka_ip, 'my-topic-person', timeout=25)
     assert 10000 * NUM_INSEL_PROCS == cnt
 
     for p in ins_pros:
