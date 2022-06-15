@@ -68,7 +68,7 @@ sudo apt install -y python3-pip unzip
 
 # 코드 설치
 git clone --quiet https://github.com/haje01/kfktest.git
-cd kfktest && pip3 install -q -r requirements.txt
+cd kfktest && pip3 install -q -r requirements.txt && pip3 install -e .
 cd
 
 # Kafka 설치

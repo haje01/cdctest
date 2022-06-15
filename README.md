@@ -7,7 +7,7 @@
 - pytest 로 시나리오별 테스트 수행
 
 ## 사전 작업
-- 내려 받을 Kafka 의 URL
+- 내려 받을 Kafka 의 URL 확보
   - 예: `https://archive.apache.org/dist/kafka/3.0.0/kafka_2.13-3.0.0.tgz`
 - 환경 변수 `KFKTEST_SSH_PKEY` 에 AWS 에서 이용할 Private Key 경로를 지정
 - `refers` 디렉토리에 아래의 두 파일 (가능한 최신 버전) 이 있어야 한다
@@ -25,7 +25,7 @@
   insel_instance_type = "t3.small"
   key_pair_name = "AWS-KEY-PAIR-NAME"
   work_cidr = [
-      "14.32.4.111/32"      # my pc
+      "11.22.33.44/32"      # my pc ip
       ]
   db_user = "DB-USER"
   db_port = "DB-SERVER-PORT"
@@ -40,7 +40,7 @@
 
 ## Kafka JDBC Source Connector 테스트
 
-- DB 에서 Kafka 로 로그성 데이터 가져오기
+- Kafka JDBC Source Connector 를 이용해 CT (Change Tracking) 방식으로 DB 에서 Kafka 로 로그성 데이터 가져오기
 - 대상 DBMS 는 MySQL 과 MSSQL
 
 ### 인프라 구축

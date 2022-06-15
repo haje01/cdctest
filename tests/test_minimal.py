@@ -1,20 +1,18 @@
 import os
-import sys
 import json
 from multiprocessing import Process
-from threading import local
 
 import pytest
-import pymssql
+from mysql.connector import connect
 
-from kfktest.util import (SSH, register_socon, unregister_socon, list_socons,
+from common import (SSH, register_socon, unregister_socon, list_socons,
     unregister_all_socons, count_topic_message, topic, ssh_cmd, local_cmd,
     scp_to_remote
 )
 
-SETUP_PATH = '../mssql/temp/setup.json'
+SETUP_PATH = '../mysql/temp/setup.json'
 NUM_INSEL_PROCS = 5
-DB_PORT = 1433
+DB_PORT = 3306
 
 
 @pytest.fixture(scope="session")
@@ -31,7 +29,7 @@ def cp_setup(setup):
     targets = ['consumer_public_ip', 'inserter_public_ip', 'selector_public_ip']
     for target in targets:
         ip = setup[target]['value']
-        scp_to_remote('../mssql/temp/setup.json', ip, '~/kfktest/mssql/temp')
+        scp_to_remote('../mysql/temp/setup.json', ip, '~/kfktest/mysql/temp')
     yield setup
 
 
@@ -48,10 +46,10 @@ def exec_many(cursor, stmt):
 
 @pytest.fixture
 def dbconcur(setup):
-    db_addr = setup['mssql_public_ip']['value']
+    db_addr = setup['mysql_public_ip']['value']
     db_user = setup['db_user']['value']
     db_passwd = setup['db_passwd']['value']['result']
-    conn = pymssql.connect(host=db_addr, user=db_user, password=db_passwd, database="test")
+    conn = connect(host=db_addr, user=db_user, password=db_passwd, database="test")
     cursor = conn.cursor()
     yield conn, cursor
     conn.close()
@@ -60,33 +58,27 @@ def dbconcur(setup):
 @pytest.fixture
 def table(dbconcur):
     """테스트용 테이블 초기화."""
-    print("fixture - table")
     conn, cursor = dbconcur
 
     stmt = '''
-    IF OBJECT_ID('person', 'U') IS NOT NULL
-        DROP TABLE person
-    CREATE TABLE person (
-        id int IDENTITY(1,1) PRIMARY KEY,
-        pid INT NOT NULL,
-        sid INT NOT NULL,
-        name VARCHAR(40),
-        address VARCHAR(200),
-        ip VARCHAR(20),
-        birth DATE,
-        company VARCHAR(40),
-        phone VARCHAR(40),
-    )
+DROP TABLE IF EXISTS person;
+CREATE TABLE person (
+    id  INT NOT NULL AUTO_INCREMENT,
+    pid INT DEFAULT -1 NOT NULL,
+    sid INT DEFAULT -1 NOT NULL,
+    name VARCHAR(40),
+    address VARCHAR(200),
+    ip VARCHAR(20),
+    birth DATE,
+    company VARCHAR(40),
+    phone VARCHAR(40),
+    PRIMARY KEY(id)
+)
     '''
-    cursor.execute(stmt)
-    conn.commit()
-    print("  yield")
+    exec_many(cursor, stmt)
     yield
     print("Delete table 'person'")
-    cursor.execute('''
-        IF OBJECT_ID('person', 'U') IS NOT NULL
-        DROP TABLE person
-    ''')
+    cursor.execute('DROP TABLE IF EXISTS person;')
     conn.commit()
 
 
@@ -95,14 +87,14 @@ def socon(setup, table, topic):
     """테스트용 카프카 커넥터 초기화 (테이블과 토픽 먼저 생성)."""
     cons_ip = setup['consumer_public_ip']['value']
     kafka_ip = setup['kafka_private_ip']['value']
-    db_addr = setup['mssql_private_ip']['value']
+    db_addr = setup['mysql_private_ip']['value']
     db_user = setup['db_user']['value']
     db_passwd = setup['db_passwd']['value']['result']
 
     ssh = SSH(cons_ip)
 
     unregister_all_socons(ssh, kafka_ip)
-    ret = register_socon(ssh, kafka_ip, 'mssql',
+    ret = register_socon(ssh, kafka_ip, 'mysql',
         db_addr, DB_PORT, db_user, db_passwd, "test", "person",
         "my-topic-")
     try:
@@ -118,7 +110,7 @@ def test_socon(setup):
     """카프카 JDBC Source 커넥트 테스트."""
     cons_ip = setup['consumer_public_ip']['value']
     kafka_ip = setup['kafka_private_ip']['value']
-    db_addr = setup['mssql_public_ip']['value']
+    db_addr = setup['mysql_public_ip']['value']
     db_user = setup['db_user']['value']
     db_passwd = setup['db_passwd']['value']['result']
 
@@ -132,7 +124,7 @@ def test_socon(setup):
     assert ret == []
 
     # 커넥터 등록
-    ret = register_socon(ssh, kafka_ip, 'mssql', db_addr, DB_PORT,
+    ret = register_socon(ssh, kafka_ip, 'mysql', db_addr, DB_PORT,
         db_user, db_passwd, "test", "person", "my-topic-")
     conn_name = ret['name']
     cfg = ret['config']
@@ -145,11 +137,10 @@ def test_socon(setup):
     ret = list_socons(ssh, kafka_ip)
     assert ret == []
 
-
 def _local_select_proc(setup, pid):
     """로컬에서 가짜 데이터 셀렉트."""
     print(f"Select process {pid} start")
-    cmd = f"cd ../mssql && python selector.py temp/setup.json -p {pid} -d"
+    cmd = f"cd ../mysql && python selector.py temp/setup.json -p {pid} -d"
     local_cmd(cmd)
     print(f"Select process {pid} done")
 
@@ -157,13 +148,17 @@ def _local_select_proc(setup, pid):
 def _local_insert_proc(setup, pid, epoch, batch):
     """로컬에서 가짜 데이터 인서트."""
     print(f"Insert process start: {pid}")
-    cmd = f"cd ../mssql && python inserter.py temp/setup.json -p {pid} -e {epoch} -b {batch} -d"
+    cmd = f"cd ../mysql && python inserter.py temp/setup.json -p {pid} -e {epoch} -b {batch} -d"
     local_cmd(cmd)
     print(f"Insert process done: {pid}")
 
 
 def test_ct_local_basic(setup, table, socon):
-    """로컬 insert / select 로 기본적인 Change Tracking 테스트."""
+    """로컬 insert / select 로 기본적인 Change Tracking 테스트.
+
+    - 테스트 시작전 이전 토픽을 참고하는 것이 없어야 함. (delete_topic 에러 발생)
+
+    """
     cons_ip = setup['consumer_public_ip']['value']
     kafka_ip = setup['kafka_private_ip']['value']
     ssh = SSH(cons_ip)
@@ -184,8 +179,8 @@ def test_ct_local_basic(setup, table, socon):
         ins_pros.append(p)
         p.start()
 
-    # 카프카 토픽 확인 (timeout 되기 전에 다 받아야 함)
-    cnt = count_topic_message(ssh, kafka_ip, 'my-topic-person', timeout=10)
+    # 카프카 토픽 확인 (timeout 되기전에 다 받아야 함)
+    cnt = count_topic_message(ssh, kafka_ip, 'my-topic-person', timeout=25)
     assert 10000 * NUM_INSEL_PROCS == cnt
 
     for p in ins_pros:
@@ -202,7 +197,7 @@ def _remote_select_proc(setup, pid):
     print(f"Select process start: {pid}")
     sel_ip = setup['selector_public_ip']['value']
     ssh = SSH(sel_ip)
-    cmd = f"cd kfktest/mssql && python3 selector.py temp/setup.json -p {pid}"
+    cmd = f"cd kfktest/mysql && python3 selector.py temp/setup.json -p {pid}"
     ret = ssh_cmd(ssh, cmd, False)
     print(ret)
     print(f"Select process done: {pid}")
@@ -214,7 +209,7 @@ def _remote_insert_proc(setup, pid, epoch, batch):
     print(f"Insert process start: {pid}")
     ins_ip = setup['inserter_public_ip']['value']
     ssh = SSH(ins_ip)
-    cmd = f"cd kfktest/mssql && python3 inserter.py temp/setup.json -p {pid} -e {epoch} -b {batch}"
+    cmd = f"cd kfktest/mysql && python3 inserter.py temp/setup.json -p {pid} -e {epoch} -b {batch}"
     ret = ssh_cmd(ssh, cmd, False)
     print(ret)
     print(f"Insert process done: {pid}")
@@ -244,7 +239,7 @@ def test_ct_remote_basic(cp_setup, table, socon):
         p.start()
 
     # 카프카 토픽 확인 (timeout 되기전에 다 받아야 함)
-    cnt = count_topic_message(ssh, kafka_ip, 'my-topic-person', timeout=10)
+    cnt = count_topic_message(ssh, kafka_ip, 'my-topic-person', timeout=25)
     assert 10000 * NUM_INSEL_PROCS == cnt
 
     for p in ins_pros:
@@ -254,118 +249,3 @@ def test_ct_remote_basic(cp_setup, table, socon):
     for p in sel_pros:
         p.join()
     print("All select processes are done.")
-
-
-
-# import os
-# import pdb
-# import sys
-# import json
-
-# import pytest
-# import pymssql
-
-# from common import (SSH, register_socon, unregister_socon, list_socons,
-#     unregister_all_socons, count_topic_message, topic, remote_insert_fake
-# )
-
-# sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
-# from util import mssql_insert_fake
-
-# SETUP_PATH = '../mssql/temp/setup.json'
-
-
-# @pytest.fixture(scope="session")
-# def setup():
-#     """인프라 설치 정보."""
-#     print("fixture - setup")
-#     assert os.path.isfile(SETUP_PATH)
-#     with open(SETUP_PATH, 'rt') as f:
-#         return json.loads(f.read())
-
-
-# @pytest.fixture
-# def dbconcur(setup):
-#     print("fixture - dbconcur")
-#     db_addr = setup['sqlserver_public_ip']['value']
-#     db_user = setup['db_user']['value']
-#     db_passwd = setup['db_passwd']['value']['result']
-#     conn = pymssql.connect(db_addr, db_user, db_passwd, 'test')
-#     cursor = conn.cursor(as_dict=True)
-#     yield conn, cursor
-#     conn.close()
-
-
-
-# @pytest.fixture
-# def socon(setup, table, topic):
-#     """테스트용 카프카 커넥터 초기화 (테이블과 토픽 먼저 생성)."""
-#     consumer_ip = setup['consumer_public_ip']['value']
-#     kafka_ip = setup['kafka_private_ip']['value']
-#     db_addr = setup['sqlserver_private_ip']['value']
-#     db_user = setup['db_user']['value']
-#     db_passwd = setup['db_passwd']['value']['result']
-
-#     ssh = SSH(consumer_ip)
-
-#     unregister_all_socons(ssh, kafka_ip)
-#     ret = register_socon(ssh, kafka_ip, 'sqlserver',
-#         db_addr, 1433, db_user, db_passwd, "test", "person",
-#         "my-topic-")
-#     conn_name = ret['name']
-#     yield
-#     unregister_socon(ssh, kafka_ip, conn_name)
-
-
-# def test_socon(setup):
-#     """카프카 JDBC Source 커넥트 테스트."""
-#     consumer_ip = setup['consumer_public_ip']['value']
-#     kafka_ip = setup['kafka_private_ip']['value']
-#     db_addr = setup['sqlserver_public_ip']['value']
-#     db_user = setup['db_user']['value']
-#     db_passwd = setup['db_passwd']['value']['result']
-
-#     ssh = SSH(consumer_ip)
-
-#     # 기존 등록된 소스 커넥터 모두 제거
-#     unregister_all_socons(ssh, kafka_ip)
-
-#     # 현재 등록된 커넥터
-#     ret = list_socons(ssh, kafka_ip)
-#     assert ret == []
-
-#     # 커넥터 등록
-#     ret = register_socon(ssh, kafka_ip, 'sqlserver', db_addr, 1433,
-#         db_user, db_passwd, "test", "person", "my-topic-")
-#     conn_name = ret['name']
-#     cfg = ret['config']
-#     assert cfg['name'].startswith('my-socon')
-#     ret = list_socons(ssh, kafka_ip)
-#     assert ret == [conn_name]
-
-#     # 커넥터 해제
-#     unregister_socon(ssh, kafka_ip, conn_name)
-#     ret = list_socons(ssh, kafka_ip)
-#     assert ret == []
-
-
-# def test_ct_basic(setup, socon):
-#     """기본적인 Change Tracking 테스트."""
-#     ins_ip = setup['inserter_public_ip']['value']
-#     con_ip = setup['consumer_public_ip']['value']
-#     kafka_ip = setup['kafka_private_ip']['value']
-#     ins_ssh = SSH(ins_ip)
-#     con_ssh = SSH(con_ip)
-
-#     # 인서트 노드에서 DB 테이블에 100 x 100 행 insert
-#     remote_insert_fake(ins_ssh, 1, 100, 100)
-
-#     # 카프카 토픽 확인
-#     cnt = count_topic_message(con_ssh, kafka_ip, 'my-topic-person')
-#     assert 10000 == cnt
-
-#     # 인서트 노드에서 DB 테이블에 100 x 100 행 insert
-#     remote_insert_fake(ins_ssh, 1, 100, 100)
-
-#     cnt = count_topic_message(con_ssh, kafka_ip, 'my-topic-person')
-#     assert 20000 == cnt

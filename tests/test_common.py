@@ -1,7 +1,10 @@
 import pdb
 
 from requests import delete
-from common import SSH, delete_all_topics, setup, list_topics, create_topic, delete_topic, describe_topic
+from kfktest.util import (
+    SSH, delete_all_topics, setup, list_topics, create_topic, delete_topic,
+    describe_topic
+)
 
 
 def test_topic(setup):
