@@ -50,7 +50,6 @@ def _insert_fake(conn, cursor, epoch, batch, pid, db_type):
         # time.sleep(0.8)
 
 
-SSH_PKEY = os.environ['KFKTEST_SSH_PKEY']
 # 내장 토픽 이름
 INTERNAL_TOPICS = ['__consumer_offsets', 'connect-configs', 'connect-offsets', 'connect-status']
 
@@ -58,9 +57,11 @@ INTERNAL_TOPICS = ['__consumer_offsets', 'connect-configs', 'connect-offsets', '
 def SSH(host):
     """Paramiko SSH 접속 생성."""
     print("Connect via SSH")
+    ssh_pkey = os.environ['KFKTEST_SSH_PKEY']
+
     ssh = paramiko.SSHClient()
     ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-    pkey = paramiko.RSAKey.from_private_key_file(SSH_PKEY)
+    pkey = paramiko.RSAKey.from_private_key_file(ssh_pkey)
     ssh.connect(host, username='ubuntu', pkey=pkey)
     return ssh
 
@@ -114,6 +115,7 @@ def scp_to_remote(src, dst_addr, dst_dir):
     """
     print(f'scp_to_remote: {src} to {dst_addr}:{dst_dir}')
     assert not dst_dir.endswith('/')
+    ssh_pkey = os.environ['KFKTEST_SSH_PKEY']
 
     dst_ssh = SSH(dst_addr)
     # 대상 디렉토리 확보
@@ -121,7 +123,7 @@ def scp_to_remote(src, dst_addr, dst_dir):
     # scp
     src = os.path.abspath(src)
     cmd = f'scp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null '\
-        f'-i {SSH_PKEY} {src} ubuntu@{dst_addr}:{dst_dir}'
+        f'-i {ssh_pkey} {src} ubuntu@{dst_addr}:{dst_dir}'
     return local_cmd(cmd)
 
 
