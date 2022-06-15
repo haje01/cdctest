@@ -10,100 +10,12 @@ from kfktest.util import (SSH, register_socon, unregister_socon, list_socons,
     scp_to_remote
 )
 
-SETUP_PATH = '../mysql/temp/setup.json'
 NUM_INSEL_PROCS = 5
-DB_PORT = 3306
 
 
 @pytest.fixture(scope="session")
-def setup():
-    """인프라 설치 정보."""
-    assert os.path.isfile(SETUP_PATH)
-    with open(SETUP_PATH, 'rt') as f:
-        return json.loads(f.read())
-
-
-@pytest.fixture(scope="session")
-def cp_setup(setup):
-    """확보된 인프라 설치 정보를 원격 노드에 복사."""
-    targets = ['consumer_public_ip', 'inserter_public_ip', 'selector_public_ip']
-    for target in targets:
-        ip = setup[target]['value']
-        scp_to_remote('../mysql/temp/setup.json', ip, '~/kfktest/mysql/temp')
-    yield setup
-
-
-def exec_many(cursor, stmt):
-    """멀티 라인 쿼리 실행
-
-    주: 결과를 읽어와야 쿼리 실행이 됨
-
-    """
-    results = cursor.execute(stmt, multi=True)
-    for res in results:
-        print(res)
-
-
-@pytest.fixture
-def dbconcur(setup):
-    db_addr = setup['mysql_public_ip']['value']
-    db_user = setup['db_user']['value']
-    db_passwd = setup['db_passwd']['value']['result']
-    conn = connect(host=db_addr, user=db_user, password=db_passwd, database="test")
-    cursor = conn.cursor()
-    yield conn, cursor
-    conn.close()
-
-
-@pytest.fixture
-def table(dbconcur):
-    """테스트용 테이블 초기화."""
-    conn, cursor = dbconcur
-
-    stmt = '''
-DROP TABLE IF EXISTS person;
-CREATE TABLE person (
-    id  INT NOT NULL AUTO_INCREMENT,
-    pid INT DEFAULT -1 NOT NULL,
-    sid INT DEFAULT -1 NOT NULL,
-    name VARCHAR(40),
-    address VARCHAR(200),
-    ip VARCHAR(20),
-    birth DATE,
-    company VARCHAR(40),
-    phone VARCHAR(40),
-    PRIMARY KEY(id)
-)
-    '''
-    exec_many(cursor, stmt)
-    yield
-    print("Delete table 'person'")
-    cursor.execute('DROP TABLE IF EXISTS person;')
-    conn.commit()
-
-
-@pytest.fixture
-def socon(setup, table, topic):
-    """테스트용 카프카 커넥터 초기화 (테이블과 토픽 먼저 생성)."""
-    cons_ip = setup['consumer_public_ip']['value']
-    kafka_ip = setup['kafka_private_ip']['value']
-    db_addr = setup['mysql_private_ip']['value']
-    db_user = setup['db_user']['value']
-    db_passwd = setup['db_passwd']['value']['result']
-
-    ssh = SSH(cons_ip)
-
-    unregister_all_socons(ssh, kafka_ip)
-    ret = register_socon(ssh, kafka_ip, 'mysql',
-        db_addr, DB_PORT, db_user, db_passwd, "test", "person",
-        "my-topic-")
-    try:
-        conn_name = ret['name']
-    except Exception as e:
-        raise Exception(str(ret))
-    yield
-
-    unregister_socon(ssh, kafka_ip, conn_name)
+def db_type():
+    return 'mysql'
 
 
 def test_socon(setup):
@@ -136,6 +48,7 @@ def test_socon(setup):
     unregister_socon(ssh, kafka_ip, conn_name)
     ret = list_socons(ssh, kafka_ip)
     assert ret == []
+
 
 def _local_select_proc(setup, pid):
     """로컬에서 가짜 데이터 셀렉트."""

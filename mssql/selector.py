@@ -18,11 +18,12 @@ parser.add_argument('-d', '--dev', action='store_true', default=False,
     help="개발 PC 에서 실행 여부.")
 
 
-def count_rows(cursor):
-    cursor.execute('''
+def count_rows(db_type, cursor):
+    sql = '''
     SELECT COUNT(*) cnt
     FROM [test].[dbo].[person]
-    ''')
+    '''
+    cursor.execute()
     res = cursor.fetchone()
     return res[0]
 

@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 import argparse
 
+import pymssql
 from mysql.connector import connect
 
 # CLI 용 파서
@@ -19,10 +20,11 @@ parser.add_argument('-d', '--dev', action='store_true', default=False,
     help="개발 PC 에서 실행 여부.")
 
 
-def count_rows(cursor):
-    cursor.execute('''
+def count_rows(db_type, cursor):
+    tbl = 'person' if db_type == 'mysql' else '[test].[dbo].[person]'
+    cursor.execute(f'''
     SELECT COUNT(*) cnt
-    FROM person
+    FROM {tbl}
     ''')
     res = cursor.fetchone()
     return res[0]
@@ -33,7 +35,7 @@ def select_fake(setup, db_type, db_name=parser.get_default('db_name'),
         pid=parser.get_default('pid'),
         dev=parser.get_default('devs')
         ):
-    """MySQL용 가짜 데이터 인서트.
+    """가짜 데이터 셀렉트.
 
     `db_name` DB 에 `person` 테이블이 미리 만들어져 있어야 함.
 
@@ -48,25 +50,37 @@ def select_fake(setup, db_type, db_name=parser.get_default('db_name'),
     """
     if type(setup) is io.TextIOWrapper:
         setup = json.loads(setup.read())
-    mysql_ip_key = 'mysql_public_ip' if dev else 'mysql_private_ip'
-    db_host = setup[mysql_ip_key]['value']
+    db_ip_key = f'{db_type}_public_ip' if dev else f'{db_type}_private_ip'
+    db_host = setup[db_ip_key]['value']
     db_user = setup['db_user']['value']
     db_passwd = setup['db_passwd']['value']['result']
 
-    print(f"Selector {pid} connect MySQL at {db_host} batch {batch}")
-    conn = connect(host=db_host, user=db_user, password=db_passwd, db=db_name)
+    print(f"Selector {pid} connect DB at {db_host} batch {batch}")
+    if db_type == 'mysql':
+        conn = connect(host=db_host, user=db_user, password=db_passwd, db=db_name)
+    else:
+        conn = pymssql.connect(host=db_host, user=db_user, password=db_passwd, database=db_name)
     cursor = conn.cursor()
     print("Connect done.")
 
-    sql = f'''
-        SELECT * FROM (
-            SELECT * FROM person ORDER BY pid, sid DESC LIMIT {batch}
-        ) sub
-        '''
+    if db_type == 'mysql':
+        sql = f'''
+            SELECT * FROM (
+                SELECT * FROM person ORDER BY pid, sid DESC LIMIT {batch}
+            ) sub
+            '''
+    else:
+        # MSSQL
+        cursor.execute('SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED')
+        sql = f'''
+            SELECT TOP {batch} *
+            FROM [test].[dbo].[person]
+            ORDER BY newid()
+            '''
 
     st = time.time()
     tot_read = row_cnt = i = 0
-    row_prev = count_rows(cursor)
+    row_prev = count_rows(db_type, cursor)
     equal = 0
     while True:
         i += 1
@@ -75,7 +89,7 @@ def select_fake(setup, db_type, db_name=parser.get_default('db_name'),
         time.sleep(1)
         cursor.execute(sql)
         tot_read += len(cursor.fetchall())
-        row_cnt = count_rows(cursor)
+        row_cnt = count_rows(db_type, cursor)
         if row_cnt == row_prev:
             equal += 1
         else:

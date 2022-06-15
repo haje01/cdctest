@@ -9,11 +9,20 @@ import re
 import binascii
 import subprocess
 
+import pymssql
 from mysql.connector import connect
 from faker import Faker
 from faker.providers import internet, date_time, company, phone_number
 import paramiko
 import pytest
+
+# Kafka 내장 토픽 이름
+INTERNAL_TOPICS = ['__consumer_offsets', 'connect-configs', 'connect-offsets', 'connect-status']
+DB_PORTS = {'mysql': 3306, 'mssql': 1433}
+
+
+def db_port(db_type):
+    return DB_PORTS[db_type]
 
 
 def _insert_fake(conn, cursor, epoch, batch, pid, db_type):
@@ -26,9 +35,9 @@ def _insert_fake(conn, cursor, epoch, batch, pid, db_type):
     fake.add_provider(phone_number)
 
     if db_type == 'mysql':
-        stmt = "INSERT INTO person(pid, sid, name, address, ip, birth, company, phone) VALUES(%s, %s, %s, %s, %s, %s, %s, %s)"
+        sql = "INSERT INTO person(pid, sid, name, address, ip, birth, company, phone) VALUES(%s, %s, %s, %s, %s, %s, %s, %s)"
     else:
-        stmt = "INSERT INTO person VALUES(%s, %s, %s, %s, %s, %s, %s, %s)"
+        sql = "INSERT INTO person VALUES(%s, %s, %s, %s, %s, %s, %s, %s)"
 
     for j in range(epoch):
         print(f"Inserter {pid} epoch: {j+1}")
@@ -45,13 +54,9 @@ def _insert_fake(conn, cursor, epoch, batch, pid, db_type):
                 fake.phone_number()
             )
             rows.append(row)
-        cursor.executemany(stmt, rows)
+        cursor.executemany(sql, rows)
         conn.commit()
         # time.sleep(0.8)
-
-
-# 내장 토픽 이름
-INTERNAL_TOPICS = ['__consumer_offsets', 'connect-configs', 'connect-offsets', 'connect-status']
 
 
 def SSH(host):
@@ -368,3 +373,126 @@ def remote_insert_fake(ins_ssh, pid, epoch, batch):
     """원격 인서트 노드에서 가짜 데이터 insert"""
     cmd = f"cd kfktest/mssql && python3 inserter.py temp/setup.json {pid} {epoch} {batch}"
     return ssh_cmd(ins_ssh, cmd, False)
+
+
+
+
+def setup_path(db_type):
+    return f'../{db_type}/temp/setup.json'
+
+
+@pytest.fixture(scope="session")
+def setup(db_type):
+    """인프라 설치 정보."""
+    assert os.path.isfile(setup_path(db_type))
+    with open(setup_path(db_type), 'rt') as f:
+        return json.loads(f.read())
+
+
+@pytest.fixture(scope="session")
+def cp_setup(db_type, setup):
+    """확보된 인프라 설치 정보를 원격 노드에 복사."""
+    targets = ['consumer_public_ip', 'inserter_public_ip', 'selector_public_ip']
+    for target in targets:
+        ip = setup[target]['value']
+        scp_to_remote(f'../{db_type}/temp/setup.json', ip, f'~/kfktest/{db_type}/temp')
+    yield setup
+
+
+@pytest.fixture
+def dbconcur(db_type, setup):
+    db_addr = setup[f'{db_type}_public_ip']['value']
+    db_user = setup['db_user']['value']
+    db_passwd = setup['db_passwd']['value']['result']
+    if db_type == 'mysql':
+        conn = connect(host=db_addr, user=db_user, password=db_passwd, database="test")
+    else:
+        conn = pymssql.connect(host=db_addr, user=db_user, password=db_passwd, database="test")
+    cursor = conn.cursor()
+    yield conn, cursor
+    conn.close()
+
+
+def mysql_exec_many(cursor, stmt):
+    """MySQL 용 멀티 라인 쿼리 실행
+
+    주: 결과를 읽어와야 쿼리 실행이 됨
+
+    """
+    results = cursor.execute(stmt, multi=True)
+    for res in results:
+        print(res)
+
+
+@pytest.fixture
+def table(db_type, dbconcur):
+    """테스트용 테이블 초기화."""
+    conn, cursor = dbconcur
+
+    if db_type == 'mysql':
+        head = '''
+DROP TABLE IF EXISTS person;
+CREATE TABLE person (
+    id  INT NOT NULL AUTO_INCREMENT,
+    pid INT DEFAULT -1 NOT NULL,
+    sid INT DEFAULT -1 NOT NULL,
+        '''
+        tail = ', PRIMARY KEY(id)'
+    else:
+        # MSSQL
+        head = '''
+IF OBJECT_ID('person', 'U') IS NOT NULL
+    DROP TABLE person
+CREATE TABLE person (
+    id int IDENTITY(1,1) PRIMARY KEY,
+    pid INT NOT NULL,
+    sid INT NOT NULL,
+        '''
+        tail = ''
+
+    sql = f'''
+{head}name VARCHAR(40),
+    address VARCHAR(200),
+    ip VARCHAR(20),
+    birth DATE,
+    company VARCHAR(40),
+    phone VARCHAR(40)
+    {tail}
+    )
+    '''
+
+    if db_type == 'mysql':
+        mysql_exec_many(cursor, sql)
+    else:
+        cursor.execute(sql)
+    yield
+    print("Delete table 'person'")
+    if db_type == 'mysql':
+        cursor.execute('DROP TABLE IF EXISTS person;')
+    else:
+        cursor.execute("IF OBJECT_ID('person', 'U') IS NOT NULL DROP TABLE person")
+
+    conn.commit()
+
+
+@pytest.fixture
+def socon(db_type, setup, table, topic):
+    """테스트용 카프카 커넥터 초기화 (테이블과 토픽 먼저 생성)."""
+    cons_ip = setup['consumer_public_ip']['value']
+    kafka_ip = setup['kafka_private_ip']['value']
+    db_addr = setup[f'{db_type}_private_ip']['value']
+    db_user = setup['db_user']['value']
+    db_passwd = setup['db_passwd']['value']['result']
+
+    ssh = SSH(cons_ip)
+
+    unregister_all_socons(ssh, kafka_ip)
+    ret = register_socon(ssh, kafka_ip, db_type, db_addr, DB_PORTS[db_type],
+        db_user, db_passwd, "test", "person", "my-topic-")
+    try:
+        conn_name = ret['name']
+    except Exception as e:
+        raise Exception(str(ret))
+    yield
+
+    unregister_socon(ssh, kafka_ip, conn_name)
