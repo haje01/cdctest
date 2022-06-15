@@ -2,7 +2,7 @@
 
 다양한 상황에서 Kafka 의 기능을 테스트
 
-필요한 준비:
+## 사전 작업
 - 환경 변수 `KFKTEST_SSH_PKEY` 에 AWS 에서 이용할 Private Key 경로를 지정
 - `refers` 디렉토리에 아래의 두 파일이 있어야 한다
   - `confluentinc-kafka-connect-jdbc-10.5.0.zip`
@@ -44,6 +44,6 @@ Terraform 으로 AWS 에 필요 인스턴스 생성
     - 원격 장비에서 DB insert / select 실행
 
 ### 주의할 점
-- 테스트 실행전 기존 Kafka 토픽을 이용하고 있는 클라이언트
-  - `kafka-console-consumer` 는 delete_topic 이 호출된 뒤 실행해야 한다.
+- 테스트 실행전 기존 Kafka 토픽을 이용하고 있는 클라이언트는 무두 종료해야 한다.
+  - `kafka-console-consumer` 는 테스트 과정의 delete_topic 이 호출된 뒤 실행해야 한다.
 - Kafka JDBC Connector 는 `confluentinc-kafka-connect-jdbc-10.5.0` 이상을 써야한다 (MSSQL 에서 `READ_UNCOMMITTED` 를 지원).
