@@ -2,6 +2,10 @@
 
 다양한 상황에서 Kafka 의 기능을 테스트
 
+- Terraform 을 사용해 AWS 에 상황별 인프라를 기술
+- Snakemake 를 통한 Terraform 호출로 인프라 생성/파괴
+- pytest 로 시나리오별 테스트 수행
+
 ## 사전 작업
 - 내려 받을 Kafka 의 URL
   - 예: `https://archive.apache.org/dist/kafka/3.0.0/kafka_2.13-3.0.0.tgz`
