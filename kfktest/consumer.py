@@ -46,7 +46,6 @@ def consume(profile,
     cnt = 0
     for msg in consumer:
         cnt += 1
-        import pdb; pdb.set_trace()
         if not count_only:
             print(f'{msg.topic}:{msg.partition}:{msg.offset} key={msg.key} value={msg.value}')
 
