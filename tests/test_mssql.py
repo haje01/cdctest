@@ -3,8 +3,8 @@ from multiprocessing import Process
 import pytest
 
 from kfktest.util import (SSH, register_socon, unregister_socon, list_socons,
-    unregister_all_socons, count_topic_message, topic, ssh_cmd, local_cmd,
-    setup, cp_setup, db_port, table, dbconcur, socon
+    unregister_all_socons, count_topic_message, ssh_cmd, local_cmd, db_port,
+    setup, topic, cp_setup, table, dbconcur, socon
 )
 
 NUM_INSEL_PROCS = 5
@@ -49,7 +49,7 @@ def test_socon(deploy, setup):
 def _local_select_proc(setup, pid):
     """로컬에서 가짜 데이터 셀렉트."""
     print(f"Select process {pid} start")
-    cmd = f"cd ../deploy/mssql && python -m kfktest.selector setup.json mssql -p {pid} -d"
+    cmd = f"cd ../deploy/mssql && python -m kfktest.selector mssql -p {pid} -d"
     local_cmd(cmd)
     print(f"Select process {pid} done")
 
@@ -57,7 +57,7 @@ def _local_select_proc(setup, pid):
 def _local_insert_proc(setup, pid, epoch, batch):
     """로컬에서 가짜 데이터 인서트."""
     print(f"Insert process start: {pid}")
-    cmd = f"cd ../deploy/mssql && python -m kfktest.inserter setup.json mssql -p {pid} -e {epoch} -b {batch} -d"
+    cmd = f"cd ../deploy/mssql && python -m kfktest.inserter mssql -p {pid} -e {epoch} -b {batch} -d"
     local_cmd(cmd)
     print(f"Insert process done: {pid}")
 
@@ -102,7 +102,7 @@ def _remote_select_proc(setup, pid):
     print(f"Select process start: {pid}")
     sel_ip = setup['selector_public_ip']['value']
     ssh = SSH(sel_ip)
-    cmd = f"cd kfktest/deploy/mssql && python3 -m kfktest.selector setup.json mssql -p {pid}"
+    cmd = f"cd kfktest/deploy/mssql && python3 -m kfktest.selector mssql -p {pid}"
     ret = ssh_cmd(ssh, cmd, False)
     print(ret)
     print(f"Select process done: {pid}")
@@ -114,7 +114,7 @@ def _remote_insert_proc(setup, pid, epoch, batch):
     print(f"Insert process start: {pid}")
     ins_ip = setup['inserter_public_ip']['value']
     ssh = SSH(ins_ip)
-    cmd = f"cd kfktest/deploy/mssql && python3 -m kfktest.inserter setup.json mssql -p {pid} -e {epoch} -b {batch}"
+    cmd = f"cd kfktest/deploy/mssql && python3 -m kfktest.inserter mssql -p {pid} -e {epoch} -b {batch}"
     ret = ssh_cmd(ssh, cmd, False)
     print(ret)
     print(f"Insert process done: {pid}")

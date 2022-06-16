@@ -14,7 +14,7 @@ module "kafka" {
 }
 
 module "producer" {
-  source = "../../module/kfktest"
+  source = "../module/test"
   name = var.name
   nodename = "consumer"
   ubuntu_ami = var.ubuntu_ami
@@ -27,7 +27,7 @@ module "producer" {
 }
 
 module "consumer" {
-  source = "../../module/kfktest"
+  source = "../module/test"
   name = var.name
   nodename = "consumer"
   ubuntu_ami = var.ubuntu_ami

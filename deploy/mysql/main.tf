@@ -133,7 +133,7 @@ EOT
 
 # Inserter / Select
 module "inserter" {
-  source = "../../module/kfktest"
+  source = "../module/kfktest"
   name = var.name
   nodename = "inserter"
   ubuntu_ami = var.ubuntu_ami
@@ -146,7 +146,7 @@ module "inserter" {
 }
 
 module "selector" {
-  source = "../../module/kfktest"
+  source = "../module/kfktest"
   name = var.name
   nodename = "selector"
   ubuntu_ami = var.ubuntu_ami
@@ -159,7 +159,7 @@ module "selector" {
 }
 
 module "consumer" {
-  source = "../../module/kfktest"
+  source = "../module/kfktest"
   name = var.name
   nodename = "consumer"
   ubuntu_ami = var.ubuntu_ami

@@ -1,6 +1,6 @@
 
 rule setup:
-    """프로파일별 인프라 설치."""
+    """프로파일 인프라 설치."""
     output: "temp/{profile}/setup.json"
     shell:
         """
@@ -11,7 +11,7 @@ rule setup:
 
 
 rule destroy:
-    """시스템 제거."""
+    """프로파일 인프라 제거."""
     output:
         "temp/{profile}/destroy"
     shell:
