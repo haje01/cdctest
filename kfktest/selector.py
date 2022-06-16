@@ -7,11 +7,12 @@ import argparse
 import pymssql
 from mysql.connector import connect
 
+from kfktest.util import load_setup
+
 # CLI 용 파서
 parser = argparse.ArgumentParser(description="MySQL DB 에서 데이터 셀렉트.",
     formatter_class=argparse.ArgumentDefaultsHelpFormatter
 )
-parser.add_argument('setup', type=argparse.FileType('r'), help="배포 결과 파일.")
 parser.add_argument('db_type', type=str, choices=['mysql', 'mssql'], help="DBMS 종류.")
 parser.add_argument('--db-name', type=str, default='test', help="이용할 데이터베이스 이름")
 parser.add_argument('-b', '--batch', type=int, default=1000, help="한 번에 select 할 행수.")
@@ -30,7 +31,7 @@ def count_rows(db_type, cursor):
     return res[0]
 
 
-def select_fake(setup, db_type, db_name=parser.get_default('db_name'),
+def select_fake(db_type, db_name=parser.get_default('db_name'),
         batch=parser.get_default('batch'),
         pid=parser.get_default('pid'),
         dev=parser.get_default('devs')
@@ -40,7 +41,6 @@ def select_fake(setup, db_type, db_name=parser.get_default('db_name'),
     `db_name` DB 에 `person` 테이블이 미리 만들어져 있어야 함.
 
     Args:
-        setup (str): 배포 결과 파일 경로
         db_type (str): DBMS 종류. mysql / mssql
         db_name (str): DB 이름
         batch (int): 한 번에 select 할 행수
@@ -48,8 +48,7 @@ def select_fake(setup, db_type, db_name=parser.get_default('db_name'),
         dev (bool): 개발 PC 에서 실행 여부
 
     """
-    if type(setup) is io.TextIOWrapper:
-        setup = json.loads(setup.read())
+    setup = load_setup(db_type)
     db_ip_key = f'{db_type}_public_ip' if dev else f'{db_type}_private_ip'
     db_host = setup[db_ip_key]['value']
     db_user = setup['db_user']['value']
@@ -107,5 +106,5 @@ def select_fake(setup, db_type, db_name=parser.get_default('db_name'),
 
 if __name__ == '__main__':
     args = parser.parse_args()
-    select_fake(args.setup, args.db_type, args.db_name, args.batch, args.pid,
+    select_fake(args.db_type, args.db_name, args.batch, args.pid,
         args.dev)

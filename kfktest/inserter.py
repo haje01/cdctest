@@ -8,13 +8,12 @@ import json
 import pymssql
 from mysql.connector import connect
 
-from kfktest.util import _insert_fake
+from kfktest.util import _insert_fake, load_setup
 
 # CLI 용 파서
 parser = argparse.ArgumentParser(description="MySQL DB 에 가짜 데이터 인서트.",
     formatter_class=argparse.ArgumentDefaultsHelpFormatter
 )
-parser.add_argument('setup', type=argparse.FileType('r'), help="배포 결과 파일.")
 parser.add_argument('db_type', type=str, choices=['mysql', 'mssql'], help="DBMS 종류.")
 parser.add_argument('--db-name', type=str, default='test', help="이용할 데이터베이스 이름.")
 parser.add_argument('-p', '--pid', type=int, default=0, help="인서트 프로세스 ID.")
@@ -24,7 +23,7 @@ parser.add_argument('-d', '--dev', action='store_true', default=False,
     help="개발 PC 에서 실행 여부.")
 
 
-def insert_fake(setup, db_type, db_name=parser.get_default('db_name'),
+def insert_fake(db_type, db_name=parser.get_default('db_name'),
         epoch=parser.get_default('epoch'),
         batch=parser.get_default('batch'),
         pid=parser.get_default('pid'),
@@ -35,7 +34,6 @@ def insert_fake(setup, db_type, db_name=parser.get_default('db_name'),
     `db_name` DB 에 `person` 테이블이 미리 만들어져 있어야 함.
 
     Args:
-        setup (str): 배포 결과 파일 경로
         db_type (str): DBMS 종류. mysql / mssql
         db_name (str): DB 이름
         epoch (int): 에포크 수
@@ -44,9 +42,7 @@ def insert_fake(setup, db_type, db_name=parser.get_default('db_name'),
         dev (bool): 개발 PC 에서 실행 여부
 
     """
-    if type(setup) is io.TextIOWrapper:
-        setup = json.loads(setup.read())
-
+    setup = load_setup(db_type)
     if db_type == 'mysql':
         db_ip_key = 'mysql_public_ip' if dev else 'mysql_private_ip'
     else:
@@ -74,5 +70,5 @@ def insert_fake(setup, db_type, db_name=parser.get_default('db_name'),
 
 if __name__ == '__main__':
     args = parser.parse_args()
-    insert_fake(args.setup, args.db_type, args.db_name, args.epoch, args.batch,
+    insert_fake(args.db_type, args.db_name, args.epoch, args.batch,
         args.pid, args.dev)

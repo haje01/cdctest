@@ -20,13 +20,16 @@ import pytest
 INTERNAL_TOPICS = ['__consumer_offsets', 'connect-configs', 'connect-offsets', 'connect-status']
 DB_PORTS = {'mysql': 3306, 'mssql': 1433}
 
+HOME = os.path.abspath(
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
 
-def db_port(db_type):
-    return DB_PORTS[db_type]
+
+def db_port(profile):
+    return DB_PORTS[profile]
 
 
-def _insert_fake(conn, cursor, epoch, batch, pid, db_type):
-    assert db_type in ('mysql', 'mssql')
+def _insert_fake(conn, cursor, epoch, batch, pid, profile):
+    assert profile in ('mysql', 'mssql')
 
     fake = Faker()
     fake.add_provider(internet)
@@ -34,7 +37,7 @@ def _insert_fake(conn, cursor, epoch, batch, pid, db_type):
     fake.add_provider(company)
     fake.add_provider(phone_number)
 
-    if db_type == 'mysql':
+    if profile == 'mysql':
         sql = "INSERT INTO person(pid, sid, name, address, ip, birth, company, phone) VALUES(%s, %s, %s, %s, %s, %s, %s, %s)"
     else:
         sql = "INSERT INTO person VALUES(%s, %s, %s, %s, %s, %s, %s, %s)"
@@ -61,7 +64,7 @@ def _insert_fake(conn, cursor, epoch, batch, pid, db_type):
 
 def SSH(host):
     """Paramiko SSH 접속 생성."""
-    print("Connect via SSH")
+    print(f"Connect {host} via SSH")
     ssh_pkey = os.environ['KFKTEST_SSH_PKEY']
 
     ssh = paramiko.SSHClient()
@@ -264,7 +267,7 @@ def count_topic_message(node_ssh, kafka_addr, topic, from_begin=True, timeout=10
     return cnt
 
 
-def register_socon(node_ssh, kafka_addr, db_type, db_addr,
+def register_socon(node_ssh, kafka_addr, profile, db_addr,
         db_port, db_user, db_passwd, db_name, tables, topic_prefix,
         poll_interval=5000):
     """카프카 JDBC Source 커넥터 등록.
@@ -275,7 +278,7 @@ def register_socon(node_ssh, kafka_addr, db_type, db_addr,
     Args:
         node_ssh: 명령을 실행할 노드로의 Paramiko SSH 객체
         kafka_addr (str): 카프카 브로커 Private 주소
-        db_type (str): 커넥션 URL 용 DBMS 타입. mysql 또는 mssql
+        profile (str): 커넥션 URL 용 DBMS 타입. mysql 또는 mssql
         db_addr (str): DB 주소 (Private IP)
         db_port (int): DB 포트
         db_name (str): 사용할 DB 이름
@@ -286,8 +289,8 @@ def register_socon(node_ssh, kafka_addr, db_type, db_addr,
         poll_interval (int): ms 단위 폴링 간격. 기본값 5000
 
     """
-    assert db_type in ('mysql', 'mssql')
-    if db_type == 'mssql':
+    assert profile in ('mysql', 'mssql')
+    if profile == 'mssql':
         db_url = f"jdbc:sqlserver://{db_addr}:{db_port};databaseName={db_name};encrypt=true;trustServerCertificate=true;"
     else:
         db_url = f"jdbc:mysql://{db_addr}:{db_port}/{db_name}"
@@ -369,42 +372,40 @@ def topic(setup):
     # delete_topic(ssh, kafka_ip, "my-topic-person")
 
 
-def remote_insert_fake(ins_ssh, pid, epoch, batch):
-    """원격 인서트 노드에서 가짜 데이터 insert"""
-    cmd = f"cd kfktest/mssql && python3 inserter.py temp/setup.json {pid} {epoch} {batch}"
-    return ssh_cmd(ins_ssh, cmd, False)
+# def remote_insert_fake(ins_ssh, pid, epoch, batch):
+#     """원격 인서트 노드에서 가짜 데이터 insert"""
+#     cmd = f"cd kfktest/mssql && python3 inserter.py temp/setup.json {pid} {epoch} {batch}"
+#     return ssh_cmd(ins_ssh, cmd, False)
 
 
-
-
-def setup_path(db_type):
-    return f'../{db_type}/temp/setup.json'
+def setup_path(profile):
+    return f'../temp/{profile}/setup.json'
 
 
 @pytest.fixture(scope="session")
-def setup(db_type):
+def setup(profile):
     """인프라 설치 정보."""
-    assert os.path.isfile(setup_path(db_type))
-    with open(setup_path(db_type), 'rt') as f:
+    assert os.path.isfile(setup_path(profile))
+    with open(setup_path(profile), 'rt') as f:
         return json.loads(f.read())
 
 
 @pytest.fixture(scope="session")
-def cp_setup(db_type, setup):
+def cp_setup(profile, setup):
     """확보된 인프라 설치 정보를 원격 노드에 복사."""
     targets = ['consumer_public_ip', 'inserter_public_ip', 'selector_public_ip']
     for target in targets:
         ip = setup[target]['value']
-        scp_to_remote(f'../{db_type}/temp/setup.json', ip, f'~/kfktest/{db_type}/temp')
+        scp_to_remote(f'../temp/{profile}/setup.json', ip, f'~/kfktest/temp/{profile}')
     yield setup
 
 
 @pytest.fixture
-def dbconcur(db_type, setup):
-    db_addr = setup[f'{db_type}_public_ip']['value']
+def dbconcur(profile, setup):
+    db_addr = setup[f'{profile}_public_ip']['value']
     db_user = setup['db_user']['value']
     db_passwd = setup['db_passwd']['value']['result']
-    if db_type == 'mysql':
+    if profile == 'mysql':
         conn = connect(host=db_addr, user=db_user, password=db_passwd, database="test")
     else:
         conn = pymssql.connect(host=db_addr, user=db_user, password=db_passwd, database="test")
@@ -425,11 +426,11 @@ def mysql_exec_many(cursor, stmt):
 
 
 @pytest.fixture
-def table(db_type, dbconcur):
+def table(profile, dbconcur):
     """테스트용 테이블 초기화."""
     conn, cursor = dbconcur
 
-    if db_type == 'mysql':
+    if profile == 'mysql':
         head = '''
 DROP TABLE IF EXISTS person;
 CREATE TABLE person (
@@ -461,13 +462,16 @@ CREATE TABLE person (
     )
     '''
 
-    if db_type == 'mysql':
+    print("Create table 'person'")
+    if profile == 'mysql':
         mysql_exec_many(cursor, sql)
     else:
         cursor.execute(sql)
+    conn.commit()
+
     yield
     print("Delete table 'person'")
-    if db_type == 'mysql':
+    if profile == 'mysql':
         cursor.execute('DROP TABLE IF EXISTS person;')
     else:
         cursor.execute("IF OBJECT_ID('person', 'U') IS NOT NULL DROP TABLE person")
@@ -476,18 +480,18 @@ CREATE TABLE person (
 
 
 @pytest.fixture
-def socon(db_type, setup, table, topic):
+def socon(profile, setup, table, topic):
     """테스트용 카프카 커넥터 초기화 (테이블과 토픽 먼저 생성)."""
     cons_ip = setup['consumer_public_ip']['value']
     kafka_ip = setup['kafka_private_ip']['value']
-    db_addr = setup[f'{db_type}_private_ip']['value']
+    db_addr = setup[f'{profile}_private_ip']['value']
     db_user = setup['db_user']['value']
     db_passwd = setup['db_passwd']['value']['result']
 
     ssh = SSH(cons_ip)
 
     unregister_all_socons(ssh, kafka_ip)
-    ret = register_socon(ssh, kafka_ip, db_type, db_addr, DB_PORTS[db_type],
+    ret = register_socon(ssh, kafka_ip, profile, db_addr, DB_PORTS[profile],
         db_user, db_passwd, "test", "person", "my-topic-")
     try:
         conn_name = ret['name']
@@ -496,3 +500,14 @@ def socon(db_type, setup, table, topic):
     yield
 
     unregister_socon(ssh, kafka_ip, conn_name)
+
+
+def load_setup(profile):
+    """Profile 에 맞는 setup.json 읽기.
+
+    snakemake -f temp/{profile}/setup.json 로 미리 만들어져야 함.
+
+    """
+    path = os.path.join(HOME, 'temp', profile, 'setup.json')
+    with open(path, 'rt') as f:
+        return json.loads(f.read())

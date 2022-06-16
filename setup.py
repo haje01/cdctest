@@ -10,13 +10,5 @@ setup(
     author_email='haje01@gmail.com',
     url="https://github.com/haje01/kfktest",
     description="Kafka Test",
-    license='MIT License',
-    install_requires=[
-        'pymssql',
-        'mysql-connector-python',
-        'faker',
-        'kafka-python',
-        'pytest',
-        'paramiko',
-    ]
+    license='MIT License'
 )
