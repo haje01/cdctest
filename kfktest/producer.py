@@ -22,7 +22,12 @@ parser.add_argument('-d', '--dev', action='store_true', default=False,
     help="개발 PC 에서 실행 여부.")
 
 
-def produce(profile, count, acks, compress, dev):
+def produce(profile,
+        count=parser.get_default('count'),
+        acks=parser.get_default('acks'),
+        compress=parser.get_default('compress'),
+        dev=parser.get_default('dev')
+        ):
     """Fake 레코드 생성.
 
     Dev 모드로 로컬 PC 에서 Kafka 접근하려면 server.properties 에서 Public IP 로 수정 필요.

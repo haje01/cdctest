@@ -19,7 +19,6 @@ import pytest
 # Kafka 내장 토픽 이름
 INTERNAL_TOPICS = ['__consumer_offsets', 'connect-configs', 'connect-offsets', 'connect-status']
 DB_PORTS = {'mysql': 3306, 'mssql': 1433}
-
 HOME = os.path.abspath(
         os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
 
@@ -362,12 +361,12 @@ def unregister_all_socons(node_ssh, kafka_addr):
 
 
 @pytest.fixture
-def topic(setup):
+def topic(setup, profile):
     """테스트용 카프카 토픽 초기화."""
     cons_ip = setup['consumer_public_ip']['value']
     kafka_ip = setup['kafka_private_ip']['value']
     ssh = SSH(cons_ip)
-    reset_topic(ssh, kafka_ip, "my-topic-person")
+    reset_topic(ssh, kafka_ip, f"my-topic-{profile}")
     yield
     # 토픽을 참조하는 프로듀서/컨슈머가 있을 때 삭제 안되는 이슈로 다음 시작시 지우게
     # delete_topic(ssh, kafka_ip, "my-topic-person")
