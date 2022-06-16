@@ -8,7 +8,7 @@ import json
 import pymssql
 from mysql.connector import connect
 
-from kfktest.util import _insert_fake, load_setup
+from kfktest.util import insert_fake, load_setup
 
 # CLI 용 파서
 parser = argparse.ArgumentParser(description="MySQL DB 에 가짜 데이터 인서트.",
@@ -60,7 +60,7 @@ def insert_fake(db_type, db_name=parser.get_default('db_name'),
     print("Connect done.")
 
     st = time.time()
-    _insert_fake(conn, cursor, epoch, batch, pid, db_type)
+    insert_fake(conn, cursor, epoch, batch, pid, db_type)
     conn.close()
 
     elapsed = time.time() - st

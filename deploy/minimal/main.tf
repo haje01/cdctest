@@ -1,24 +1,23 @@
 module "kafka" {
-  source = "../../module/kafka"
+  source = "../module/kafka"
   name = var.name
   ubuntu_ami = var.ubuntu_ami
   private_key = var.private_key
   kafka_instance_type = var.kafka_instance_type
   work_cidr = var.work_cidr
   key_pair_name = var.key_pair_name
+  producer_sg_id = module.producer.sg_id
   consumer_sg_id = module.consumer.sg_id
   kafka_url = var.kafka_url
-  kafka_jdbc_connector = var.kafka_jdbc_connector
-  mysql_jdbc_driver = var.mysql_jdbc_driver
   tags = var.tags
 }
 
 module "producer" {
-  source = "../module/test"
+  source = "../module/kfktest"
   name = var.name
-  nodename = "consumer"
+  nodename = "producer"
   ubuntu_ami = var.ubuntu_ami
-  instance_type = var.insel_instance_type
+  instance_type = var.procon_instance_type
   private_key = var.private_key
   work_cidr = var.work_cidr
   key_pair_name = var.key_pair_name
@@ -27,11 +26,11 @@ module "producer" {
 }
 
 module "consumer" {
-  source = "../module/test"
+  source = "../module/kfktest"
   name = var.name
   nodename = "consumer"
   ubuntu_ami = var.ubuntu_ami
-  instance_type = var.insel_instance_type
+  instance_type = var.procon_instance_type
   private_key = var.private_key
   work_cidr = var.work_cidr
   key_pair_name = var.key_pair_name

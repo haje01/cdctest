@@ -22,7 +22,7 @@ resource "aws_security_group" "kfktest" {
 
   tags = merge(
     {
-      Name = "${var.name}-kfktest",
+      Name = "${var.name}-${var.nodename}",
       terraform = "true"
     },
     var.tags

@@ -48,6 +48,11 @@ Terraform 으로 프로파일별 AWS 인프라를 생성 및 삭제하는데, Te
 인프라 생성: `snakemake -f temp/{profile}/setup.json -j`
 인프라 삭제: `snakemake -f temp/{profile}/destroy -j`
 
+프로파일별 최초 인프라 구축시에는 아래와 같이 Terraform 모듈 설치가 필요하다.
+```
+cd deploy/{profile}
+terraform init
+```
 
 예를 들어 `mysql` 프로파일을 위해서는
 

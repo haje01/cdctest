@@ -31,12 +31,14 @@ def count_rows(db_type, cursor):
     return res[0]
 
 
-def select_fake(db_type, db_name=parser.get_default('db_name'),
+def select(db_type, db_name=parser.get_default('db_name'),
         batch=parser.get_default('batch'),
         pid=parser.get_default('pid'),
         dev=parser.get_default('devs')
         ):
-    """가짜 데이터 셀렉트.
+    """DB 에서 가짜 데이터 셀렉트.
+
+    실제 라이브와 비슷한 상황에서 CDC/CT 하기 위함.
 
     `db_name` DB 에 `person` 테이블이 미리 만들어져 있어야 함.
 
@@ -106,5 +108,5 @@ def select_fake(db_type, db_name=parser.get_default('db_name'),
 
 if __name__ == '__main__':
     args = parser.parse_args()
-    select_fake(args.db_type, args.db_name, args.batch, args.pid,
+    select(args.db_type, args.db_name, args.batch, args.pid,
         args.dev)
