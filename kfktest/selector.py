@@ -49,6 +49,9 @@ def select(db_type, db_name=parser.get_default('db_name'),
         pid (int): 멀티 프로세스 인서트시 구분용 ID
         dev (bool): 개발 PC 에서 실행 여부
 
+    Returns:
+        int: 읽은 행 수 (테이블 행 수와 일치하지 않음!)
+
     """
     setup = load_setup(db_type)
     db_ip_key = f'{db_type}_public_ip' if dev else f'{db_type}_private_ip'
@@ -104,6 +107,7 @@ def select(db_type, db_name=parser.get_default('db_name'),
     elapsed = time.time() - st
     vel = tot_read / elapsed
     print(f"Selector {pid} selects {tot_read} rows. {int(vel)} rows per seconds.")
+    return tot_read
 
 
 if __name__ == '__main__':

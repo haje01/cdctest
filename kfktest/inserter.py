@@ -23,7 +23,7 @@ parser.add_argument('-d', '--dev', action='store_true', default=False,
     help="개발 PC 에서 실행 여부.")
 
 
-def insert_fake(db_type, db_name=parser.get_default('db_name'),
+def insert(db_type, db_name=parser.get_default('db_name'),
         epoch=parser.get_default('epoch'),
         batch=parser.get_default('batch'),
         pid=parser.get_default('pid'),
@@ -70,5 +70,5 @@ def insert_fake(db_type, db_name=parser.get_default('db_name'),
 
 if __name__ == '__main__':
     args = parser.parse_args()
-    insert_fake(args.db_type, args.db_name, args.epoch, args.batch,
+    insert(args.db_type, args.db_name, args.epoch, args.batch,
         args.pid, args.dev)

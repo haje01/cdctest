@@ -361,21 +361,15 @@ def unregister_all_socons(node_ssh, kafka_addr):
 
 
 @pytest.fixture
-def topic(setup, profile):
+def xtopic(xsetup, xprofile):
     """테스트용 카프카 토픽 초기화."""
-    cons_ip = setup['consumer_public_ip']['value']
-    kafka_ip = setup['kafka_private_ip']['value']
+    cons_ip = xsetup['consumer_public_ip']['value']
+    kafka_ip = xsetup['kafka_private_ip']['value']
     ssh = SSH(cons_ip)
-    reset_topic(ssh, kafka_ip, f"my-topic-{profile}")
+    reset_topic(ssh, kafka_ip, "my-topic-person")
     yield
     # 토픽을 참조하는 프로듀서/컨슈머가 있을 때 삭제 안되는 이슈로 다음 시작시 지우게
     # delete_topic(ssh, kafka_ip, "my-topic-person")
-
-
-# def remote_insert_fake(ins_ssh, pid, epoch, batch):
-#     """원격 인서트 노드에서 가짜 데이터 insert"""
-#     cmd = f"cd kfktest/mssql && python3 inserter.py temp/setup.json {pid} {epoch} {batch}"
-#     return ssh_exec(ins_ssh, cmd, False)
 
 
 def setup_path(profile):
@@ -383,25 +377,31 @@ def setup_path(profile):
 
 
 @pytest.fixture(scope="session")
-def setup(profile):
+def xsetup(xprofile):
     """인프라 설치 정보."""
-    assert os.path.isfile(setup_path(profile))
-    with open(setup_path(profile), 'rt') as f:
+    assert os.path.isfile(setup_path(xprofile))
+    with open(setup_path(xprofile), 'rt') as f:
         return json.loads(f.read())
 
 
 @pytest.fixture(scope="session")
-def cp_setup(profile, setup):
+def xcp_setup(xprofile, xsetup):
     """확보된 인프라 설치 정보를 원격 노드에 복사."""
-    targets = ['consumer_public_ip', 'inserter_public_ip', 'selector_public_ip']
-    for target in targets:
-        ip = setup[target]['value']
-        scp_to_remote(f'../temp/{profile}/setup.json', ip, f'~/kfktest/temp/{profile}')
-    yield setup
+    from kfktest.cpsetup import cp_setup as _cp_setup
+    _cp_setup(xprofile)
+    yield xsetup
 
 
 @pytest.fixture
-def dbconcur(profile, setup):
+def xdbconcur(xprofile):
+    conn, cursor = db_concur(xprofile)
+    yield conn, cursor
+    conn.close()
+
+
+def db_concur(profile):
+    """프로파일에 적합한 DB 커넥션과 커서 얻기."""
+    setup = load_setup(profile)
     db_addr = setup[f'{profile}_public_ip']['value']
     db_user = setup['db_user']['value']
     db_passwd = setup['db_passwd']['value']['result']
@@ -410,8 +410,7 @@ def dbconcur(profile, setup):
     else:
         conn = pymssql.connect(host=db_addr, user=db_user, password=db_passwd, database="test")
     cursor = conn.cursor()
-    yield conn, cursor
-    conn.close()
+    return conn, cursor
 
 
 def mysql_exec_many(cursor, stmt):
@@ -426,72 +425,34 @@ def mysql_exec_many(cursor, stmt):
 
 
 @pytest.fixture
-def table(profile, dbconcur):
+def xtable(xprofile, xsetup):
     """테스트용 테이블 초기화."""
-    conn, cursor = dbconcur
+    from kfktest.table import reset_table
 
-    if profile == 'mysql':
-        head = '''
-DROP TABLE IF EXISTS person;
-CREATE TABLE person (
-    id  INT NOT NULL AUTO_INCREMENT,
-    pid INT DEFAULT -1 NOT NULL,
-    sid INT DEFAULT -1 NOT NULL,
-        '''
-        tail = ', PRIMARY KEY(id)'
-    else:
-        # MSSQL
-        head = '''
-IF OBJECT_ID('person', 'U') IS NOT NULL
-    DROP TABLE person
-CREATE TABLE person (
-    id int IDENTITY(1,1) PRIMARY KEY,
-    pid INT NOT NULL,
-    sid INT NOT NULL,
-        '''
-        tail = ''
-
-    sql = f'''
-{head}name VARCHAR(40),
-    address VARCHAR(200),
-    ip VARCHAR(20),
-    birth DATE,
-    company VARCHAR(40),
-    phone VARCHAR(40)
-    {tail}
-    )
-    '''
-
-    print("Create table 'person'")
-    if profile == 'mysql':
-        mysql_exec_many(cursor, sql)
-    else:
-        cursor.execute(sql)
-    conn.commit()
-
+    conn, cursor = reset_table(xprofile)
     yield
-    print("Delete table 'person'")
-    if profile == 'mysql':
-        cursor.execute('DROP TABLE IF EXISTS person;')
-    else:
-        cursor.execute("IF OBJECT_ID('person', 'U') IS NOT NULL DROP TABLE person")
+    # print("Delete table 'person'")
+    # if xprofile == 'mysql':
+    #     cursor.execute('DROP TABLE IF EXISTS person;')
+    # else:
+    #     cursor.execute("IF OBJECT_ID('person', 'U') IS NOT NULL DROP TABLE person")
 
     conn.commit()
 
 
 @pytest.fixture
-def socon(profile, setup, table, topic):
+def xsocon(xprofile, xtable, xtopic, xsetup):
     """테스트용 카프카 커넥터 초기화 (테이블과 토픽 먼저 생성)."""
-    cons_ip = setup['consumer_public_ip']['value']
-    kafka_ip = setup['kafka_private_ip']['value']
-    db_addr = setup[f'{profile}_private_ip']['value']
-    db_user = setup['db_user']['value']
-    db_passwd = setup['db_passwd']['value']['result']
+    cons_ip = xsetup['consumer_public_ip']['value']
+    kafka_ip = xsetup['kafka_private_ip']['value']
+    db_addr = xsetup[f'{xprofile}_private_ip']['value']
+    db_user = xsetup['db_user']['value']
+    db_passwd = xsetup['db_passwd']['value']['result']
 
     ssh = SSH(cons_ip)
 
     unregister_all_socons(ssh, kafka_ip)
-    ret = register_socon(ssh, kafka_ip, profile, db_addr, DB_PORTS[profile],
+    ret = register_socon(ssh, kafka_ip, xprofile, db_addr, DB_PORTS[xprofile],
         db_user, db_passwd, "test", "person", "my-topic-")
     try:
         conn_name = ret['name']

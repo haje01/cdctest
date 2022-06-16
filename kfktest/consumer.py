@@ -55,4 +55,5 @@ def consume(profile,
 
 if __name__ == '__main__':
     args = parser.parse_args()
-    consume(args.profile, args.timeout, args.auto_commit, args.from_begin, args.dev)
+    consume(args.profile, args.timeout, args.auto_commit, args.from_begin,
+        args.count_only, args.dev)

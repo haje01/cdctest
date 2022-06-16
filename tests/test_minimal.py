@@ -24,7 +24,7 @@ def _local_produce_proc(pro_cnt):
 
 def _local_consume_proc(q):
     print("Consume process start.")
-    cnt = consume('minimal', dev=True)
+    cnt = consume('minimal', dev=True, count_only=True, from_begin=True)
     q.put(cnt)
     print("Consume process done.")
 
