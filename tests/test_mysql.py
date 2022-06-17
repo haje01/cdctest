@@ -5,8 +5,10 @@ from multiprocessing import Process
 import pytest
 from mysql.connector import connect
 
-from kfktest.util import (SSH, count_topic_message, ssh_exec,
-    xsetup, xsocon, xcp_setup, xtable, xtopic
+from kfktest.util import (SSH, count_topic_message, ssh_exec, stop_kafka_broker,
+    start_kafka_broker, kill_proc_by_port, get_kafka_ssh, vm_start, vm_stop,
+    # 픽스쳐들
+    xsetup, xsocon, xcp_setup, xtable, xtopic, xkafka, xzookeeper, xkvmstart
 )
 from kfktest.selector import select
 from kfktest.inserter import insert
@@ -33,7 +35,7 @@ def _local_insert_proc(pid, epoch, batch):
     print(f"Insert process done: {pid}")
 
 
-def test_ct_local_basic(xsocon, xsetup):
+def test_ct_local_basic(xsocon, xsetup, xprofile):
     """로컬 insert / select 로 기본적인 Change Tracking 테스트.
 
     - 테스트 시작전 이전 토픽을 참고하는 것이 없어야 함. (delete_topic 에러 발생)
@@ -61,7 +63,135 @@ def test_ct_local_basic(xsocon, xsetup):
         p.start()
 
     # 카프카 토픽 확인 (timeout 되기전에 다 받아야 함)
-    cnt = count_topic_message(ssh, kafka_ip, 'my-topic-person', timeout=20)
+    cnt = count_topic_message(ssh, kafka_ip, f'{xprofile}-person', timeout=20)
+    assert 10000 * NUM_INSEL_PROCS == cnt
+
+    for p in ins_pros:
+        p.join()
+    print("All insert processes are done.")
+
+    for p in sel_pros:
+        p.join()
+    print("All select processes are done.")
+
+
+def test_ct_broker_stop(xsetup, xsocon, xprofile):
+    """카프카 브로커 정상 정지시 Change Tracking 테스트.
+
+    Insert / Select 시작 후 브로커를 멈추고 (Stop Gracefully) 잠시 후 다시 기동해도
+        메시지 수가 일치.
+
+    """
+    # Selector 프로세스들 시작
+    sel_pros = []
+    for pid in range(1, NUM_INSEL_PROCS + 1):
+        # insert 프로세스
+        p = Process(target=_local_select_proc, args=(pid,))
+        sel_pros.append(p)
+        p.start()
+
+    # Insert 프로세스들 시작
+    ins_pros = []
+    for pid in range(1, NUM_INSEL_PROCS + 1):
+        # insert 프로세스
+        p = Process(target=_local_insert_proc, args=(pid, 100, 100))
+        ins_pros.append(p)
+        p.start()
+
+    # 잠시 후 카프카 브로커 stop
+    time.sleep(4)
+    stop_kafka_broker(xprofile)
+    # 잠시 후 카프카 브로커 start
+    time.sleep(4)
+    start_kafka_broker(xprofile)
+
+    # 카프카 토픽 확인 (timeout 되기 전에 다 받아야 함)
+    cnt = count_topic_message(xprofile, f'{xprofile}-person', timeout=10)
+    assert 10000 * NUM_INSEL_PROCS == cnt
+
+    for p in ins_pros:
+        p.join()
+    print("All insert processes are done.")
+
+    for p in sel_pros:
+        p.join()
+    print("All select processes are done.")
+
+
+def test_ct_broker_down(xsetup, xsocon, xprofile):
+    """카프카 브로커 다운시 Change Tracking 테스트.
+
+    Insert / Select 시작 후 브로커 프로세스를 강제로 죽인 후, 잠시 후 다시 재개해도
+        메시지 수가 일치.
+
+    """
+    # Selector 프로세스들 시작
+    sel_pros = []
+    for pid in range(1, NUM_INSEL_PROCS + 1):
+        # insert 프로세스
+        p = Process(target=_local_select_proc, args=(pid,))
+        sel_pros.append(p)
+        p.start()
+
+    # Insert 프로세스들 시작
+    ins_pros = []
+    for pid in range(1, NUM_INSEL_PROCS + 1):
+        # insert 프로세스
+        p = Process(target=_local_insert_proc, args=(pid, 100, 100))
+        ins_pros.append(p)
+        p.start()
+
+    # 잠시 후 카프카 브로커 강제 종료
+    time.sleep(4)
+    kill_proc_by_port(get_kafka_ssh(xprofile), 9092)
+    # 잠시 후 카프카 브로커 start (한 번 재시도 필요!?)
+    time.sleep(4)
+    start_kafka_broker(xprofile)
+
+    # 카프카 토픽 확인 (timeout 되기 전에 다 받아야 함)
+    cnt = count_topic_message(xprofile, f'{xprofile}-person', timeout=20)
+    assert 10000 * NUM_INSEL_PROCS == cnt
+
+    for p in ins_pros:
+        p.join()
+    print("All insert processes are done.")
+
+    for p in sel_pros:
+        p.join()
+    print("All select processes are done.")
+
+
+def test_ct_broker_vmstop(xsetup, xsocon, xprofile):
+    """카프카 브로커 VM 정지시 Change Tracking 테스트.
+
+    Insert / Select 시작 후 브로커가 정지 후 재개해도 메시지 수가 일치.
+
+    """
+    # Selector 프로세스들 시작
+    sel_pros = []
+    for pid in range(1, NUM_INSEL_PROCS + 1):
+        # insert 프로세스
+        p = Process(target=_local_select_proc, args=(pid,))
+        sel_pros.append(p)
+        p.start()
+
+    # Insert 프로세스들 시작
+    ins_pros = []
+    for pid in range(1, NUM_INSEL_PROCS + 1):
+        # insert 프로세스
+        p = Process(target=_local_insert_proc, args=(pid, 1, 100))
+        ins_pros.append(p)
+        p.start()
+
+    # 잠시 후 카프카 브로커 VM 정지
+    time.sleep(4)
+    vm_stop(xprofile, 'kafka')
+    # 잠시 후 카프카 브로커 VM 재개
+    time.sleep(4)
+    vm_start(xprofile, 'kafka')
+
+    # 카프카 토픽 확인 (timeout 되기 전에 다 받아야 함)
+    cnt = count_topic_message(xprofile, f'{xprofile}-person', timeout=10)
     assert 10000 * NUM_INSEL_PROCS == cnt
 
     for p in ins_pros:
@@ -120,7 +250,7 @@ def test_ct_remote_basic(xcp_setup, xsocon):
         p.start()
 
     # 카프카 토픽 확인 (timeout 되기전에 다 받아야 함)
-    cnt = count_topic_message(ssh, kafka_ip, 'my-topic-person', timeout=20)
+    cnt = count_topic_message(ssh, kafka_ip, f'{xprofile}-person', timeout=20)
     assert 10000 * NUM_INSEL_PROCS == cnt
 
     for p in ins_pros:

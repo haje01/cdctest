@@ -1,6 +1,3 @@
-import multiprocessing
-
-
 from multiprocessing import Process, Queue
 
 import pytest

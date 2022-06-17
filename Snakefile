@@ -18,5 +18,7 @@ rule destroy:
         """
         cd deploy/{wildcards.profile}
         TF_VAR_private_key=$KFKTEST_SSH_PKEY terraform destroy -var-file=test.tfvars -auto-approve
-        touch ../../{output}
+        cd ../..
+        rm -f temp/{wildcards.profile}/setup.json
+        touch {output}
         """

@@ -33,7 +33,7 @@ def produce(profile,
     Dev 모드로 로컬 PC 에서 Kafka 접근하려면 server.properties 에서 Public IP 로 수정 필요.
 
     """
-    topic = f'my-topic-{profile}'
+    topic = f'{profile}-person'
     print(f"Produce {count} records to {topic}.")
 
     setup = load_setup(profile)

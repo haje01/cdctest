@@ -6,3 +6,4 @@ kafka-python
 pytest
 pytest-shell
 paramiko
+boto3

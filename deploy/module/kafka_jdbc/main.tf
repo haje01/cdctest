@@ -122,6 +122,7 @@ echo 'export PATH=$PATH:$JAVA_HOME/bin' >> ~/.myenv
 wget -nv ${var.kafka_url}
 kafka_file=${basename(var.kafka_url)}
 kafka_dir=$(basename $kafka_file .tgz)
+echo "export KAFKA_HOME=~/$kafka_dir" >> ~/.myenv
 tar xzf $kafka_file
 rm $kafka_file
 cd $kafka_dir
