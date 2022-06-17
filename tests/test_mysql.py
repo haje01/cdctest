@@ -5,9 +5,8 @@ from multiprocessing import Process
 import pytest
 from mysql.connector import connect
 
-from kfktest.util import (SSH, register_socon, unregister_socon, list_socons,
-    unregister_all_socons, count_topic_message, ssh_exec, local_exec,
-    xsetup, xtable, xtopic, xsocon, xcp_setup
+from kfktest.util import (SSH, count_topic_message, ssh_exec,
+    xsetup, xsocon, xcp_setup, xtable, xtopic
 )
 from kfktest.selector import select
 from kfktest.inserter import insert
@@ -62,7 +61,7 @@ def test_ct_local_basic(xsocon, xsetup):
         p.start()
 
     # 카프카 토픽 확인 (timeout 되기전에 다 받아야 함)
-    cnt = count_topic_message(ssh, kafka_ip, 'my-topic-person', timeout=25)
+    cnt = count_topic_message(ssh, kafka_ip, 'my-topic-person', timeout=20)
     assert 10000 * NUM_INSEL_PROCS == cnt
 
     for p in ins_pros:
@@ -121,7 +120,7 @@ def test_ct_remote_basic(xcp_setup, xsocon):
         p.start()
 
     # 카프카 토픽 확인 (timeout 되기전에 다 받아야 함)
-    cnt = count_topic_message(ssh, kafka_ip, 'my-topic-person', timeout=25)
+    cnt = count_topic_message(ssh, kafka_ip, 'my-topic-person', timeout=20)
     assert 10000 * NUM_INSEL_PROCS == cnt
 
     for p in ins_pros:

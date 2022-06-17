@@ -214,7 +214,7 @@ module "consumer" {
 
 # Kafka
 module "kafka" {
-  source = "../../module/kafka_jdbc"
+  source = "../module/kafka_jdbc"
   name = var.name
   ubuntu_ami = var.ubuntu_ami
   private_key = var.private_key

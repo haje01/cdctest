@@ -2,9 +2,8 @@ from multiprocessing import Process
 
 import pytest
 
-from kfktest.util import (SSH, register_socon, unregister_socon, list_socons,
-    unregister_all_socons, count_topic_message, ssh_exec, local_exec, db_port,
-    xsetup, xtopic, xcp_setup, xtable, xdbconcur, xsocon
+from kfktest.util import (SSH, count_topic_message, ssh_exec, local_exec,
+    xsetup, xcp_setup, xsocon, xtable, xtopic
 )
 
 NUM_INSEL_PROCS = 5
@@ -30,7 +29,7 @@ def _local_insert_proc(pid, epoch, batch):
     print(f"Insert process done: {pid}")
 
 
-def test_ct_local_basic(xsetup, xtable, xsocon):
+def test_ct_local_basic(xsetup, xtabxsocon):
     """로컬 insert / select 로 기본적인 Change Tracking 테스트."""
     cons_ip = xsetup['consumer_public_ip']['value']
     kafka_ip = xsetup['kafka_private_ip']['value']
@@ -89,17 +88,17 @@ def _remote_insert_proc(setup, pid, epoch, batch):
     return ret
 
 
-def test_ct_remote_basic(cp_setup, table, socon):
+def test_ct_remote_basic(xcp_setup, xsocon):
     """원격 insert / select 로 기본적인 Change Tracking 테스트."""
-    cons_ip = cp_setup['consumer_public_ip']['value']
-    kafka_ip = cp_setup['kafka_private_ip']['value']
+    cons_ip = xcp_setup['consumer_public_ip']['value']
+    kafka_ip = xcp_setup['kafka_private_ip']['value']
     ssh = SSH(cons_ip)
 
     # Selector 프로세스들 시작
     sel_pros = []
     for pid in range(1, NUM_INSEL_PROCS + 1):
         # insert 프로세스
-        p = Process(target=_remote_select_proc, args=(cp_setup, pid))
+        p = Process(target=_remote_select_proc, args=(xcp_setup, pid))
         sel_pros.append(p)
         p.start()
 
@@ -107,7 +106,7 @@ def test_ct_remote_basic(cp_setup, table, socon):
     ins_pros = []
     for pid in range(1, NUM_INSEL_PROCS + 1):
         # insert 프로세스
-        p = Process(target=_remote_insert_proc, args=(cp_setup, pid, 100, 100))
+        p = Process(target=_remote_insert_proc, args=(xcp_setup, pid, 100, 100))
         ins_pros.append(p)
         p.start()
 

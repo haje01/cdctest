@@ -361,7 +361,7 @@ def unregister_all_socons(node_ssh, kafka_addr):
 
 
 @pytest.fixture
-def xtopic(xsetup, xprofile):
+def xtopic(xsetup):
     """테스트용 카프카 토픽 초기화."""
     cons_ip = xsetup['consumer_public_ip']['value']
     kafka_ip = xsetup['kafka_private_ip']['value']
