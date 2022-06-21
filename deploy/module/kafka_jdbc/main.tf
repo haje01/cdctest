@@ -65,21 +65,31 @@ mv /tmp/${basename(var.kafka_jdbc_connector)} connectors/
 cd connectors/
 unzip ${basename(var.kafka_jdbc_connector)}
 rm ${basename(var.kafka_jdbc_connector)}
-kjc_file=${basename(var.kafka_jdbc_connector)}
-kjc_dir=$(basename $kjc_file .zip)
 sed -i "s/#plugin.path=/plugin.path=\\/home\\/ubuntu\\/$kafka_dir\\/connectors/" ../config/connect-distributed.properties
 cd ..
 EOT
   run_kafka_jdbc_connector = <<EOT
-bin/connect-distributed.sh -daemon config/connect-distributed.properties
+bin/connect-distributed.sh -daemon ./config/connect-distributed.properties
 sleep 10
-# screen -S kafka-connect -dm bash -c 'JAVA_HOME=/usr/lib/jvm/java-8-openjdk-amd64; sudo bin/connect-distributed.sh config/connect-distributed.properties; exec bash'
+# screen -S kafka-connect -dm bash -c 'JAVA_HOME=/usr/lib/jvm/java-8-openjdk-amd64; bin/connect-distributed.sh ./config/connect-distributed.properties; exec bash'
 # while ! curl -s localhost:8083/connectors >> /dev/null 2>&1 ; do sleep 5 ; done
 EOT
   install_mysql_jdbc_driver = <<EOT
 sudo apt install -y /tmp/${basename(var.mysql_jdbc_driver)}
-cp /usr/share/java/mysql-connector-java-*.jar ~/$kafka_dir/connectors/$kjc_dir/lib
+cp /usr/share/java/mysql-connector-java-*.jar /home/ubuntu/$kafka_dir/connectors/$kjc_dir/lib
 EOT
+}
+
+resource "aws_eip" "kafka" {
+  instance = aws_instance.kafka.id
+  vpc = true
+  tags = merge(
+    {
+      Name = "${var.name}-kafka",
+      terraform = "true"
+    },
+    var.tags
+  )
 }
 
 # Kafka 인스턴스
@@ -112,27 +122,40 @@ connection {
   provisioner "remote-exec" {
     inline = [<<EOT
 cloud-init status --wait
-sudo apt update
-sudo apt install -y unzip
-
-# Kafka 설치
-sudo apt install -y openjdk-8-jdk
-echo 'export JAVA_HOME=/usr/lib/jvm/java-8-openjdk-amd64' >> ~/.myenv
-echo 'export PATH=$PATH:$JAVA_HOME/bin' >> ~/.myenv
-wget -nv ${var.kafka_url}
 kafka_file=${basename(var.kafka_url)}
 kafka_dir=$(basename $kafka_file .tgz)
-echo "export KAFKA_HOME=~/$kafka_dir" >> ~/.myenv
+kjc_file=${basename(var.kafka_jdbc_connector)}
+kjc_dir=$(basename $kjc_file .zip)
+
+sudo apt update
+sudo apt install -y unzip
+# Kafka 설치
+sudo apt install -y openjdk-8-jdk
+echo 'export JAVA_HOME=/usr/lib/jvm/java-8-openjdk-amd64' >> ~/.kenv
+echo 'export PATH=$PATH:$JAVA_HOME/bin' >> ~/.kenv
+echo "export KAFKA_HOME=~/$kafka_dir" >> ~/.kenv
+wget -nv ${var.kafka_url}
+echo ${var.kafka_url} > /tmp/kurl
+echo ${basename(var.kafka_url)} > /tmp/kbase
+echo $kafka_file > /tmp/kfile
+echo $kafka_dir > /tmp/kdir
 tar xzf $kafka_file
 rm $kafka_file
+
+# 설정
 cd $kafka_dir
 sed -i "s/#listeners=PLAINTEXT:\\/\\/:9092/listeners=INTERNAL:\\/\\/0.0.0.0:9092,EXTERNAL:\\/\\/0.0.0.0:19092/" config/server.properties
 sed -i "s/#advertised.listeners=PLAINTEXT:\\/\\/your.host.name:9092/advertised.listeners=INTERNAL:\\/\\/${self.private_ip}:9092,EXTERNAL:\\/\\/${self.public_ip}:19092/" config/server.properties
 echo "listener.security.protocol.map=INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT" >> config/server.properties
 echo "inter.broker.listener.name=INTERNAL" >> config/server.properties
 
-echo "export PATH=$PATH:~/$kafka_dir/bin" >> ~/.myenv
-cat ~/.myenv >> ~/.bashrc
+sudo mkdir -p /data/zookeeper
+sudo mkdir -p /data/kafka
+sudo chown ubuntu:ubuntu -R /data
+sed -i "s/dataDir=\\/tmp\\/zookeeper/dataDir=\\/data\\/zookeeper/" config/zookeeper.properties
+sed -i "s/log.dirs=\\/tmp\\/kafka-logs/log.dirs=\\/data\\/kafka/" config/server.properties
+echo "export PATH=$PATH:~/$kafka_dir/bin" >> ~/.kenv
+cat ~/.kenv >> ~/.bashrc
 
 # 플러그인 설치
 ${var.kafka_jdbc_connector != "" ? local.install_kafka_jdbc_connector : ""}
@@ -140,15 +163,13 @@ ${var.mysql_jdbc_driver != ""? local.install_mysql_jdbc_driver : ""}
 # MSSQL JDBC Driver 는 confluentinc-kafka-connect-jdbc 에 이미 포함
 
 # 실행
-bin/zookeeper-server-start.sh -daemon config/zookeeper.properties
-bin/kafka-server-start.sh -daemon config/server.properties
+bin/zookeeper-server-start.sh -daemon ./config/zookeeper.properties
+bin/kafka-server-start.sh -daemon ./config/server.properties
 ${var.kafka_jdbc_connector != "" ? local.run_kafka_jdbc_connector : ""}
-
-# screen -S zookeeper -dm bash -c 'JAVA_HOME=/usr/lib/jvm/java-8-openjdk-amd64; sudo bin/zookeeper-server-start.sh config/zookeeper.properties; exec bash'
-# screen -S kafka -dm bash -c 'JAVA_HOME=/usr/lib/jvm/java-8-openjdk-amd64; sudo bin/kafka-server-start.sh config/server.properties; exec bash'
 
 # Connector 등록
 # "bash /tmp/regretry.sh
+sleep 10
 EOT
     ]
   }

@@ -5,6 +5,7 @@
 """
 import os
 import json
+from json import JSONDecodeError
 import re
 import time
 import binascii
@@ -65,15 +66,20 @@ def insert_fake(conn, cursor, epoch, batch, pid, profile):
         # time.sleep(0.8)
 
 
-def SSH(host):
+@retry(RuntimeError, tries=10, delay=3)
+def SSH(host, name=None):
     """Paramiko SSH 접속 생성."""
-    print(f"Connect {host} via SSH")
+    name = host if name is None else f'{name} ({host})'
+    print(f"[ ] ssh connect {name}")
     ssh_pkey = os.environ['KFKTEST_SSH_PKEY']
-
     ssh = paramiko.SSHClient()
     ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
     pkey = paramiko.RSAKey.from_private_key_file(ssh_pkey)
-    ssh.connect(host, username='ubuntu', pkey=pkey)
+    try:
+        ssh.connect(host, username='ubuntu', pkey=pkey)
+    except paramiko.ssh_exception.NoValidConnectionsError:
+        raise RuntimeError("Can not connnect to {host}")
+    print(f"[v] ssh connect {name}")
     return ssh
 
 
@@ -91,8 +97,9 @@ def ssh_exec(ssh, cmd, kafka_env=True, stderr_type="stderr", ignore_err=False):
         ignore_err (bool): 에러가 있어도 무시
 
     """
-    env = ". ~/.myenv && " if kafka_env else ""
-    _, stdout, stderr = ssh.exec_command(env + cmd)
+    env = "source ~/.kenv && " if kafka_env else ""
+    cmd = f'{env}{cmd}'
+    _, stdout, stderr = ssh.exec_command(cmd)
     es = stdout.channel.recv_exit_status()
     out = stdout.read().decode('utf8')
     err = stderr.read().decode('utf8')
@@ -103,7 +110,7 @@ def ssh_exec(ssh, cmd, kafka_env=True, stderr_type="stderr", ignore_err=False):
         err = ''
     elif es != 0 and err == '':
         err = out
-    if not ignore_err:
+    if es != 0 and not ignore_err :
         if err != '':
             ssh_addr = ssh.get_transport().getpeername()[0]
             raise Exception(f'[@{ssh_addr}] {cmd} <--- {err}')
@@ -138,7 +145,7 @@ def scp_to_remote(src, dst_addr, dst_dir):
     return local_exec(cmd)
 
 
-def list_topics(profile, skip_internal=True):
+def list_topics(kfk_ssh, skip_internal=True):
     """토픽 리스팅.
 
     Args:
@@ -150,7 +157,6 @@ def list_topics(profile, skip_internal=True):
 
     """
     print("list_topics at kafka")
-    kfk_ssh = get_kafka_ssh(profile)
     ret = ssh_exec(kfk_ssh, f'kafka-topics.sh --list --bootstrap-server localhost:9092')
     topics = ret.strip().split('\n')
     if skip_internal:
@@ -158,40 +164,38 @@ def list_topics(profile, skip_internal=True):
     return topics
 
 
-def create_topic(profile, topic, partitions=12, replications=1):
+def create_topic(kfk_ssh, topic, partitions=12, replications=1):
     """토픽 생성.
 
     Args:
-        profile (str): 프로파일 명
+        kfk_ssh : Kafka 노드의 Paramiko SSH 객체
         topic (str): 생성할 토픽 이름
 
     """
-    kfk_ssh = get_kafka_ssh(profile)
     return ssh_exec(kfk_ssh, f'kafka-topics.sh --create --topic {topic} --bootstrap-server localhost:9092 --partitions {partitions} --replication-factor {replications}')
 
 
-def claim_topic(profile, topic, partitions=12, replications=1):
+def claim_topic(kfk_ssh, topic, partitions=12, replications=1):
     """토픽이 없는 경우만 생성.
 
     Args:
-        profile (str):
+        kfk_ssh : Kafka 노드의 Paramiko SSH 객체
         topic (str): 생성할 토픽 이름
 
     """
-    print(f"claim_topic: {topic} at kafka for {profile}")
-    topics = list_topics(profile)
+    print(f"claim_topic: {topic} at kafka")
+    topics = list_topics(kfk_ssh)
     if topic not in topics:
-        create_topic(profile, topic, partitions=partitions, replications=replications)
+        create_topic(kfk_ssh, topic, partitions=partitions, replications=replications)
 
 
-def describe_topic(profile, topic):
+def describe_topic(kfk_ssh, topic):
     """토픽 정보 얻기.
 
     Returns:
         tuple: 토픽 정보, 토픽 파티션들 정보
 
     """
-    kfk_ssh = get_kafka_ssh(profile)
     ret = ssh_exec(kfk_ssh, f'kafka-topics.sh --describe --topic {topic} --bootstrap-server localhost:9092')
     items = ret.strip().split('\n')
     items = [item.split('\t') for item in items]
@@ -202,14 +206,19 @@ def get_kafka_ssh(profile):
     """프로파일에 맞는 Kafka SSH 얻기."""
     setup = load_setup(profile)
     ip = setup['kafka_public_ip']['value']
-    ssh = SSH(ip)
+    ssh = SSH(ip, 'kafka')
     return ssh
 
 
-def check_topic_exists(profile, topic):
+@pytest.fixture
+def xkfssh(xprofile):
+    ssh = get_kafka_ssh(xprofile)
+    yield ssh
+
+
+def check_topic_exists(kfk_ssh, topic):
     """토픽 존재 여부를 체크."""
-    ssh = get_kafka_ssh(profile)
-    return _check_topic_exists(ssh, topic)
+    return _check_topic_exists(kfk_ssh, topic)
 
 
 def _check_topic_exists(kfk_ssh, topic):
@@ -219,7 +228,7 @@ def _check_topic_exists(kfk_ssh, topic):
 
 
 @retry(RuntimeError, tries=7, delay=3)
-def delete_topic(profile, topic, ignore_not_exist=False):
+def delete_topic(kfk_ssh, topic, ignore_not_exist=False):
     """토픽 삭제.
 
     토픽이 가끔 삭제되지 않는 이슈:
@@ -228,15 +237,14 @@ def delete_topic(profile, topic, ignore_not_exist=False):
     - 문제 발생시 zookeeper shell 로 지워주어야
 
     Args:
-        profile (str): 프로파일 명
+        kfk_ssh : Kafka 노드의 Paramiko SSH 객체
         topic (str): 삭제할 토픽 이름
         ignore_not_exist (bool): 토픽이 존재하지 않는 경우 에러 무시
         retry (int): 삭제가 완료될 때까지 재시도 횟수. 기본값 None
 
     """
 
-    print(f"try delete_topic '{topic}'")
-    kfk_ssh = get_kafka_ssh(profile)
+    print(f"[ ] delete_topic '{topic}'")
 
     try:
         ret = ssh_exec(kfk_ssh, f'kafka-topics.sh --delete --topic {topic}  --bootstrap-server localhost:9092')
@@ -249,7 +257,7 @@ def delete_topic(profile, topic, ignore_not_exist=False):
 
     if _check_topic_exists(kfk_ssh, topic):
         raise RuntimeError(f"Topic {topic} still remain.")
-    print(f"delete_topic '{topic}' - success")
+    print(f"[v] delete_topic '{topic}'")
     return ret
 
 
@@ -262,12 +270,13 @@ def delete_all_topics(profile):
 
 def reset_topic(profile, topic, partitions=12, replications=1):
     """특정 토픽 초기화."""
-    print(f"reset_topic '{topic}'")
+    print(f"[ ] reset_topic '{topic}'")
     delete_topic(profile, topic, True)
     create_topic(profile, topic, partitions, replications)
+    print(f"[v] reset_topic '{topic}'")
 
 
-def count_topic_message(profile, topic, from_begin=True, timeout=10):
+def count_topic_message(kfk_ssh, topic, from_begin=True, timeout=10):
     """토픽의 메시지 수를 카운팅.
 
     - 카프카 커넥트가 제대로 동작하지 않는 경우
@@ -275,16 +284,14 @@ def count_topic_message(profile, topic, from_begin=True, timeout=10):
     - 이럴 때는 카프카 커넥트를 재시작해야 한다
 
     Args:
-        profile (str): 프로파일
+        kfk_ssh : Kafka 노드의 Paramiko SSH 객체
         topic (str): 토픽명
         from_begin (bool): 토픽의 첫 메시지부터. 기본값 True
         timeout (int): 컨슘 타임아웃 초. 기본값 10초
             너무 작은 값이면 카운팅이 끝나기 전에 종료될 수 있다.
 
     """
-    setup = load_setup(profile)
-    kfk_ssh = get_kafka_ssh(profile)
-    print(f"count_topic_message: topic {topic} timeout {timeout}")
+    print(f"[ ] count_topic_message - topic: {topic}, timeout: {timeout}")
     cmd = f'''kafka-console-consumer.sh --bootstrap-server localhost:9092 --topic {topic} --timeout-ms {timeout * 1000}'''
     if from_begin:
         cmd += ' --from-beginning'
@@ -296,10 +303,12 @@ def count_topic_message(profile, topic, from_begin=True, timeout=10):
         cnt = int(match.groups()[0])
     else:
         raise Exception(f"Not matching result: {msg}")
+    print(f"[v] count_topic_message - topic: {topic}, timeout: {timeout}")
     return cnt
 
 
-def register_socon(profile, db_addr,
+@retry(RuntimeError, tries=6, delay=5)
+def register_socon(kfk_ssh, profile, db_addr,
         db_port, db_user, db_passwd, db_name, tables, topic_prefix,
         poll_interval=5000):
     """카프카 JDBC Source 커넥터 등록.
@@ -327,7 +336,7 @@ def register_socon(profile, db_addr,
 
     hash = binascii.hexlify(os.urandom(3)).decode('utf8')
     conn_name = f'my-socon-{hash}'
-    print(f"register_socon {conn_name}: {db_url}")
+    print(f"[ ] register_socon {conn_name}: {db_url}")
     isolation = 'READ_UNCOMMITTED' if profile == 'mssql' else 'DEFAULT'
 
     cmd = f'''
@@ -353,12 +362,18 @@ curl -vs -X POST 'http://localhost:8083/connectors' \
     }} \
 }}'
 '''
-    kfk_ssh = get_kafka_ssh(profile)
-    ret = ssh_exec(kfk_ssh, cmd, stderr_type="ignore")
-    return json.loads(ret)
+    ret = ssh_exec(kfk_ssh, cmd)
+    try:
+        data = json.loads(ret)
+    except Exception as e:
+        msg = str(e)
+        print(msg)
+        raise RuntimeError(msg)
+    print("[v] register_socon {profile} for {tables}")
+    return data
 
 
-def list_socons(profile):
+def list_socons(kfk_ssh):
     """등록된 카프카 Source 커넥터 리스트.
 
     Returns:
@@ -366,54 +381,56 @@ def list_socons(profile):
 
     """
     cmd = f'''curl -s http://localhost:8083/connectors'''
-    ret = ssh_exec(get_kafka_ssh(profile), cmd)
+    ret = ssh_exec(kfk_ssh, cmd)
     conns = json.loads(ret)
     return conns
 
 
-def unregister_socon(profile, conn_name):
+def unregister_socon(kfk_ssh, conn_name):
     """카프카 JDBC Source 커넥터 해제.
 
     Args:
-        profile (str): 프로파일 명
+        kfk_ssh : Kafka 노드의 Paramiko SSH 객체
         conn_name (str): 커넥터 이름
 
     """
     print(f"unregister_socon {conn_name}")
     cmd = f'''curl -X DELETE http://localhost:8083/connectors/{conn_name}'''
-    ssh_exec(get_kafka_ssh(profile), cmd, ignore_err=True)
-
-
-def unregister_all_socons(profile):
-    """등록된 모든 카프카 Source 커넥터 해제."""
-    print("unregister_all_socons")
-    for socon in list_socons(profile):
-        unregister_socon(profile, socon)
-
-
-def start_zookeeper(profile):
-    """주키퍼 시작."""
-    print(f"=== start_zookeeper for {profile} ===")
-    kfk_ssh = get_kafka_ssh(profile)
-    ssh_exec(kfk_ssh, "cd $KAFKA_HOME && bin/zookeeper-server-start.sh -daemon config/zookeeper.properties && sleep 5")
-
-
-def stop_zookeeper(profile, ignore_err=False):
-    """주키퍼 정지."""
-    print(f"=== stop_zookeeper for {profile} ===")
-    kfk_ssh = get_kafka_ssh(profile)
-    ssh_exec(kfk_ssh, "zookeeper-server-stop.sh", ignore_err=ignore_err)
+    ssh_exec(kfk_ssh, cmd, ignore_err=True)
 
 
 @retry(RuntimeError, tries=6, delay=5)
-def start_kafka_broker(profile):
+def unregister_all_socons(kfk_ssh):
+    """등록된 모든 카프카 Source 커넥터 해제."""
+    print("[ ] unregister_all_socons")
+    for socon in list_socons(kfk_ssh):
+        unregister_socon(kfk_ssh, socon)
+    print("[v] unregister_all_socons")
+
+
+def start_zookeeper(kfk_ssh):
+    """주키퍼 시작."""
+    print(f"[ ] start_zookeeper")
+    ssh_exec(kfk_ssh, "cd $KAFKA_HOME && bin/zookeeper-server-start.sh -daemon config/zookeeper.properties && sleep 5")
+    print(f"[v] start_zookeeper")
+
+
+@retry(RuntimeError, tries=6, delay=5)
+def stop_zookeeper(kfk_ssh, ignore_err=False):
+    """주키퍼 정지."""
+    print(f"[ ] stop_zookeeper")
+    ssh_exec(kfk_ssh, "zookeeper-server-stop.sh", ignore_err=ignore_err)
+    print(f"[v] stop_zookeeper")
+
+
+@retry(RuntimeError, tries=6, delay=5)
+def start_kafka_broker(kfk_ssh):
     """카프카 브로커 시작.
 
     주: 프로세스 kill 후 몇 번 시도가 필요한 듯.
 
     """
-    print(f"try start_kafka_broker for {profile}")
-    kfk_ssh = get_kafka_ssh(profile)
+    print(f"[ ] start_kafka_broker")
     ssh_exec(kfk_ssh, "cd $KAFKA_HOME && bin/kafka-server-start.sh -daemon config/server.properties")
     # 충분한 시간 경과 후에 동작을 확인해야 한다.
     time.sleep(10)
@@ -421,54 +438,58 @@ def start_kafka_broker(profile):
     ret = ssh_exec(kfk_ssh, 'fuser 9092/tcp', stderr_type='stdout')
     if ret == '':
         raise RuntimeError('Broker not launched!')
-    print(f"=== start_kafka_broker for {profile} ===")
+    print(f"[v] start_kafka_broker")
 
 
-def stop_kafka_broker(profile, ignore_err=False):
+def stop_kafka_broker(kfk_ssh, ignore_err=False):
     """카프카 브로커 정지."""
-    print(f"=== stop_kafka_broker for {profile} ===")
-    kfk_ssh = get_kafka_ssh(profile)
+    print(f"[ ] stop_kafka_broker")
     ssh_exec(kfk_ssh, "kafka-server-stop.sh", ignore_err=ignore_err)
+    print(f"[v] stop_kafka_broker")
 
 
 @pytest.fixture
 def xkvmstart(xprofile):
     """Kafka VM이 정지상태이면 재개."""
     print('kvmstart')
+    started = False
     while True:
         inst = ec2inst_by_name(xprofile, 'kafka')
         state = inst.state['Name']
         if state == 'running':
             print("Kafka VM is running.")
             break
+        elif state == 'stopped' and not started:
+            vm_start(xprofile, 'kafka')
+            started = True
         print(f"Kafka VM state: {state}, Wait for running..")
         time.sleep(5)
 
 
 @pytest.fixture
-def xzookeeper(xsetup, xprofile, xkvmstart):
+def xzookeeper(xsetup, xkfssh, xkvmstart):
     """주키퍼 초기화."""
     # 기존 주키퍼 정지
-    stop_zookeeper(xprofile, True)
+    stop_zookeeper(xkfssh, True)
     # 주키퍼 시작
-    start_zookeeper(xprofile)
+    start_zookeeper(xkfssh)
     yield
 
 
 @pytest.fixture
-def xkafka(xsetup, xprofile, xzookeeper):
+def xkafka(xsetup, xkfssh, xzookeeper):
     """카프카 브로커 초기화."""
     # 기존 브로커 정지
-    stop_kafka_broker(xprofile, True)
+    stop_kafka_broker(xkfssh, True)
     # 브로커 시작
-    start_kafka_broker(xprofile)
+    start_kafka_broker(xkfssh)
     yield
 
 
 @pytest.fixture
-def xtopic(xprofile, xkafka):
+def xtopic(xkfssh, xprofile, xkafka):
     """테스트용 카프카 토픽 초기화."""
-    reset_topic(xprofile, f"{xprofile}-person")
+    reset_topic(xkfssh, f"{xprofile}-person")
     yield
 
 
@@ -541,18 +562,43 @@ def xtable(xprofile, xkafka):
 
 
 @pytest.fixture
-def xsocon(xprofile, xtable, xtopic, xsetup):
-    """테스트용 카프카 커넥터 초기화 (테이블과 토픽 먼저 생성)."""
-    cons_ip = xsetup['consumer_public_ip']['value']
-    kafka_ip = xsetup['kafka_private_ip']['value']
+def xconn(xkfssh, xsetup):
+    """테스트용 카프카 커넥트 기동 요청.
+
+    - 커넥트가 기동되지 않았으면 기동
+    - VM 정지 후 재시작하면 Kafka Connect 가 비정상 -> 재시작해야
+
+    """
+    ret = ssh_exec(xkfssh, 'fuser 8083/tcp', stderr_type='stdout')
+    if ret == '':
+        start_kafka_connect(xkfssh)
+    else:
+        print("Kafka Connect is already running.")
+
+
+@retry(RuntimeError, tries=6, delay=5)
+def start_kafka_connect(kfk_ssh):
+    """카프카 커넥트 시작."""
+    print(f"[ ] start_kafka_connect")
+    ssh_exec(kfk_ssh, "cd $KAFKA_HOME && bin/connect-distributed.sh -daemon config/connect-distributed.properties")
+    # 잠시 후 동작 확인
+    time.sleep(4)
+    # 브로커 시작 확인
+    ret = ssh_exec(kfk_ssh, 'fuser 9092/tcp', stderr_type='stdout')
+    if ret == '':
+        raise RuntimeError('Connect not launched!')
+    print(f"[v] start_kafka_connect")
+
+
+@pytest.fixture
+def xsocon(xprofile, xkfssh, xtable, xtopic, xconn, xsetup):
+    """테스트용 카프카 소스 커넥터 초기화 (테이블과 토픽 먼저 생성)."""
     db_addr = xsetup[f'{xprofile}_private_ip']['value']
     db_user = xsetup['db_user']['value']
     db_passwd = xsetup['db_passwd']['value']['result']
 
-    ssh = SSH(cons_ip)
-
-    unregister_all_socons(xprofile)
-    ret = register_socon(xprofile, db_addr, DB_PORTS[xprofile],
+    unregister_all_socons(xkfssh)
+    ret = register_socon(xkfssh, xprofile, db_addr, DB_PORTS[xprofile],
         db_user, db_passwd, "test", "person", f"{xprofile}-")
     try:
         conn_name = ret['name']
@@ -583,7 +629,7 @@ def kill_proc_by_port(ssh, port):
 
     """
     addr = ssh.get_transport().getpeername()[0]
-    print(f"=== kill_proc_by_port {port} at {addr} === ")
+    print(f"kill_proc_by_port {port} at {addr}")
     cmd = f'kill -9 $(fuser {port}/tcp)'
     ssh_exec(ssh, cmd, stderr_type='stdout')
 
@@ -601,14 +647,27 @@ def vm_stop(profile, inst_name):
     """VM 을 정지."""
     print(f"vm_stop {inst_name} of {profile}")
     inst = ec2inst_by_name(profile, inst_name)
-    ret = inst.stop()
-    import pdb; pdb.set_trace()
-    return ret
+    inst.stop()
+    wait_vm_state(profile, inst_name, 'stopped')
 
 
 def vm_start(profile, inst_name):
     """VM 을 재개."""
     print(f"vm_start {inst_name} of {profile}")
     inst = ec2inst_by_name(profile, inst_name)
-    ret = inst.start()
-    return ret
+    inst.start()
+    wait_vm_state(profile, inst_name, 'running')
+
+
+@retry(RuntimeError, delay=3)
+def wait_vm_state(profile, inst_name, state):
+    """원하는 상태가 될 때까지 재시도"""
+    while True:
+        inst = ec2inst_by_name(profile, 'kafka')
+        _state = inst.state['Name']
+        time.sleep(3)
+        if _state == state:
+            print("Kafka VM is running.")
+            break
+        print(f"[ ] wait for {inst_name} vm of {profile} {state}.. (now {_state})")
+    print(f"[v] wait for {inst_name} vm of {profile} {state}.. (now {_state})")

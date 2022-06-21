@@ -17,7 +17,7 @@ parser.add_argument('-d', '--dev', action='store_true', default=False,
 
 
 def reset_table(profile):
-    print(f"reset_table for {profile}")
+    print(f"[ ] reset_table for {profile}")
     conn, cursor = db_concur(profile)
 
     if profile == 'mysql':
@@ -57,6 +57,7 @@ def reset_table(profile):
     else:
         cursor.execute(sql)
     conn.commit()
+    print(f"[X] reset_table for {profile}")
     return conn, cursor
 
 

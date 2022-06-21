@@ -33,15 +33,15 @@ locals {
   install_kafka = <<EOT
 # Kafka 설치
 sudo apt install -y openjdk-8-jdk
-echo 'export JAVA_HOME=/usr/lib/jvm/java-8-openjdk-amd64' >> ~/.myenv
-echo 'export PATH=$PATH:$JAVA_HOME/bin' >> ~/.myenv
+echo 'export JAVA_HOME=/usr/lib/jvm/java-8-openjdk-amd64' >> ~/.kenv
+echo 'export PATH=$PATH:$JAVA_HOME/bin' >> ~/.kenv
 wget -nv ${var.kafka_url}
 kafka_file=${basename(var.kafka_url)}
 kafka_dir=$(basename $kafka_file .tgz)
 tar xzf $kafka_file
 rm $kafka_file
-echo "export PATH=$PATH:~/$kafka_dir/bin" >> ~/.myenv
-cat ~/.myenv >> ~/.bashrc
+echo "export PATH=$PATH:~/$kafka_dir/bin" >> ~/.kenv
+cat ~/.kenv >> ~/.bashrc
 EOT
 }
 

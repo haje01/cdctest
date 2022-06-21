@@ -3,7 +3,7 @@ output "sg_id" {
 }
 
 output "public_ip" {
-  value = aws_instance.kafka.public_ip
+  value = aws_eip.kafka.public_ip
 }
 
 output "private_ip" {
