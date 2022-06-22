@@ -57,7 +57,7 @@ def reset_table(profile):
     else:
         cursor.execute(sql)
     conn.commit()
-    print(f"[X] reset_table for {profile}")
+    print(f"[v] reset_table for {profile}")
     return conn, cursor
 
 

@@ -77,8 +77,8 @@ def SSH(host, name=None):
     pkey = paramiko.RSAKey.from_private_key_file(ssh_pkey)
     try:
         ssh.connect(host, username='ubuntu', pkey=pkey)
-    except paramiko.ssh_exception.NoValidConnectionsError:
-        raise RuntimeError("Can not connnect to {host}")
+    except paramiko.ssh_exception.NoValidConnectionsError as e:
+        raise RuntimeError(f"Can not connnect to {host}")
     print(f"[v] ssh connect {name}")
     return ssh
 
@@ -183,10 +183,11 @@ def claim_topic(kfk_ssh, topic, partitions=12, replications=1):
         topic (str): 생성할 토픽 이름
 
     """
-    print(f"claim_topic: {topic} at kafka")
+    print(f"[ ] claim_topic: {topic} at kafka")
     topics = list_topics(kfk_ssh)
     if topic not in topics:
         create_topic(kfk_ssh, topic, partitions=partitions, replications=replications)
+    print(f"[v] claim_topic: {topic} at kafka")
 
 
 def describe_topic(kfk_ssh, topic):
@@ -211,7 +212,8 @@ def get_kafka_ssh(profile):
 
 
 @pytest.fixture
-def xkfssh(xprofile):
+def xkfssh(xprofile, xkvmstart):
+    print("xkfssh")
     ssh = get_kafka_ssh(xprofile)
     yield ssh
 
@@ -279,9 +281,8 @@ def reset_topic(profile, topic, partitions=12, replications=1):
 def count_topic_message(kfk_ssh, topic, from_begin=True, timeout=10):
     """토픽의 메시지 수를 카운팅.
 
-    - 카프카 커넥트가 제대로 동작하지 않는 경우
-    - 계속 같은 수가 나와 조기 종료되는 문제 있음
-    - 이럴 때는 카프카 커넥트를 재시작해야 한다
+    카프카 커넥트가 제대로 동작하지 않는 경우 계속 같은 수가 나와 조기 종료되는
+    문제 있음. 이럴 때는 카프카 커넥트를 재시작해야 한다
 
     Args:
         kfk_ssh : Kafka 노드의 Paramiko SSH 객체
@@ -408,10 +409,18 @@ def unregister_all_socons(kfk_ssh):
     print("[v] unregister_all_socons")
 
 
+@retry(RuntimeError, tries=6, delay=5)
 def start_zookeeper(kfk_ssh):
     """주키퍼 시작."""
     print(f"[ ] start_zookeeper")
-    ssh_exec(kfk_ssh, "cd $KAFKA_HOME && bin/zookeeper-server-start.sh -daemon config/zookeeper.properties && sleep 5")
+    ssh_exec(kfk_ssh, "sudo systemctl start zookeeper")
+    # 시간 경과 후에 동작 확인
+    time.sleep(5)
+    # 브로커 시작 확인
+    ret = ssh_exec(kfk_ssh, 'fuser 2181/tcp', stderr_type='stdout')
+    if ret == '':
+        raise RuntimeError('Zookeeper not launched!')
+
     print(f"[v] start_zookeeper")
 
 
@@ -419,7 +428,7 @@ def start_zookeeper(kfk_ssh):
 def stop_zookeeper(kfk_ssh, ignore_err=False):
     """주키퍼 정지."""
     print(f"[ ] stop_zookeeper")
-    ssh_exec(kfk_ssh, "zookeeper-server-stop.sh", ignore_err=ignore_err)
+    ssh_exec(kfk_ssh, "sudo systemctl stop zookeeper", ignore_err=ignore_err)
     print(f"[v] stop_zookeeper")
 
 
@@ -431,7 +440,7 @@ def start_kafka_broker(kfk_ssh):
 
     """
     print(f"[ ] start_kafka_broker")
-    ssh_exec(kfk_ssh, "cd $KAFKA_HOME && bin/kafka-server-start.sh -daemon config/server.properties")
+    ssh_exec(kfk_ssh, "sudo systemctl start kafka")
     # 충분한 시간 경과 후에 동작을 확인해야 한다.
     time.sleep(10)
     # 브로커 시작 확인
@@ -451,44 +460,63 @@ def stop_kafka_broker(kfk_ssh, ignore_err=False):
 @pytest.fixture
 def xkvmstart(xprofile):
     """Kafka VM이 정지상태이면 재개."""
-    print('kvmstart')
-    started = False
-    while True:
-        inst = ec2inst_by_name(xprofile, 'kafka')
-        state = inst.state['Name']
-        if state == 'running':
-            print("Kafka VM is running.")
-            break
-        elif state == 'stopped' and not started:
-            vm_start(xprofile, 'kafka')
-            started = True
-        print(f"Kafka VM state: {state}, Wait for running..")
-        time.sleep(5)
+    print("xkvmstart")
+    claim_vm_start(xprofile, 'kafka')
+    yield
+
+
+# @retry(RuntimeError, tries=10, delay=5)
+# def claim_kafka_instance(profile):
+#     """Kafka 인스턴스 동작 확인"""
+#     print("[ ] claim_kafka_intance")
+#     inst = ec2inst_by_name(profile, 'kafka')
+#     state = inst.state['Name']
+#     if state != 'running':
+#         claim_vm_start(profile, 'kafka')
+#     print("[ ] claim_kafka_intance")
 
 
 @pytest.fixture
-def xzookeeper(xsetup, xkfssh, xkvmstart):
-    """주키퍼 초기화."""
-    # 기존 주키퍼 정지
-    stop_zookeeper(xkfssh, True)
-    # 주키퍼 시작
-    start_zookeeper(xkfssh)
+def xzookeeper(xsetup, xkfssh):
+    """주키퍼 동작 확인."""
+    print("xzookeeper")
+    claim_zookeeper(xkfssh)
     yield
+
+
+@retry(RuntimeError, tries=10, delay=3)
+def claim_zookeeper(kfk_ssh):
+    """주키퍼 동작 확인."""
+    print("[ ] claim_zookeeper")
+    ret = ssh_exec(kfk_ssh, 'fuser 2181/tcp', stderr_type='stdout')
+    # 주키퍼가 떠있지 않으면 시작
+    if ret == '':
+        start_zookeeper(xkfssh)
+    print("[v] claim_zookeeper")
 
 
 @pytest.fixture
 def xkafka(xsetup, xkfssh, xzookeeper):
-    """카프카 브로커 초기화."""
-    # 기존 브로커 정지
-    stop_kafka_broker(xkfssh, True)
-    # 브로커 시작
-    start_kafka_broker(xkfssh)
+    """카프카 브로커 동작 확인."""
+    print("xkafka")
+    claim_kafka(xkfssh)
     yield
+
+
+def claim_kafka(kfk_ssh):
+    """카프카 브로커 동작 확인."""
+    print("[ ] claim_kafka")
+    ret = ssh_exec(kfk_ssh, 'fuser 9092/tcp', stderr_type='stdout')
+    # 주키퍼가 떠있지 않으면 시작
+    if ret == '':
+        start_kafka_connect(kfk_ssh)
+    print("[v] claim_kafka")
 
 
 @pytest.fixture
 def xtopic(xkfssh, xprofile, xkafka):
     """테스트용 카프카 토픽 초기화."""
+    print("xtopic")
     reset_topic(xkfssh, f"{xprofile}-person")
     yield
 
@@ -500,6 +528,7 @@ def setup_path(profile):
 @pytest.fixture(scope="session")
 def xsetup(xprofile):
     """인프라 설치 정보."""
+    print("xsetup")
     assert os.path.isfile(setup_path(xprofile))
     with open(setup_path(xprofile), 'rt') as f:
         return json.loads(f.read())
@@ -508,6 +537,7 @@ def xsetup(xprofile):
 @pytest.fixture(scope="session")
 def xcp_setup(xprofile, xsetup):
     """확보된 인프라 설치 정보를 원격 노드에 복사."""
+    print("xcp_setup")
     from kfktest.cpsetup import cp_setup as _cp_setup
     _cp_setup(xprofile)
     yield xsetup
@@ -515,6 +545,7 @@ def xcp_setup(xprofile, xsetup):
 
 @pytest.fixture
 def xdbconcur(xprofile):
+    print("xdbconcur")
     conn, cursor = db_concur(xprofile)
     yield conn, cursor
     conn.close()
@@ -548,6 +579,7 @@ def mysql_exec_many(cursor, stmt):
 @pytest.fixture
 def xtable(xprofile, xkafka):
     """테스트용 테이블 초기화."""
+    print("xtable")
     from kfktest.table import reset_table
 
     conn, cursor = reset_table(xprofile)
@@ -569,18 +601,25 @@ def xconn(xkfssh, xsetup):
     - VM 정지 후 재시작하면 Kafka Connect 가 비정상 -> 재시작해야
 
     """
-    ret = ssh_exec(xkfssh, 'fuser 8083/tcp', stderr_type='stdout')
+    print("xconn")
+    claim_kafka_connect(xkfssh)
+    yield
+
+
+def claim_kafka_connect(kfk_ssh):
+    """카프카 커넥트 요청."""
+    print("[ ] claim_kafka_connect")
+    ret = ssh_exec(kfk_ssh, 'fuser 8083/tcp', stderr_type='stdout')
     if ret == '':
-        start_kafka_connect(xkfssh)
-    else:
-        print("Kafka Connect is already running.")
+        start_kafka_connect(kfk_ssh)
+    print("[v] claim_kafka_connect")
 
 
 @retry(RuntimeError, tries=6, delay=5)
 def start_kafka_connect(kfk_ssh):
     """카프카 커넥트 시작."""
     print(f"[ ] start_kafka_connect")
-    ssh_exec(kfk_ssh, "cd $KAFKA_HOME && bin/connect-distributed.sh -daemon config/connect-distributed.properties")
+    ssh_exec(kfk_ssh, "sudo systemctl start kafka-connect")
     # 잠시 후 동작 확인
     time.sleep(4)
     # 브로커 시작 확인
@@ -593,6 +632,7 @@ def start_kafka_connect(kfk_ssh):
 @pytest.fixture
 def xsocon(xprofile, xkfssh, xtable, xtopic, xconn, xsetup):
     """테스트용 카프카 소스 커넥터 초기화 (테이블과 토픽 먼저 생성)."""
+    print("xsocon")
     db_addr = xsetup[f'{xprofile}_private_ip']['value']
     db_user = xsetup['db_user']['value']
     db_passwd = xsetup['db_passwd']['value']['result']
@@ -643,31 +683,31 @@ def ec2inst_by_name(profile, inst_name):
     return inst
 
 
-def vm_stop(profile, inst_name):
+def claim_vm_stop(profile, inst_name):
     """VM 을 정지."""
-    print(f"vm_stop {inst_name} of {profile}")
+    print(f"[ ] claim_vm_stop {inst_name}")
     inst = ec2inst_by_name(profile, inst_name)
     inst.stop()
     wait_vm_state(profile, inst_name, 'stopped')
+    print(f"[v] claim_vm_stop {inst_name}")
 
 
-def vm_start(profile, inst_name):
-    """VM 을 재개."""
-    print(f"vm_start {inst_name} of {profile}")
+def claim_vm_start(profile, inst_name):
+    """VM 동작 확인."""
+    print(f"[ ] claim_vm_start {inst_name} of {profile}")
     inst = ec2inst_by_name(profile, inst_name)
     inst.start()
     wait_vm_state(profile, inst_name, 'running')
+    print(f"[v] claim_vm_start {inst_name} of {profile}")
 
 
-@retry(RuntimeError, delay=3)
+@retry(RuntimeError, delay=5)
 def wait_vm_state(profile, inst_name, state):
-    """원하는 상태가 될 때까지 재시도"""
-    while True:
-        inst = ec2inst_by_name(profile, 'kafka')
-        _state = inst.state['Name']
-        time.sleep(3)
-        if _state == state:
-            print("Kafka VM is running.")
-            break
-        print(f"[ ] wait for {inst_name} vm of {profile} {state}.. (now {_state})")
-    print(f"[v] wait for {inst_name} vm of {profile} {state}.. (now {_state})")
+    """원하는 VM 상태가 될 때까지 재시도"""
+    inst = ec2inst_by_name(profile, 'kafka')
+    _state = inst.state['Name']
+    if _state == state:
+        print(f"[v] wait_vm_state {inst_name} {state}.. (now {_state})")
+    else:
+        print(f"[ ] wait_vm_state {inst_name} {state}.. (now {_state})")
+        raise RuntimeError("VM state mismtach.")

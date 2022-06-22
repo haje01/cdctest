@@ -27,14 +27,15 @@ def consume(profile,
         dev=parser.get_default('dev')
         ):
     topic = f'{profile}-person'
-    print(f"Consume {topic}.")
+    print(f"[ ] consume {topic}.")
 
     setup = load_setup(profile)
     ip_key = 'kafka_public_ip' if dev else 'kafka_private_ip'
     broker_addr = setup[ip_key]['value']
     broker_port = 19092 if dev else 9092
+    if count_only:
+        from_begin = True
 
-    import pdb; pdb.set_trace()
     consumer = KafkaConsumer(topic,
                     group_id=f'my-group-{profile}',
                     bootstrap_servers=[f'{broker_addr}:{broker_port}'],
@@ -50,7 +51,7 @@ def consume(profile,
         if not count_only:
             print(f'{msg.topic}:{msg.partition}:{msg.offset} key={msg.key} value={msg.value}')
 
-    print(f"Consume {cnt} messages.")
+    print(f"[v] consume {cnt} messages.")
     return cnt
 
 

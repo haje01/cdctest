@@ -6,7 +6,8 @@ import pytest
 from mysql.connector import connect
 
 from kfktest.util import (SSH, count_topic_message, ssh_exec, stop_kafka_broker,
-    start_kafka_broker, kill_proc_by_port, vm_start, vm_stop,
+    start_kafka_broker, kill_proc_by_port, claim_vm_start, claim_vm_stop,
+    get_kafka_ssh,
     # 픽스쳐들
     xsetup, xsocon, xcp_setup, xtable, xtopic, xkafka, xzookeeper, xkvmstart,
     xconn, xkfssh
@@ -180,19 +181,21 @@ def test_ct_broker_vmstop(xsetup, xsocon, xkfssh, xprofile):
     ins_pros = []
     for pid in range(1, NUM_INSEL_PROCS + 1):
         # insert 프로세스
-        p = Process(target=_local_insert_proc, args=(pid, 1, 100))
+        p = Process(target=_local_insert_proc, args=(pid, 100, 100))
         ins_pros.append(p)
         p.start()
 
     # 잠시 후 카프카 브로커 VM 정지후 재시작
     time.sleep(2)
-    vm_stop(xprofile, 'kafka')
+    claim_vm_stop(xprofile, 'kafka')
     # VM 정지 후 재시작하면, 모든 서비스는 내려간 상태
     # -> 명시적으로 서비스를 띄워 주어야 한다.
-    vm_start(xprofile, 'kafka')
+    claim_vm_start(xprofile, 'kafka')
 
+    # restart 후 ssh 객체 재생성 필요!
+    kfssh = get_kafka_ssh(xprofile)
     # 카프카 토픽 확인 (timeout 되기 전에 다 받아야 함)
-    cnt = count_topic_message(xkfssh, f'{xprofile}-person', timeout=10)
+    cnt = count_topic_message(kfssh, f'{xprofile}-person', timeout=10)
     assert 10000 * NUM_INSEL_PROCS == cnt
 
     for p in ins_pros:
