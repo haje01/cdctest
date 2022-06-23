@@ -36,10 +36,6 @@ def _local_insert_proc(pid, epoch, batch):
 
 def test_ct_local_basic(xsetup, xsocon, xprofile, xkfssh):
     """로컬 insert / select 로 기본적인 Change Tracking 테스트."""
-    cons_ip = xsetup['consumer_public_ip']['value']
-    kafka_ip = xsetup['kafka_private_ip']['value']
-    ssh = SSH(cons_ip, 'consumer')
-
     # Selector 프로세스들 시작
     sel_pros = []
     for pid in range(1, NUM_INSEL_PROCS + 1):
@@ -147,8 +143,8 @@ def test_ct_broker_down(xsetup, xsocon, xprofile, xkfssh):
     # 카프카 토픽 확인 (timeout 되기 전에 다 받아야 함)
     cnt = count_topic_message(xkfssh, f'{xprofile}-person', timeout=20)
     # 브로커만 강제 Kill 된 경우, 커넥터가 offset 을 flush 하지 못해 다시 시도
-    # -> 중복 메시지 발생!
-    assert 10000 * NUM_INSEL_PROCS < cnt
+    # -> 중복 메시지 발생 가능!
+    assert 10000 * NUM_INSEL_PROCS <= cnt
 
     for p in ins_pros:
         p.join()
@@ -270,10 +266,6 @@ def _remote_insert_proc(setup, pid, epoch, batch):
 
 def test_ct_remote_basic(xcp_setup, xsocon, xprofile, xkfssh):
     """원격 insert / select 로 기본적인 Change Tracking 테스트."""
-    cons_ip = xcp_setup['consumer_public_ip']['value']
-    kafka_ip = xcp_setup['kafka_private_ip']['value']
-    ssh = SSH(cons_ip, 'consumer')
-
     # Selector 프로세스들 시작
     sel_pros = []
     for pid in range(1, NUM_INSEL_PROCS + 1):

@@ -7,7 +7,7 @@ from mysql.connector import connect
 
 from kfktest.util import (SSH, count_topic_message, ssh_exec, stop_kafka_broker,
     start_kafka_broker, kill_proc_by_port, vm_start, vm_stop, vm_hibernate,
-    get_kafka_ssh,
+    get_kafka_ssh, stop_kafka_and_connect, start_kafka_and_connect,
     # 픽스쳐들
     xsetup, xsocon, xcp_setup, xtable, xtopic, xkafka, xzookeeper, xkvmstart,
     xconn, xkfssh
@@ -43,13 +43,8 @@ def test_ct_local_basic(xsocon, xkfssh, xsetup, xprofile):
     - 테스트 시작전 이전 토픽을 참고하는 것이 없어야 함. (delete_topic 에러 발생)
 
     """
-    cons_ip = xsetup['consumer_public_ip']['value']
-    kafka_ip = xsetup['kafka_private_ip']['value']
-    ssh = SSH(cons_ip, 'consumer')
-
     # Selector 프로세스들 시작
     sel_pros = []
-    sqs = []
     for pid in range(1, NUM_INSEL_PROCS + 1):
         # insert 프로세스
         p = Process(target=_local_select_proc, args=(pid,))
@@ -100,12 +95,15 @@ def test_ct_broker_stop(xsetup, xsocon, xkfssh, xprofile):
         ins_pros.append(p)
         p.start()
 
-    # 잠시 후 카프카 브로커 stop
-    time.sleep(4)
-    stop_kafka_broker(xprofile)
-    # 잠시 후 카프카 브로커 start
-    time.sleep(4)
-    start_kafka_broker(xprofile)
+    # 잠시 후 카프카 브로커 정지
+    time.sleep(3)
+    # 중요! 의존성을 고려해 Kafka 와 Connect 정지
+    stop_kafka_and_connect(xkfssh)
+    # 잠시 후 카프카 브로커 재개
+    time.sleep(3)
+    # 중요! 의존성을 고려해 Kafka 와 Connect 시작
+    start_kafka_and_connect(xkfssh)
+
 
     # 카프카 토픽 확인 (timeout 되기 전에 다 받아야 함)
     cnt = count_topic_message(xkfssh, f'{xprofile}-person', timeout=10)
@@ -144,15 +142,17 @@ def test_ct_broker_down(xsetup, xsocon, xkfssh, xprofile):
         p.start()
 
     # 잠시 후 카프카 브로커 강제 종료
-    time.sleep(4)
+    time.sleep(1)
     kill_proc_by_port(xkfssh, 9092)
-    # 잠시 후 카프카 브로커 start (한 번 재시도 필요!?)
-    time.sleep(4)
-    start_kafka_broker(xprofile)
+    # 잠시 후 카프카 브로커 start
+    time.sleep(1)
+    start_kafka_broker(xkfssh)
 
     # 카프카 토픽 확인 (timeout 되기 전에 다 받아야 함)
     cnt = count_topic_message(xkfssh, f'{xprofile}-person', timeout=10)
-    assert 10000 * NUM_INSEL_PROCS == cnt
+    # 브로커만 강제 Kill 된 경우, 커넥터가 offset 을 flush 하지 못해 다시 시도
+    # -> 중복 메시지 발생 가능!
+    assert 10000 * NUM_INSEL_PROCS <= cnt
 
     for p in ins_pros:
         p.join()
@@ -236,7 +236,7 @@ def test_ct_broker_hibernate(xsetup, xsocon, xkfssh, xprofile):
     # reboot 후 ssh 객체 재생성 필요!
     kfssh = get_kafka_ssh(xprofile)
     # 카프카 토픽 확인 (timeout 되기 전에 다 받아야 함)
-    cnt = count_topic_message(kfssh, f'{xprofile}-person', timeout=20)
+    cnt = count_topic_message(kfssh, f'{xprofile}-person', timeout=10)
     assert 30000 * NUM_INSEL_PROCS == cnt
 
     for p in ins_pros:
@@ -278,10 +278,6 @@ def test_ct_remote_basic(xcp_setup, xprofile, xkfssh, xsocon):
     - Inserter / Selector 출력은 count 가 끝난 뒤 몰아서 나옴.
 
     """
-    cons_ip = xcp_setup['consumer_public_ip']['value']
-    kafka_ip = xcp_setup['kafka_private_ip']['value']
-    ssh = SSH(cons_ip, 'consumer')
-
     # Selector 프로세스들 시작
     sel_pros = []
     for pid in range(1, NUM_INSEL_PROCS + 1):

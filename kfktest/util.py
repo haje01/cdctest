@@ -428,10 +428,8 @@ def start_zookeeper(kfk_ssh):
     # 시간 경과 후에 동작 확인
     time.sleep(5)
     # 브로커 시작 확인
-    ret = ssh_exec(kfk_ssh, 'fuser 2181/tcp', stderr_type='stdout')
-    if ret == '':
+    if not is_service_active(kfk_ssh, 'zookeeper'):
         raise RuntimeError('Zookeeper not launched!')
-
     print(f"[v] start_zookeeper")
 
 
@@ -453,12 +451,20 @@ def start_kafka_broker(kfk_ssh):
     print(f"[ ] start_kafka_broker")
     ssh_exec(kfk_ssh, "sudo systemctl start kafka")
     # 충분한 시간 경과 후에 동작을 확인해야 한다.
-    time.sleep(7)
+    # kill 시 Zookeeper 의 기존 /brokers/ids/0 겹치는 문제로 기동중 다시 죽을 수 있음
+    time.sleep(15)
     # 브로커 시작 확인
-    ret = ssh_exec(kfk_ssh, 'fuser 9092/tcp', stderr_type='stdout')
-    if ret == '':
+    if not is_service_active(kfk_ssh, 'kafka'):
         raise RuntimeError('Broker not launched!')
     print(f"[v] start_kafka_broker")
+
+
+def is_service_active(ssh, svc_name):
+    """systemctl 을 이용해 서비스 Active 상태를 얻음."""
+    ret = ssh_exec(ssh, f"systemctl status {svc_name} | grep Active | awk '{{print $2}}'")
+    stat = ret.strip()
+    print(f"is_service_active - {svc_name} {stat}")
+    return stat == 'active'
 
 
 def stop_kafka_broker(kfk_ssh, ignore_err=False):
@@ -519,10 +525,9 @@ def xkafka(xsetup, xkfssh, xzookeeper):
 def claim_kafka(kfk_ssh):
     """카프카 브로커 동작 확인."""
     print("[ ] claim_kafka")
-    ret = ssh_exec(kfk_ssh, 'fuser 9092/tcp', stderr_type='stdout')
-    # 주키퍼가 떠있지 않으면 시작
-    if ret == '':
-        start_kafka_connect(kfk_ssh)
+    # 카프카가 떠있지 않으면 시작
+    if not is_service_active(kfk_ssh, 'kafka'):
+        start_kafka_broker(kfk_ssh)
     print("[v] claim_kafka")
 
 
@@ -622,8 +627,7 @@ def xconn(xkfssh, xsetup):
 def claim_kafka_connect(kfk_ssh):
     """카프카 커넥트 요청."""
     print("[ ] claim_kafka_connect")
-    ret = ssh_exec(kfk_ssh, 'fuser 8083/tcp', stderr_type='stdout')
-    if ret == '':
+    if not is_service_active(kfk_ssh, 'kafka-connect'):
         start_kafka_connect(kfk_ssh)
     print("[v] claim_kafka_connect")
 
@@ -635,9 +639,8 @@ def start_kafka_connect(kfk_ssh):
     ssh_exec(kfk_ssh, "sudo systemctl start kafka-connect")
     # 잠시 후 동작 확인
     time.sleep(5)
-    # 브로커 시작 확인
-    ret = ssh_exec(kfk_ssh, 'fuser 9092/tcp', stderr_type='stdout')
-    if ret == '':
+    # 시작 확인
+    if not is_service_active(kfk_ssh, 'kafka-connect'):
         raise RuntimeError('Connect not launched!')
     print(f"[v] start_kafka_connect")
 
