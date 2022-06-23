@@ -351,6 +351,8 @@ curl -vs -X POST 'http://localhost:8083/connectors' \
         "connection.password":"{db_passwd}", \
         "auto.create": false, \
         "auto.evolve": false, \
+        "poll.interval.ms": 5000, \
+        "table.poll.interval.ms": 60000, \
         "delete.enabled": true, \
         "transaction.isolation.mode": "{isolation}", \
         "mode": "incrementing", \
@@ -369,10 +371,11 @@ curl -vs -X POST 'http://localhost:8083/connectors' \
         msg = str(e)
         print(msg)
         raise RuntimeError(msg)
-    print("[v] register_socon {profile} for {tables}")
+    print(f"[v] register_socon {profile} for {tables}")
     return data
 
 
+@retry(RuntimeError, tries=6, delay=5)
 def list_socons(kfk_ssh):
     """등록된 카프카 Source 커넥터 리스트.
 
@@ -380,12 +383,18 @@ def list_socons(kfk_ssh):
         list: 등록된 커넥터 이름 리스트
 
     """
+    print(f"[ ] list_socons")
     cmd = f'''curl -s http://localhost:8083/connectors'''
     ret = ssh_exec(kfk_ssh, cmd)
-    conns = json.loads(ret)
+    try:
+        conns = json.loads(ret)
+    except json.decoder.JSONDecodeError as e:
+        raise RuntimeError(str(e))
+    print(f"[v] list_socons")
     return conns
 
 
+@retry(RuntimeError, tries=6, delay=5)
 def unregister_socon(kfk_ssh, conn_name):
     """카프카 JDBC Source 커넥터 해제.
 
@@ -394,12 +403,15 @@ def unregister_socon(kfk_ssh, conn_name):
         conn_name (str): 커넥터 이름
 
     """
-    print(f"unregister_socon {conn_name}")
+    print(f"[ ] unregister_socon {conn_name}")
     cmd = f'''curl -X DELETE http://localhost:8083/connectors/{conn_name}'''
-    ssh_exec(kfk_ssh, cmd, ignore_err=True)
+    try:
+        ssh_exec(kfk_ssh, cmd, ignore_err=True)
+    except json.decoder.JSONDecodeError as e:
+        raise RuntimeError(str(e))
+    print(f"[v] unregister_socon {conn_name}")
 
 
-@retry(RuntimeError, tries=6, delay=5)
 def unregister_all_socons(kfk_ssh):
     """등록된 모든 카프카 Source 커넥터 해제."""
     print("[ ] unregister_all_socons")
@@ -450,9 +462,14 @@ def start_kafka_broker(kfk_ssh):
 
 
 def stop_kafka_broker(kfk_ssh, ignore_err=False):
-    """카프카 브로커 정지."""
+    """카프카 브로커 정지.
+
+    주: 의존성에 따라 Kafka Connect 를 먼저 멈추고 이것을 불러야 한다.
+
+    """
     print(f"[ ] stop_kafka_broker")
-    ssh_exec(kfk_ssh, "kafka-server-stop.sh", ignore_err=ignore_err)
+    ssh_exec(kfk_ssh, "sudo systemctl stop kafka", ignore_err=ignore_err)
+    # ssh_exec(kfk_ssh, "sudo $KAFKA_HOME/bin/kafka-server-stop.sh", ignore_err=ignore_err)
     print(f"[v] stop_kafka_broker")
 
 
@@ -625,6 +642,25 @@ def start_kafka_connect(kfk_ssh):
     print(f"[v] start_kafka_connect")
 
 
+def start_kafka_and_connect(kfk_ssh):
+    """의존성을 고려해 Kafka 와 Kafka Connect 시작."""
+    start_kafka_broker(kfk_ssh)
+    start_kafka_connect(kfk_ssh)
+
+
+def stop_kafka_and_connect(kfk_ssh):
+    """의존성을 고려해 Kafka 와 Kafka Connect 정지."""
+    stop_kafka_connect(kfk_ssh)
+    stop_kafka_broker(kfk_ssh)
+
+
+def stop_kafka_connect(kfk_ssh):
+    """카프카 커넥트 정지."""
+    print(f"[ ] stop_kafka_connect")
+    ssh_exec(kfk_ssh, "sudo kill $(fuser 8083/tcp)")
+    print(f"[v] stop_kafka_connect")
+
+
 @pytest.fixture
 def xsocon(xprofile, xkfssh, xtable, xtopic, xconn, xsetup):
     """테스트용 카프카 소스 커넥터 초기화 (테이블과 토픽 먼저 생성)."""
@@ -655,17 +691,17 @@ def load_setup(profile):
 
 
 def kill_proc_by_port(ssh, port):
-    """원격 노드의 프로세스를 열린 포트 번호로 kill.
+    """원격 노드의 프로세스를 열린 포트 번호로 강제 kill.
 
     Args:
         ssh: 원격 노드의 Paramiko SSH 객체
         port: 대상 포트
 
     """
-    addr = ssh.get_transport().getpeername()[0]
-    print(f"kill_proc_by_port {port} at {addr}")
+    print(f"[ ] kill_proc_by_port {port}")
     cmd = f'kill -9 $(fuser {port}/tcp)'
     ssh_exec(ssh, cmd, stderr_type='stdout')
+    print(f"[v] kill_proc_by_port {port}")
 
 
 def ec2inst_by_name(profile, inst_name):

@@ -190,7 +190,7 @@ def test_ct_broker_vmstop(xsetup, xsocon, xkfssh, xprofile):
     vm_stop(xprofile, 'kafka')
     vm_start(xprofile, 'kafka')
 
-    # reboot 후 ssh 객체 재생성 필요!
+    # Reboot 후 ssh 객체 재생성 필요!
     kfssh = get_kafka_ssh(xprofile)
     # 카프카 토픽 확인 (timeout 되기 전에 다 받아야 함)
     cnt = count_topic_message(kfssh, f'{xprofile}-person', timeout=10)
