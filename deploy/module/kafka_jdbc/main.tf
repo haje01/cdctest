@@ -101,7 +101,12 @@ resource "aws_instance" "kafka" {
   security_groups = [aws_security_group.kafka.name]
   key_name = var.key_pair_name
 
-  # hibernation = true
+  root_block_device {
+    encrypted = true  # Hibernate 테스트용
+    volume_size = 20
+  }
+
+  hibernation = true
 
   tags = merge(
     {

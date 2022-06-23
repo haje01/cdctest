@@ -63,7 +63,6 @@ def insert_fake(conn, cursor, epoch, batch, pid, profile):
             rows.append(row)
         cursor.executemany(sql, rows)
         conn.commit()
-        # time.sleep(0.8)
 
 
 @retry(RuntimeError, tries=10, delay=3)
@@ -442,7 +441,7 @@ def start_kafka_broker(kfk_ssh):
     print(f"[ ] start_kafka_broker")
     ssh_exec(kfk_ssh, "sudo systemctl start kafka")
     # 충분한 시간 경과 후에 동작을 확인해야 한다.
-    time.sleep(10)
+    time.sleep(7)
     # 브로커 시작 확인
     ret = ssh_exec(kfk_ssh, 'fuser 9092/tcp', stderr_type='stdout')
     if ret == '':
@@ -465,15 +464,12 @@ def xkvmstart(xprofile):
     yield
 
 
-# @retry(RuntimeError, tries=10, delay=5)
-# def claim_kafka_instance(profile):
-#     """Kafka 인스턴스 동작 확인"""
-#     print("[ ] claim_kafka_intance")
-#     inst = ec2inst_by_name(profile, 'kafka')
-#     state = inst.state['Name']
-#     if state != 'running':
-#         claim_vm_start(profile, 'kafka')
-#     print("[ ] claim_kafka_intance")
+def claim_vm_start(profile, inst_name):
+    """VM 실행 확인."""
+    inst = ec2inst_by_name(profile, inst_name)
+    state = inst.state['Name']
+    if state != 'running':
+        vm_start(profile, inst_name)
 
 
 @pytest.fixture
@@ -621,7 +617,7 @@ def start_kafka_connect(kfk_ssh):
     print(f"[ ] start_kafka_connect")
     ssh_exec(kfk_ssh, "sudo systemctl start kafka-connect")
     # 잠시 후 동작 확인
-    time.sleep(4)
+    time.sleep(5)
     # 브로커 시작 확인
     ret = ssh_exec(kfk_ssh, 'fuser 9092/tcp', stderr_type='stdout')
     if ret == '':
@@ -640,10 +636,8 @@ def xsocon(xprofile, xkfssh, xtable, xtopic, xconn, xsetup):
     unregister_all_socons(xkfssh)
     ret = register_socon(xkfssh, xprofile, db_addr, DB_PORTS[xprofile],
         db_user, db_passwd, "test", "person", f"{xprofile}-")
-    try:
-        conn_name = ret['name']
-    except Exception as e:
-        raise Exception(str(ret))
+    conn_name = ret['name']
+    time.sleep(5)
     yield
 
     # unregister_socon(xprofile, conn_name)
@@ -683,22 +677,34 @@ def ec2inst_by_name(profile, inst_name):
     return inst
 
 
-def claim_vm_stop(profile, inst_name):
-    """VM 을 정지."""
-    print(f"[ ] claim_vm_stop {inst_name}")
+def vm_stop(profile, inst_name):
+    """VM 정지."""
+    print(f"[ ] vm_stop {inst_name}")
     inst = ec2inst_by_name(profile, inst_name)
     inst.stop()
-    wait_vm_state(profile, inst_name, 'stopped')
-    print(f"[v] claim_vm_stop {inst_name}")
+    inst.wait_until_stopped()
+    # wait_vm_state(profile, inst_name, 'stopped')
+    print(f"[v] vm_stop {inst_name}")
 
 
-def claim_vm_start(profile, inst_name):
-    """VM 동작 확인."""
-    print(f"[ ] claim_vm_start {inst_name} of {profile}")
+def vm_hibernate(profile, inst_name):
+    """VM Hibernate."""
+    print(f"[ ] vm_hibernate {inst_name} of {profile}")
+    inst = ec2inst_by_name(profile, inst_name)
+    inst.stop(Hibernate=True)
+    inst.wait_until_stopped()
+    # wait_vm_state(profile, inst_name, 'running')
+    print(f"[v] vm_hibernate {inst_name} of {profile}")
+
+
+def vm_start(profile, inst_name):
+    """VM 시작."""
+    print(f"[ ] vm_start {inst_name} of {profile}")
     inst = ec2inst_by_name(profile, inst_name)
     inst.start()
-    wait_vm_state(profile, inst_name, 'running')
-    print(f"[v] claim_vm_start {inst_name} of {profile}")
+    inst.wait_until_running()
+    # wait_vm_state(profile, inst_name, 'running')
+    print(f"[v] vm_start {inst_name} of {profile}")
 
 
 @retry(RuntimeError, delay=5)
