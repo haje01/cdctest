@@ -6,10 +6,11 @@ import pytest
 from kfktest.util import (SSH, count_topic_message, get_kafka_ssh, ssh_exec,
     local_exec, start_kafka_broker, stop_kafka_broker, kill_proc_by_port,
     vm_stop, vm_start, start_kafka_and_connect, stop_kafka_and_connect,
+    count_table_row,
     # 픽스쳐들
-    xsetup, xcp_setup, xsocon, xtable, xtopic, xkafka, xzookeeper, xkvmstart,
-    xconn, xkfssh
-)
+    xsetup, xcp_setup, xsocon, xtable, xtopic_ct, xkafka, xzookeeper, xkvmstart,
+    xconn, xkfssh, xdbzm, xtopic_cdc, xrmcons, xcdc
+    )
 
 NUM_INSEL_PROCS = 5
 
@@ -264,6 +265,37 @@ def _remote_insert_proc(setup, pid, epoch, batch):
     return ret
 
 
+def test_db(xcp_setup, xprofile, xkfssh, xtable):
+    """DB 기본성능 확인을 위해 원격 insert / select 만 수행."""
+    # Selector 프로세스들 시작
+    sel_pros = []
+    for pid in range(1, NUM_INSEL_PROCS + 1):
+        # insert 프로세스
+        p = Process(target=_remote_select_proc, args=(xcp_setup, pid))
+        sel_pros.append(p)
+        p.start()
+
+    # Insert 프로세스들 시작
+    ins_pros = []
+    for pid in range(1, NUM_INSEL_PROCS + 1):
+        # insert 프로세스
+        p = Process(target=_remote_insert_proc, args=(xcp_setup, pid, 100, 100))
+        ins_pros.append(p)
+        p.start()
+
+    for p in ins_pros:
+        p.join()
+    print("All insert processes are done.")
+
+    for p in sel_pros:
+        p.join()
+    print("All select processes are done.")
+
+    # 테이블 행수 확인
+    cnt = count_table_row(xprofile)
+    assert 10000 * NUM_INSEL_PROCS == cnt
+
+
 def test_ct_remote_basic(xcp_setup, xsocon, xprofile, xkfssh):
     """원격 insert / select 로 기본적인 Change Tracking 테스트."""
     # Selector 프로세스들 시작
@@ -284,6 +316,42 @@ def test_ct_remote_basic(xcp_setup, xsocon, xprofile, xkfssh):
 
     # 카프카 토픽 확인 (timeout 되기전에 다 받아야 함)
     cnt = count_topic_message(xkfssh, f'{xprofile}-person', timeout=10)
+    assert 10000 * NUM_INSEL_PROCS == cnt
+
+    for p in ins_pros:
+        p.join()
+    print("All insert processes are done.")
+
+    for p in sel_pros:
+        p.join()
+    print("All select processes are done.")
+
+
+def test_cdc_remote_basic(xcp_setup, xdbzm, xprofile, xkfssh):
+    """원격 insert / select 로 기본적인 Change Data Capture 테스트.
+
+    - 테스트 시작전 이전 토픽을 참고하는 것이 없어야 함. (delete_topic 에러 발생)
+
+    """
+
+    # Selector 프로세스들 시작
+    sel_pros = []
+    for pid in range(1, NUM_INSEL_PROCS + 1):
+        # insert 프로세스
+        p = Process(target=_remote_select_proc, args=(xcp_setup, pid))
+        sel_pros.append(p)
+        p.start()
+
+    # Insert 프로세스들 시작
+    ins_pros = []
+    for pid in range(1, NUM_INSEL_PROCS + 1):
+        # insert 프로세스
+        p = Process(target=_remote_insert_proc, args=(xcp_setup, pid, 100, 100))
+        ins_pros.append(p)
+        p.start()
+
+    # 카프카 토픽 확인 (timeout 되기전에 다 받아야 함)
+    cnt = count_topic_message(xkfssh, f'db1.dbo.person', timeout=10)
     assert 10000 * NUM_INSEL_PROCS == cnt
 
     for p in ins_pros:

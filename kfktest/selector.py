@@ -7,7 +7,7 @@ import argparse
 import pymssql
 from mysql.connector import connect
 
-from kfktest.util import load_setup
+from kfktest.util import load_setup, count_rows
 
 # CLI 용 파서
 parser = argparse.ArgumentParser(description="MySQL DB 에서 데이터 셀렉트.",
@@ -19,16 +19,6 @@ parser.add_argument('-b', '--batch', type=int, default=1000, help="한 번에 se
 parser.add_argument('-p', '--pid', type=int, default=0, help="셀렉트 프로세스 ID.")
 parser.add_argument('-d', '--dev', action='store_true', default=False,
     help="개발 PC 에서 실행 여부.")
-
-
-def count_rows(db_type, cursor):
-    tbl = 'person' if db_type == 'mysql' else '[test].[dbo].[person]'
-    cursor.execute(f'''
-    SELECT COUNT(*) cnt
-    FROM {tbl}
-    ''')
-    res = cursor.fetchone()
-    return res[0]
 
 
 def select(db_type, db_name=parser.get_default('db_name'),

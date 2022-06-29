@@ -11,5 +11,6 @@ IF NOT EXISTS (SELECT * FROM sys.database_principals WHERE name = N'${user}')
 BEGIN
     CREATE USER ${user} FOR LOGIN ${user}
     EXEC sp_addrolemember N'db_owner', N'${user}'
+    ALTER SERVER ROLE sysadmin ADD MEMBER tester;
 END;
 GO

@@ -184,6 +184,8 @@ module "kafka" {
   kafka_url = var.kafka_url
   kafka_jdbc_connector = var.kafka_jdbc_connector
   mysql_jdbc_driver = var.mysql_jdbc_driver
+  mysql_dbzm_connector = var.mysql_dbzm_connector
+  mssql_dbzm_connector = var.mssql_dbzm_connector
   tags = var.tags
 }
 

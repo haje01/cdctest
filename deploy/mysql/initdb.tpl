@@ -4,3 +4,5 @@ USE test;
 
 CREATE USER '${user}'@'%' IDENTIFIED BY '${passwd}';
 GRANT ALL PRIVILEGES ON test.* TO '${user}'@'%';
+# Debezium 을 위한 권한
+GRANT SELECT, RELOAD, SHOW DATABASES, REPLICATION SLAVE, REPLICATION CLIENT ON *.* TO '${user}'@'%';

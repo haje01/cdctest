@@ -22,6 +22,8 @@ variable "db_port" {}
 variable "kafka_url" {}
 variable "kafka_jdbc_connector" {}
 variable "mysql_jdbc_driver" {}
+variable "mysql_dbzm_connector" {}
+variable "mssql_dbzm_connector" {}
 variable "tags" {
     type = map(string)
 }

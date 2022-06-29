@@ -171,7 +171,11 @@ def create_topic(kfk_ssh, topic, partitions=12, replications=1):
         topic (str): 생성할 토픽 이름
 
     """
-    return ssh_exec(kfk_ssh, f'kafka-topics.sh --create --topic {topic} --bootstrap-server localhost:9092 --partitions {partitions} --replication-factor {replications}')
+    print(f"[ ] create_topic '{topic}'")
+    ret = ssh_exec(kfk_ssh, f'kafka-topics.sh --create --topic {topic} --bootstrap-server localhost:9092 --partitions {partitions} --replication-factor {replications}')
+    print(f"[v] create_topic '{topic}'")
+    return ret
+
 
 
 def claim_topic(kfk_ssh, topic, partitions=12, replications=1):
@@ -308,15 +312,16 @@ def count_topic_message(kfk_ssh, topic, from_begin=True, timeout=10):
 
 
 @retry(RuntimeError, tries=6, delay=5)
-def register_socon(kfk_ssh, profile, db_addr,
+def register_jdbc(kfk_ssh, profile, db_addr,
         db_port, db_user, db_passwd, db_name, tables, topic_prefix,
         poll_interval=5000):
     """카프카 JDBC Source 커넥터 등록.
 
-    설정에 관한 설명 참조:
-    https://www.confluent.io/blog/kafka-connect-deep-dive-jdbc-source-connector/
+    설정에 관한 참조:
+        https://www.confluent.io/blog/kafka-connect-deep-dive-jdbc-source-connector/
 
     Args:
+        kfk_ssh: Paramiko SSH 객체
         profile (str): 커넥션 URL 용 DBMS 타입. mysql 또는 mssql
         db_addr (str): DB 주소 (Private IP)
         db_port (int): DB 포트
@@ -335,35 +340,133 @@ def register_socon(kfk_ssh, profile, db_addr,
         db_url = f"jdbc:mysql://{db_addr}:{db_port}/{db_name}"
 
     hash = binascii.hexlify(os.urandom(3)).decode('utf8')
-    conn_name = f'my-socon-{hash}'
-    print(f"[ ] register_socon {conn_name}: {db_url}")
+    conn_name = f'jdbc-{profile}-{hash}'
+    print(f"[ ] register_jdbc {conn_name}: {db_url}")
     isolation = 'READ_UNCOMMITTED' if profile == 'mssql' else 'DEFAULT'
 
+    config = f'''{{
+        "connector.class" : "io.confluent.connect.jdbc.JdbcSourceConnector",
+        "connection.url":"{db_url}",
+        "connection.user":"{db_user}",
+        "connection.password":"{db_passwd}",
+        "auto.create": false,
+        "auto.evolve": false,
+        "poll.interval.ms": 5000,
+        "table.poll.interval.ms": 60000,
+        "delete.enabled": true,
+        "transaction.isolation.mode": "{isolation}",
+        "mode": "incrementing",
+        "incrementing.column.name" : "id",
+        "table.whitelist": "{tables}",
+        "topic.prefix" : "{topic_prefix}",
+        "poll.interval.ms": "{poll_interval}",
+        "tasks.max" : "1"
+    }}'''
+    data = _register_connector(kfk_ssh, conn_name, config)
+    print(f"[v] register_jdbc {profile} for {tables}")
+    return data
+
+
+@retry(RuntimeError, tries=6, delay=5)
+def register_dbzm(kfk_ssh, profile, svr_name, db_addr, db_port, db_name,
+        db_user, db_passwd):
+    """Debezium MySQL/MSSQL 커넥터 등록
+
+    설정에 관한 참조:
+        https://debezium.io/documentation/reference/1.9/connectors/mysql.html
+        https://debezium.io/documentation/reference/1.9/connectors/sqlserver.html
+        https://debezium.io/blog/2020/09/03/debezium-1-3-beta1-released/
+
+    Args:
+        kfk_ssh: Paramiko SSH 객체
+        profile (str): 프로파일 명
+        svr_name (str): DB 서버 명
+        db_addr (str): DB 주소 (Private IP)
+        db_port (int): DB 포트
+        db_name (str): 대상 DB 이름
+        db_user (str): DB 유저
+        db_passwd (str): DB 유저 암호
+
+    """
+    hash = binascii.hexlify(os.urandom(3)).decode('utf8')
+    conn_name = f'dbzm-{profile}-{hash}'
+    print(f"[ ] register_dbzm {conn_name} for {db_name}")
+
+    # 공통 설정
+    config = {
+        "database.hostname": db_addr,
+        "database.port": f"{db_port}",
+        "database.user": db_user,
+        "database.password": db_passwd,
+        "database.server.name": svr_name,
+        "database.history.kafka.bootstrap.servers": "localhost:9092",
+        "database.history.kafka.topic": f"{profile}.history.{svr_name}",
+        "include.schema.changes": "true",
+        "tasks.max": "1"
+    }
+
+    if profile == 'mysql':
+        cls_name = 'mysql.MySqlConnector'
+        config["database.include.list"] = db_name
+        config["database.server.id"] = "1"
+    else:
+        cls_name = 'sqlserver.SqlServerConnector'
+        config['database.dbname'] = db_name
+
+    config['connector.class'] = f"io.debezium.connector.{cls_name}"
+
+    # config = f'''{{
+    #     "connector.class":"io.debezium.connector.{cls_name}",
+    #     "database.hostname":"{db_addr}",
+    #     "database.port":"{db_port}",
+    #     "database.user":"{db_user}",
+    #     "database.password":"{db_passwd}",
+    #     "database.server.id":"1",
+    #     "database.server.name":"{svr_name}",
+    #     "database.include.list":"{db_name}",
+    #     "database.history.kafka.bootstrap.servers":"localhost:9092",
+    #     "database.history.kafka.topic":"{profile}.history.{svr_name}",
+    #     "include.schema.changes": "true",
+    #     "tasks.max": "1"
+    # }}'''
+
+    data = _register_connector(kfk_ssh, conn_name, json.dumps(config))
+    # 등록된 커넥터 상태 확인
+    time.sleep(5)
+    status = get_connector_status(kfk_ssh, conn_name)
+    if status['tasks'][0]['state'] == 'FAILED':
+        raise RuntimeError(status['tasks'][0]['trace'])
+    print(f"[v] register_dbzm {conn_name} for {db_name}")
+    return data
+
+
+def get_connector_status(kfk_ssh, conn_name):
+    """등록된 카프카 커넥터 상태를 얻음."""
+    print(f"[ ] get_connector_status")
+    cmd = f'''curl -s http://localhost:8083/connectors/{conn_name}/status'''
+    ret = ssh_exec(kfk_ssh, cmd)
+    status = json.loads(ret)
+    return status
+
+
+def _register_connector(kfk_ssh, name, config, poll_interval=5000):
+    """공용 카프카 커넥터 등록.
+
+    Args:
+        kfk_ssh: Kafka 노드 Paramiko SSH 객체
+        name (str): 커넥터 이름
+        config (str): 커넥터 설정
+        poll_interval (int): ms 단위 폴링 간격. 기본값 5000
+
+    """
     cmd = f'''
 curl -vs -X POST 'http://localhost:8083/connectors' \
     -H 'Content-Type: application/json' \
     --data-raw '{{ \
-    "name" : "{conn_name}", \
-    "config" : {{ \
-        "connector.class" : "io.confluent.connect.jdbc.JdbcSourceConnector", \
-        "connection.url":"{db_url}", \
-        "connection.user":"{db_user}", \
-        "connection.password":"{db_passwd}", \
-        "auto.create": false, \
-        "auto.evolve": false, \
-        "poll.interval.ms": 5000, \
-        "table.poll.interval.ms": 60000, \
-        "delete.enabled": true, \
-        "transaction.isolation.mode": "{isolation}", \
-        "mode": "incrementing", \
-        "incrementing.column.name" : "id", \
-        "table.whitelist": "{tables}", \
-        "topic.prefix" : "{topic_prefix}", \
-        "poll.interval.ms": "{poll_interval}", \
-        "tasks.max" : "1" \
-    }} \
-}}'
-'''
+    "name" : "{name}", \
+    "config" : {config} \
+}}' '''
+
     ret = ssh_exec(kfk_ssh, cmd)
     try:
         data = json.loads(ret)
@@ -371,7 +474,6 @@ curl -vs -X POST 'http://localhost:8083/connectors' \
         msg = str(e)
         print(msg)
         raise RuntimeError(msg)
-    print(f"[v] register_socon {profile} for {tables}")
     return data
 
 
@@ -532,10 +634,19 @@ def claim_kafka(kfk_ssh):
 
 
 @pytest.fixture
-def xtopic(xkfssh, xprofile, xkafka):
-    """테스트용 카프카 토픽 초기화."""
-    print("xtopic")
+def xtopic_ct(xkfssh, xprofile, xkafka):
+    """CT 테스트용 카프카 토픽 초기화."""
+    print("xtopic_ct")
     reset_topic(xkfssh, f"{xprofile}-person")
+    yield
+
+
+@pytest.fixture
+def xtopic_cdc(xkfssh, xprofile, xkafka):
+    """CDC 테스트용 카프카 토픽 초기화."""
+    print("xtopic_cdc")
+    reset_topic(xkfssh, f"db1")
+    reset_topic(xkfssh, f"db1.dbo.person")
     yield
 
 
@@ -665,17 +776,40 @@ def stop_kafka_connect(kfk_ssh):
 
 
 @pytest.fixture
-def xsocon(xprofile, xkfssh, xtable, xtopic, xconn, xsetup):
-    """테스트용 카프카 소스 커넥터 초기화 (테이블과 토픽 먼저 생성)."""
+def xrmcons(xkfssh):
+    """등록된 모든 Source Connector 제거."""
+    unregister_all_socons(xkfssh)
+
+
+@pytest.fixture
+def xsocon(xprofile, xrmcons, xkfssh, xtable, xtopic_ct, xconn, xsetup):
+    """CT용 Kafka 소스 커넥터 초기화 (테이블과 토픽 먼저 생성)."""
     print("xsocon")
     db_addr = xsetup[f'{xprofile}_private_ip']['value']
     db_user = xsetup['db_user']['value']
     db_passwd = xsetup['db_passwd']['value']['result']
 
-    unregister_all_socons(xkfssh)
-    ret = register_socon(xkfssh, xprofile, db_addr, DB_PORTS[xprofile],
+    ret = register_jdbc(xkfssh, xprofile, db_addr, DB_PORTS[xprofile],
         db_user, db_passwd, "test", "person", f"{xprofile}-")
-    conn_name = ret['name']
+    time.sleep(5)
+    yield
+
+    # unregister_socon(xprofile, conn_name)
+
+
+@pytest.fixture
+def xdbzm(xprofile, xkfssh, xrmcons, xtopic_cdc, xconn, xsetup, xcdc):
+    """Debezium Source 커넥터 초기화 (테이블과 토픽 먼저 생성)."""
+    print("xdbzm")
+    db_addr = xsetup[f'{xprofile}_private_ip']['value']
+    db_user = xsetup['db_user']['value']
+    db_passwd = xsetup['db_passwd']['value']['result']
+    svr_name = "db1"
+
+    ret = register_dbzm(xkfssh, xprofile, svr_name, db_addr,
+        DB_PORTS[xprofile], "test", db_user, db_passwd)
+    if 'error_code' in ret:
+        raise RuntimeError(ret['message'])
     time.sleep(5)
     yield
 
@@ -756,3 +890,47 @@ def wait_vm_state(profile, inst_name, state):
     else:
         print(f"[ ] wait_vm_state {inst_name} {state}.. (now {_state})")
         raise RuntimeError("VM state mismtach.")
+
+
+
+def count_rows(db_type, cursor):
+    tbl = 'person' if db_type == 'mysql' else '[test].[dbo].[person]'
+    cursor.execute(f'''
+    SELECT COUNT(*) cnt
+    FROM {tbl}
+    ''')
+    res = cursor.fetchone()
+    return res[0]
+
+
+def count_table_row(profile):
+    """테이블 행수 얻기."""
+    _, cursor = db_concur(profile)
+    return count_rows(profile, cursor)
+
+
+@pytest.fixture
+def xcdc(xprofile, xtable):
+    """CDC 가능 처리.
+
+    MSSQL 에서만 동작
+
+    """
+    if xprofile != 'mssql':
+        return
+    print("xcdc")
+    sql = '''
+USE test;
+
+EXEC sys.sp_cdc_enable_db
+
+EXEC sys.sp_cdc_enable_table
+    @source_schema = N'dbo',
+    @source_name = N'person',
+    @role_name = NULL,
+    @supports_net_changes = 1
+
+COMMIT;
+    '''
+    _, cursor = db_concur(xprofile)
+    cursor.execute(sql)

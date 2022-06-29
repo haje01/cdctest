@@ -7,3 +7,6 @@ pytest
 pytest-shell
 paramiko
 boto3
+pandas
+seaborn
+pyarrow

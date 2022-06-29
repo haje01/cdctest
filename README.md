@@ -19,6 +19,8 @@
     - [Confluent 의 JDBC 커넥터 다운로드](https://www.confluent.io/hub/confluentinc/kafka-connect-jdbc?_ga=2.129728655.246901732.1655082179-1759829787.1651627548&_gac=1.126341503.1655171481.Cj0KCQjwwJuVBhCAARIsAOPwGASjitveKrkPlHSvd6FzJtL8sQZu-c1mrjjhFPBgtc4_f_fGhCBZHx8aAseAEALw_wcB) 에서 Download 클릭하여 받음
   - `mysql-connector-java_8.0.29-1ubuntu21.10_all.deb`
     - [MySQL 의 커넥터 다운로드 페이지](https://dev.mysql.com/downloads/connector/j/) 에서 OS 에 맞는 파일을 받음
+  - `debezium-connector-mysql-1.9.4.Final-plugin.tar` 및  `debezium-connector-sqlserver-1.9.4.Final-plugin.tar`
+    - [Debezium 커넥터 다운로드](https://debezium.io/documentation/reference/stable/install.html) 에서 MySQL 및 MSSQL 을 위한 Debezium 커넥트를 각각 내려 받음
   - `confluent-hub install confluentinc/kafka-connect-replicator:7.1.1.zip`
     - [Confluent 의 Kafka Replicator 다운로드](https://www7.confluent.io/hub/confluentinc/kafka-connect-replicator) 에서 Download 클릭하여 받음
 - `test.tfvars` 파일 만들기
@@ -38,6 +40,8 @@
   kafka_url = "https://archive.apache.org/dist/kafka/3.0.0/kafka_2.13-3.0.0.tgz"
   kafka_jdbc_connector = "../../refers/confluentinc-kafka-connect-jdbc-10.5.0.zip"
   mysql_jdbc_driver = "../../refers/mysql-connector-java_8.0.29-1ubuntu21.10_all.deb"
+  mysql_dbzm_connector = "../../refers/debezium-connector-mysql-1.9.4.Final-plugin.tar"
+  mssql_dbzm_connector = "../../refers/debezium-connector-sqlserver-1.9.4.Final-plugin.tar"
   tags = {
       Owner = "MY-EMAIL-ADDRESS"
   }
