@@ -33,7 +33,8 @@ rule test_db:
         "temp/{profile}/{epoch}/test_db"
     shell:
         """
-        cd tests && pytest test_{wildcards.profile}.py::test_db -s | grep "per seconds" > ../{output}
+        cd tests && pytest test_{wildcards.profile}.py::test_db -s > ../temp/{wildcards.profile}/test_db.out
+        cd .. && grep "per seconds" temp/{wildcards.profile}/test_db.out > {output}
         """
 
 
@@ -45,7 +46,8 @@ rule test_ct:
         "temp/{profile}/{epoch}/test_ct"
     shell:
         """
-        cd tests && pytest test_{wildcards.profile}.py::test_ct_remote_basic -s | grep "per seconds" > ../{output}
+        cd tests && pytest test_{wildcards.profile}.py::test_ct_remote_basic -s > ../temp/{wildcards.profile}/test_ct.out
+        cd .. && grep "per seconds" temp/{wildcards.profile}/test_ct.out > {output}
         """
 
 
@@ -57,7 +59,8 @@ rule test_cdc:
         "temp/{profile}/{epoch}/test_cdc"
     shell:
         """
-        cd tests && pytest test_{wildcards.profile}.py::test_cdc_remote_basic -s | grep "per seconds" > ../{output}
+        cd tests && pytest test_{wildcards.profile}.py::test_cdc_remote_basic -s > ../temp/{wildcards.profile}/test_cdc.out
+        cd .. && grep "per seconds" temp/{wildcards.profile}/test_cdc.out > {output}
         """
 
 
@@ -96,7 +99,7 @@ rule plot:
     """
     input:
         # lambda wc: _plot_input(wc)
-        expand("temp/{{profile}}/{epoch}/merge.parquet", epoch=range(1,10))
+        expand("temp/{{profile}}/{epoch}/merge.parquet", epoch=range(1,5))
     output:
         "temp/{profile}/plot.png"
     script:

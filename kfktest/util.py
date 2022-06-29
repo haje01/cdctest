@@ -20,6 +20,13 @@ import boto3
 import pytest
 from retry import retry
 
+# MSSQL의 경우 사전 100000 행이 들어가 있으면 Insert / Select 성능이 25% 정도 감소
+# MySQL 은 Select 만 10% 정도 감소
+# (AWS I/O Bound 일수도)
+DB_PRE_EPOCH = 0
+DB_PRE_BATCH = 1000
+DB_PRE_ROWS = DB_PRE_EPOCH * DB_PRE_BATCH
+
 # Kafka 내장 토픽 이름
 INTERNAL_TOPICS = ['__consumer_offsets', 'connect-configs', 'connect-offsets', 'connect-status']
 DB_PORTS = {'mysql': 3306, 'mssql': 1433}
@@ -646,7 +653,8 @@ def xtopic_cdc(xkfssh, xprofile, xkafka):
     """CDC 테스트용 카프카 토픽 초기화."""
     print("xtopic_cdc")
     reset_topic(xkfssh, f"db1")
-    reset_topic(xkfssh, f"db1.dbo.person")
+    scm = 'dbo' if xprofile == 'mssql' else 'test'
+    reset_topic(xkfssh, f"db1.{scm}.person")
     yield
 
 
@@ -712,14 +720,14 @@ def xtable(xprofile, xkafka):
     from kfktest.table import reset_table
 
     conn, cursor = reset_table(xprofile)
-    yield
-    # print("Delete table 'person'")
-    # if xprofile == 'mysql':
-    #     cursor.execute('DROP TABLE IF EXISTS person;')
-    # else:
-    #     cursor.execute("IF OBJECT_ID('person', 'U') IS NOT NULL DROP TABLE person")
 
-    conn.commit()
+    from kfktest.inserter import insert
+    if DB_PRE_ROWS > 0 :
+        print("[ ] insert initial data")
+        insert(db_type=xprofile, epoch=DB_PRE_EPOCH, batch=DB_PRE_BATCH, pid=1, dev=True, show_result=False)
+        print("[v] insert initial data")
+
+    yield
 
 
 @pytest.fixture
@@ -799,7 +807,7 @@ def xsocon(xprofile, xrmcons, xkfssh, xtable, xtopic_ct, xconn, xsetup):
 
 @pytest.fixture
 def xdbzm(xprofile, xkfssh, xrmcons, xtopic_cdc, xconn, xsetup, xcdc):
-    """Debezium Source 커넥터 초기화 (테이블과 토픽 먼저 생성)."""
+    """CDC 용 Debezium Source 커넥터 초기화 (테이블과 토픽 먼저 생성)."""
     print("xdbzm")
     db_addr = xsetup[f'{xprofile}_private_ip']['value']
     db_user = xsetup['db_user']['value']
@@ -918,8 +926,10 @@ def xcdc(xprofile, xtable):
     """
     if xprofile != 'mssql':
         return
-    print("xcdc")
-    sql = '''
+    hash = binascii.hexlify(os.urandom(3)).decode('utf8')
+    cap_inst = f'dbo_person_{hash}'
+    print(f"xcdc : capture_instance {cap_inst}")
+    sql = f'''
 USE test;
 
 EXEC sys.sp_cdc_enable_db
@@ -928,6 +938,7 @@ EXEC sys.sp_cdc_enable_table
     @source_schema = N'dbo',
     @source_name = N'person',
     @role_name = NULL,
+    @capture_instance = {cap_inst},
     @supports_net_changes = 1
 
 COMMIT;

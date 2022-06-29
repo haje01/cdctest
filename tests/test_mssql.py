@@ -6,7 +6,7 @@ import pytest
 from kfktest.util import (SSH, count_topic_message, get_kafka_ssh, ssh_exec,
     local_exec, start_kafka_broker, stop_kafka_broker, kill_proc_by_port,
     vm_stop, vm_start, start_kafka_and_connect, stop_kafka_and_connect,
-    count_table_row,
+    count_table_row, DB_PRE_ROWS,
     # 픽스쳐들
     xsetup, xcp_setup, xsocon, xtable, xtopic_ct, xkafka, xzookeeper, xkvmstart,
     xconn, xkfssh, xdbzm, xtopic_cdc, xrmcons, xcdc
@@ -293,7 +293,7 @@ def test_db(xcp_setup, xprofile, xkfssh, xtable):
 
     # 테이블 행수 확인
     cnt = count_table_row(xprofile)
-    assert 10000 * NUM_INSEL_PROCS == cnt
+    assert 10000 * NUM_INSEL_PROCS + DB_PRE_ROWS == cnt
 
 
 def test_ct_remote_basic(xcp_setup, xsocon, xprofile, xkfssh):
@@ -316,7 +316,7 @@ def test_ct_remote_basic(xcp_setup, xsocon, xprofile, xkfssh):
 
     # 카프카 토픽 확인 (timeout 되기전에 다 받아야 함)
     cnt = count_topic_message(xkfssh, f'{xprofile}-person', timeout=10)
-    assert 10000 * NUM_INSEL_PROCS == cnt
+    assert 10000 * NUM_INSEL_PROCS + DB_PRE_ROWS == cnt
 
     for p in ins_pros:
         p.join()
@@ -352,7 +352,7 @@ def test_cdc_remote_basic(xcp_setup, xdbzm, xprofile, xkfssh):
 
     # 카프카 토픽 확인 (timeout 되기전에 다 받아야 함)
     cnt = count_topic_message(xkfssh, f'db1.dbo.person', timeout=10)
-    assert 10000 * NUM_INSEL_PROCS == cnt
+    assert 10000 * NUM_INSEL_PROCS + DB_PRE_ROWS == cnt
 
     for p in ins_pros:
         p.join()

@@ -8,10 +8,10 @@ from mysql.connector import connect
 from kfktest.util import (SSH, count_topic_message, ssh_exec, stop_kafka_broker,
     start_kafka_broker, kill_proc_by_port, vm_start, vm_stop, vm_hibernate,
     get_kafka_ssh, stop_kafka_and_connect, start_kafka_and_connect,
-    count_table_row,
+    count_table_row, DB_PRE_ROWS,
     # 픽스쳐들
     xsetup, xsocon, xcp_setup, xtable, xtopic_ct, xkafka, xzookeeper, xkvmstart,
-    xconn, xkfssh, xdbzm, xrmcons, xtopic_cdc
+    xconn, xkfssh, xdbzm, xrmcons, xtopic_cdc, xcdc
     )
 from kfktest.selector import select
 from kfktest.inserter import insert
@@ -61,7 +61,7 @@ def test_ct_local_basic(xsocon, xkfssh, xsetup, xprofile):
 
     # 카프카 토픽 확인 (timeout 되기전에 다 받아야 함)
     cnt = count_topic_message(xkfssh, f'{xprofile}-person', timeout=10)
-    assert 10000 * NUM_INSEL_PROCS == cnt
+    assert 10000 * NUM_INSEL_PROCS + DB_PRE_ROWS == cnt
 
     for p in ins_pros:
         p.join()
@@ -300,7 +300,7 @@ def test_db(xcp_setup, xprofile, xkfssh, xtable):
 
     # 테이블 행수 확인
     cnt = count_table_row(xprofile)
-    assert 10000 * NUM_INSEL_PROCS == cnt
+    assert 10000 * NUM_INSEL_PROCS + DB_PRE_ROWS == cnt
 
 
 def test_ct_remote_basic(xcp_setup, xprofile, xkfssh, xsocon):
@@ -327,7 +327,7 @@ def test_ct_remote_basic(xcp_setup, xprofile, xkfssh, xsocon):
 
     # 카프카 토픽 확인 (timeout 되기전에 다 받아야 함)
     cnt = count_topic_message(xkfssh, f'{xprofile}-person', timeout=10)
-    assert 10000 * NUM_INSEL_PROCS == cnt
+    assert 10000 * NUM_INSEL_PROCS + DB_PRE_ROWS == cnt
 
     for p in ins_pros:
         p.join()
@@ -362,7 +362,7 @@ def test_cdc_local_basic(xdbzm, xkfssh, xsetup, xprofile):
 
     # 카프카 토픽 확인 (timeout 되기전에 다 받아야 함)
     cnt = count_topic_message(xkfssh, f'db1.test.person', timeout=10)
-    assert 10000 * NUM_INSEL_PROCS == cnt
+    assert 10000 * NUM_INSEL_PROCS + DB_PRE_ROWS == cnt
 
     for p in ins_pros:
         p.join()
@@ -397,7 +397,7 @@ def test_cdc_remote_basic(xcp_setup, xdbzm, xprofile, xkfssh):
 
     # 카프카 토픽 확인 (timeout 되기전에 다 받아야 함)
     cnt = count_topic_message(xkfssh, f'db1.test.person', timeout=10)
-    assert 10000 * NUM_INSEL_PROCS == cnt
+    assert 10000 * NUM_INSEL_PROCS + DB_PRE_ROWS == cnt
 
     for p in ins_pros:
         p.join()
