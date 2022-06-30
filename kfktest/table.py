@@ -1,6 +1,6 @@
 import argparse
 
-from kfktest.util import mysql_exec_many, db_concur
+from kfktest.util import mysql_exec_many, db_concur, linfo
 
 
 # CLI 용 파서
@@ -17,7 +17,7 @@ parser.add_argument('-d', '--dev', action='store_true', default=False,
 
 
 def reset_table(profile):
-    print(f"[ ] reset_table for {profile}")
+    linfo(f"[ ] reset_table for {profile}")
     conn, cursor = db_concur(profile)
 
     if profile == 'mysql':
@@ -51,13 +51,13 @@ def reset_table(profile):
         {tail}
         )
         '''
-    print("Create table 'person'")
+    linfo("Create table 'person'")
     if profile == 'mysql':
         mysql_exec_many(cursor, sql)
     else:
         cursor.execute(sql)
     conn.commit()
-    print(f"[v] reset_table for {profile}")
+    linfo(f"[v] reset_table for {profile}")
     return conn, cursor
 
 

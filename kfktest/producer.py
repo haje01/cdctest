@@ -6,7 +6,7 @@ from kafka import KafkaProducer
 from faker import Faker
 from faker.providers import internet, date_time, company, phone_number
 
-from kfktest.util import load_setup
+from kfktest.util import load_setup, linfo
 
 # CLI 용 파서
 parser = argparse.ArgumentParser(description="프로파일에 맞는 토픽에 레코드 생성.",
@@ -34,7 +34,7 @@ def produce(profile,
 
     """
     topic = f'{profile}-person'
-    print(f"Produce {count} records to {topic}.")
+    linfo(f"Produce {count} records to {topic}.")
 
     setup = load_setup(profile)
     ip_key = 'kafka_public_ip' if dev else 'kafka_private_ip'
@@ -67,7 +67,7 @@ def produce(profile,
         producer.send(topic, value=data)
 
     producer.flush()
-    print("Produce done.")
+    linfo("Produce done.")
 
 
 if __name__ == '__main__':

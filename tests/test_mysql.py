@@ -7,37 +7,21 @@ from mysql.connector import connect
 
 from kfktest.util import (SSH, count_topic_message, ssh_exec, stop_kafka_broker,
     start_kafka_broker, kill_proc_by_port, vm_start, vm_stop, vm_hibernate,
-    get_kafka_ssh, stop_kafka_and_connect, start_kafka_and_connect,
-    count_table_row, DB_PRE_ROWS,
+    get_kafka_ssh, stop_kafka_and_connect, start_kafka_and_connect, linfo,
+    count_table_row, DB_PRE_ROWS, NUM_INSEL_PROCS, local_insert_proc,
+    local_select_proc, remote_insert_proc, remote_select_proc, DB_ROWS,
     # 픽스쳐들
-    xsetup, xsocon, xcp_setup, xtable, xtopic_ct, xkafka, xzookeeper, xkvmstart,
-    xconn, xkfssh, xdbzm, xrmcons, xtopic_cdc, xcdc
+    xsetup, xjdbc, xcp_setup, xtable, xtopic_ct, xkafka, xzookeeper, xkvmstart,
+    xconn, xkfssh, xdbzm, xrmcons, xtopic_cdc, xhash
     )
-from kfktest.selector import select
-from kfktest.inserter import insert
 
-NUM_INSEL_PROCS = 4
 
 @pytest.fixture(scope="session")
 def xprofile():
     return 'mysql'
 
 
-def _local_select_proc(pid):
-    """로컬에서 가짜 데이터 셀렉트."""
-    print(f"Select process {pid} start")
-    select(db_type='mysql', pid=pid, dev=True)
-    print(f"Select process {pid} done")
-
-
-def _local_insert_proc(pid, epoch, batch):
-    """로컬에서 가짜 데이터 인서트."""
-    print(f"Insert process start: {pid}")
-    insert(db_type='mysql', epoch=epoch, batch=batch, pid=pid, dev=True)
-    print(f"Insert process done: {pid}")
-
-
-def test_ct_local_basic(xsocon, xkfssh, xsetup, xprofile):
+def test_ct_local_basic(xjdbc, xkfssh, xsetup, xprofile):
     """로컬 insert / select 로 기본적인 Change Tracking 테스트.
 
     - 테스트 시작전 이전 토픽을 참고하는 것이 없어야 함. (delete_topic 에러 발생)
@@ -47,7 +31,7 @@ def test_ct_local_basic(xsocon, xkfssh, xsetup, xprofile):
     sel_pros = []
     for pid in range(1, NUM_INSEL_PROCS + 1):
         # insert 프로세스
-        p = Process(target=_local_select_proc, args=(pid,))
+        p = Process(target=local_select_proc, args=(xprofile, pid,))
         sel_pros.append(p)
         p.start()
 
@@ -55,35 +39,42 @@ def test_ct_local_basic(xsocon, xkfssh, xsetup, xprofile):
     ins_pros = []
     for pid in range(1, NUM_INSEL_PROCS + 1):
         # insert 프로세스
-        p = Process(target=_local_insert_proc, args=(pid, 100, 100))
+        p = Process(target=local_insert_proc, args=(xprofile, pid))
         ins_pros.append(p)
         p.start()
 
     # 카프카 토픽 확인 (timeout 되기전에 다 받아야 함)
     cnt = count_topic_message(xkfssh, f'{xprofile}-person', timeout=10)
-    assert 10000 * NUM_INSEL_PROCS + DB_PRE_ROWS == cnt
+    assert DB_ROWS + DB_PRE_ROWS == cnt
 
     for p in ins_pros:
         p.join()
-    print("All insert processes are done.")
+    linfo("All insert processes are done.")
 
     for p in sel_pros:
         p.join()
-    print("All select processes are done.")
+    linfo("All select processes are done.")
 
 
-def test_ct_broker_stop(xsetup, xsocon, xkfssh, xprofile):
+def test_ct_broker_stop(xsetup, xjdbc, xkfssh, xprofile):
     """카프카 브로커 정상 정지시 Change Tracking 테스트.
 
-    Insert / Select 시작 후 브로커를 멈추고 (Stop Gracefully) 잠시 후 다시 기동해도
-        메시지 수가 일치.
+    - 기본적으로 Insert / Select 시작 후 브로커를 멈추고 (Stop Gracefully) 다시
+        기동해도 메시지 수가 일치해야 한다.
+    - 그러나, 소스 커넥터가 메시지 생성 ~ 오프셋 커밋 사이에 죽으면, 재기동시
+        커밋하지 않은 오프셋부터 다시 처리하게 되어 메시지 중복이 발생할 수 있다.
+    - Debezium 도 Exactly Once Semantics 가 아닌 At Least Once 를 지원
+    - KIP-618 (Exactly-Once Support for Source Connectors) 에서 이것을 해결하려 함
+    - 참고:
+        - https://stackoverflow.com/questions/59785863/exactly-once-semantics-in-kafka-source-connector
+        - https://camel-context.tistory.com/54
 
     """
     # Selector 프로세스들 시작
     sel_pros = []
     for pid in range(1, NUM_INSEL_PROCS + 1):
         # insert 프로세스
-        p = Process(target=_local_select_proc, args=(pid,))
+        p = Process(target=local_select_proc, args=(xprofile, pid,))
         sel_pros.append(p)
         p.start()
 
@@ -91,34 +82,45 @@ def test_ct_broker_stop(xsetup, xsocon, xkfssh, xprofile):
     ins_pros = []
     for pid in range(1, NUM_INSEL_PROCS + 1):
         # insert 프로세스
-        p = Process(target=_local_insert_proc, args=(pid, 100, 100))
+        p = Process(target=local_insert_proc, args=(xprofile, pid))
         ins_pros.append(p)
         p.start()
 
-    # 잠시 후 카프카 브로커 정지
-    time.sleep(3)
-    # 중요! 의존성을 고려해 Kafka 와 Connect 정지
+    # 주: 브로커 정지 시간에 따른 메시지 중복 발생 가능
+    # EPOCH 10, BATCH 10 일 때 (Insert 에 0초 걸림):
+    #   sleep 6 ~ 10, -> 중복 발생
+    #   sleep ~ 5, 11 ~ -> 중복 없음
+    # 가설:
+    #   poll.interval.ms (테이블에서 새 데이터를 가져오는 간격) = 5000
+    #   offset.flush.interval.ms (커넥터 태스크에서 오프셋 커밋 간격) = 10000
+    #   5초가 지나 새 데이터를 가져왔으나, 10초가 되기전 브로커를 정지하면
+    #     오프셋이 커밋되지 않음 -> 브로커 재시작시 다시 처리! (중복)
+    # EPOCH 50, BATCH 50 일 때 (Insert 에 6초 걸림):
+    #   sleep 7 ~ 11 -> 중복 발생
+    #   sleep ~ 6, 12~ -> 중복 없음
+    # EPOCH 100, BATCH 100 일 때 (Insert 에 11초 걸림):
+    #   sleep 1, 4, 3, 6, 9 (Insert 중) 12, 15, 21 (Insert 종료) -> 중복 없음
+    time.sleep(4)
+    # 중요: 의존성을 고려해 Kafka 와 Connect 정지
     stop_kafka_and_connect(xkfssh)
-    # 잠시 후 카프카 브로커 재개
-    time.sleep(3)
-    # 중요! 의존성을 고려해 Kafka 와 Connect 시작
+    # 중요: 의존성을 고려해 Kafka 와 Connect 시작
     start_kafka_and_connect(xkfssh)
 
 
     # 카프카 토픽 확인 (timeout 되기 전에 다 받아야 함)
     cnt = count_topic_message(xkfssh, f'{xprofile}-person', timeout=10)
-    assert 10000 * NUM_INSEL_PROCS == cnt
+    assert DB_ROWS + DB_PRE_ROWS == cnt
 
     for p in ins_pros:
         p.join()
-    print("All insert processes are done.")
+    linfo("All insert processes are done.")
 
     for p in sel_pros:
         p.join()
-    print("All select processes are done.")
+    linfo("All select processes are done.")
 
 
-def test_ct_broker_down(xsetup, xsocon, xkfssh, xprofile):
+def test_ct_broker_down(xsetup, xjdbc, xkfssh, xprofile):
     """카프카 브로커 다운시 Change Tracking 테스트.
 
     Insert / Select 시작 후 브로커 프로세스를 강제로 죽인 후, 잠시 후 다시 재개해도
@@ -129,7 +131,7 @@ def test_ct_broker_down(xsetup, xsocon, xkfssh, xprofile):
     sel_pros = []
     for pid in range(1, NUM_INSEL_PROCS + 1):
         # insert 프로세스
-        p = Process(target=_local_select_proc, args=(pid,))
+        p = Process(target=local_select_proc, args=(xprofile, pid,))
         sel_pros.append(p)
         p.start()
 
@@ -137,7 +139,7 @@ def test_ct_broker_down(xsetup, xsocon, xkfssh, xprofile):
     ins_pros = []
     for pid in range(1, NUM_INSEL_PROCS + 1):
         # insert 프로세스
-        p = Process(target=_local_insert_proc, args=(pid, 100, 100))
+        p = Process(target=local_insert_proc, args=(xprofile, pid))
         ins_pros.append(p)
         p.start()
 
@@ -152,18 +154,18 @@ def test_ct_broker_down(xsetup, xsocon, xkfssh, xprofile):
     cnt = count_topic_message(xkfssh, f'{xprofile}-person', timeout=10)
     # 브로커만 강제 Kill 된 경우, 커넥터가 offset 을 flush 하지 못해 다시 시도
     # -> 중복 메시지 발생 가능!
-    assert 10000 * NUM_INSEL_PROCS <= cnt
+    assert DB_ROWS + DB_PRE_ROWS <= cnt
 
     for p in ins_pros:
         p.join()
-    print("All insert processes are done.")
+    linfo("All insert processes are done.")
 
     for p in sel_pros:
         p.join()
-    print("All select processes are done.")
+    linfo("All select processes are done.")
 
 
-def test_ct_broker_vmstop(xsetup, xsocon, xkfssh, xprofile):
+def test_ct_broker_vmstop(xsetup, xjdbc, xkfssh, xprofile):
     """카프카 브로커 VM 정지시 Change Tracking 테스트.
 
     Insert / Select 시작 후 브로커가 정지 후 재개해도 메시지 수가 일치.
@@ -173,7 +175,7 @@ def test_ct_broker_vmstop(xsetup, xsocon, xkfssh, xprofile):
     sel_pros = []
     for pid in range(1, NUM_INSEL_PROCS + 1):
         # insert 프로세스
-        p = Process(target=_local_select_proc, args=(pid,))
+        p = Process(target=local_select_proc, args=(xprofile, pid,))
         sel_pros.append(p)
         p.start()
 
@@ -181,7 +183,7 @@ def test_ct_broker_vmstop(xsetup, xsocon, xkfssh, xprofile):
     ins_pros = []
     for pid in range(1, NUM_INSEL_PROCS + 1):
         # insert 프로세스
-        p = Process(target=_local_insert_proc, args=(pid, 100, 100))
+        p = Process(target=local_insert_proc, args=(xprofile, pid))
         ins_pros.append(p)
         p.start()
 
@@ -194,18 +196,18 @@ def test_ct_broker_vmstop(xsetup, xsocon, xkfssh, xprofile):
     kfssh = get_kafka_ssh(xprofile)
     # 카프카 토픽 확인 (timeout 되기 전에 다 받아야 함)
     cnt = count_topic_message(kfssh, f'{xprofile}-person', timeout=10)
-    assert 10000 * NUM_INSEL_PROCS == cnt
+    assert DB_ROWS + DB_PRE_ROWS == cnt
 
     for p in ins_pros:
         p.join()
-    print("All insert processes are done.")
+    linfo("All insert processes are done.")
 
     for p in sel_pros:
         p.join()
-    print("All select processes are done.")
+    linfo("All select processes are done.")
 
 
-def test_ct_broker_hibernate(xsetup, xsocon, xkfssh, xprofile):
+def test_ct_broker_hibernate(xsetup, xjdbc, xkfssh, xprofile):
     """카프카 브로커 VM Hibernate 시 Change Tracking 테스트.
 
     Insert / Select 시작 후 브로커 Hibernate 후 재개해도 메시지 수가 일치.
@@ -215,7 +217,7 @@ def test_ct_broker_hibernate(xsetup, xsocon, xkfssh, xprofile):
     sel_pros = []
     for pid in range(1, NUM_INSEL_PROCS + 1):
         # insert 프로세스
-        p = Process(target=_local_select_proc, args=(pid,))
+        p = Process(target=local_select_proc, args=(xprofile, pid,))
         sel_pros.append(p)
         p.start()
 
@@ -223,13 +225,13 @@ def test_ct_broker_hibernate(xsetup, xsocon, xkfssh, xprofile):
     ins_pros = []
     for pid in range(1, NUM_INSEL_PROCS + 1):
         # insert 프로세스
-        p = Process(target=_local_insert_proc, args=(pid, 300, 100))
+        p = Process(target=local_insert_proc, args=(xprofile, pid))
         ins_pros.append(p)
         p.start()
 
     # 잠시 후 카프카 브로커 VM 정지 + 재시작
     vm_hibernate(xprofile, 'kafka')
-    print("=== wait for a while ===")
+    linfo("=== wait for a while ===")
     time.sleep(5)
     vm_start(xprofile, 'kafka')
 
@@ -237,39 +239,15 @@ def test_ct_broker_hibernate(xsetup, xsocon, xkfssh, xprofile):
     kfssh = get_kafka_ssh(xprofile)
     # 카프카 토픽 확인 (timeout 되기 전에 다 받아야 함)
     cnt = count_topic_message(kfssh, f'{xprofile}-person', timeout=10)
-    assert 30000 * NUM_INSEL_PROCS == cnt
+    assert DB_ROWS + DB_PRE_ROWS == cnt
 
     for p in ins_pros:
         p.join()
-    print("All insert processes are done.")
+    linfo("All insert processes are done.")
 
     for p in sel_pros:
         p.join()
-    print("All select processes are done.")
-
-
-def _remote_select_proc(xsetup, pid):
-    """원격 셀렉트 노드에서 가짜 데이터 셀렉트 (원격 노드에 setup.json 있어야 함)."""
-    print(f"Select process start: {pid}")
-    sel_ip = xsetup['selector_public_ip']['value']
-    ssh = SSH(sel_ip, 'selector')
-    cmd = f"cd kfktest/deploy/mysql && python3 -m kfktest.selector mysql -p {pid}"
-    ret = ssh_exec(ssh, cmd, False)
-    print(ret)
-    print(f"Select process done: {pid}")
-    return ret
-
-
-def _remote_insert_proc(xsetup, pid, epoch, batch):
-    """원격 인서트 노드에서 가짜 데이터 인서트 (원격 노드에 setup.json 있어야 함)."""
-    print(f"Insert process start: {pid}")
-    ins_ip = xsetup['inserter_public_ip']['value']
-    ssh = SSH(ins_ip, 'inserter')
-    cmd = f"cd kfktest/deploy/mysql && python3 -m kfktest.inserter mysql -p {pid} -e {epoch} -b {batch}"
-    ret = ssh_exec(ssh, cmd, False)
-    print(ret)
-    print(f"Insert process done: {pid}")
-    return ret
+    linfo("All select processes are done.")
 
 
 def test_db(xcp_setup, xprofile, xkfssh, xtable):
@@ -278,7 +256,7 @@ def test_db(xcp_setup, xprofile, xkfssh, xtable):
     sel_pros = []
     for pid in range(1, NUM_INSEL_PROCS + 1):
         # insert 프로세스
-        p = Process(target=_remote_select_proc, args=(xcp_setup, pid))
+        p = Process(target=remote_select_proc, args=(xprofile, xcp_setup, pid))
         sel_pros.append(p)
         p.start()
 
@@ -286,24 +264,24 @@ def test_db(xcp_setup, xprofile, xkfssh, xtable):
     ins_pros = []
     for pid in range(1, NUM_INSEL_PROCS + 1):
         # insert 프로세스
-        p = Process(target=_remote_insert_proc, args=(xcp_setup, pid, 100, 100))
+        p = Process(target=remote_insert_proc, args=(xprofile, xcp_setup, pid))
         ins_pros.append(p)
         p.start()
 
     for p in ins_pros:
         p.join()
-    print("All insert processes are done.")
+    linfo("All insert processes are done.")
 
     for p in sel_pros:
         p.join()
-    print("All select processes are done.")
+    linfo("All select processes are done.")
 
     # 테이블 행수 확인
     cnt = count_table_row(xprofile)
-    assert 10000 * NUM_INSEL_PROCS + DB_PRE_ROWS == cnt
+    assert DB_ROWS + DB_PRE_ROWS == cnt
 
 
-def test_ct_remote_basic(xcp_setup, xprofile, xkfssh, xsocon):
+def test_ct_remote_basic(xcp_setup, xprofile, xkfssh, xjdbc):
     """원격 insert / select 로 기본적인 Change Tracking 테스트.
 
     - Inserter / Selector 출력은 count 가 끝난 뒤 몰아서 나옴.
@@ -313,7 +291,7 @@ def test_ct_remote_basic(xcp_setup, xprofile, xkfssh, xsocon):
     sel_pros = []
     for pid in range(1, NUM_INSEL_PROCS + 1):
         # insert 프로세스
-        p = Process(target=_remote_select_proc, args=(xcp_setup, pid))
+        p = Process(target=remote_select_proc, args=(xprofile, xcp_setup, pid))
         sel_pros.append(p)
         p.start()
 
@@ -321,21 +299,21 @@ def test_ct_remote_basic(xcp_setup, xprofile, xkfssh, xsocon):
     ins_pros = []
     for pid in range(1, NUM_INSEL_PROCS + 1):
         # insert 프로세스
-        p = Process(target=_remote_insert_proc, args=(xcp_setup, pid, 100, 100))
+        p = Process(target=remote_insert_proc, args=(xprofile, xcp_setup, pid))
         ins_pros.append(p)
         p.start()
 
     # 카프카 토픽 확인 (timeout 되기전에 다 받아야 함)
     cnt = count_topic_message(xkfssh, f'{xprofile}-person', timeout=10)
-    assert 10000 * NUM_INSEL_PROCS + DB_PRE_ROWS == cnt
+    assert DB_ROWS + DB_PRE_ROWS == cnt
 
     for p in ins_pros:
         p.join()
-    print("All insert processes are done.")
+    linfo("All insert processes are done.")
 
     for p in sel_pros:
         p.join()
-    print("All select processes are done.")
+    linfo("All select processes are done.")
 
 
 def test_cdc_local_basic(xdbzm, xkfssh, xsetup, xprofile):
@@ -348,7 +326,7 @@ def test_cdc_local_basic(xdbzm, xkfssh, xsetup, xprofile):
     sel_pros = []
     for pid in range(1, NUM_INSEL_PROCS + 1):
         # insert 프로세스
-        p = Process(target=_local_select_proc, args=(pid,))
+        p = Process(target=local_select_proc, args=(xprofile, pid,))
         sel_pros.append(p)
         p.start()
 
@@ -356,21 +334,21 @@ def test_cdc_local_basic(xdbzm, xkfssh, xsetup, xprofile):
     ins_pros = []
     for pid in range(1, NUM_INSEL_PROCS + 1):
         # insert 프로세스
-        p = Process(target=_local_insert_proc, args=(pid, 100, 100))
+        p = Process(target=local_insert_proc, args=(xprofile, pid))
         ins_pros.append(p)
         p.start()
 
     # 카프카 토픽 확인 (timeout 되기전에 다 받아야 함)
     cnt = count_topic_message(xkfssh, f'db1.test.person', timeout=10)
-    assert 10000 * NUM_INSEL_PROCS + DB_PRE_ROWS == cnt
+    assert DB_ROWS + DB_PRE_ROWS == cnt
 
     for p in ins_pros:
         p.join()
-    print("All insert processes are done.")
+    linfo("All insert processes are done.")
 
     for p in sel_pros:
         p.join()
-    print("All select processes are done.")
+    linfo("All select processes are done.")
 
 
 def test_cdc_remote_basic(xcp_setup, xdbzm, xprofile, xkfssh):
@@ -383,7 +361,7 @@ def test_cdc_remote_basic(xcp_setup, xdbzm, xprofile, xkfssh):
     sel_pros = []
     for pid in range(1, NUM_INSEL_PROCS + 1):
         # insert 프로세스
-        p = Process(target=_remote_select_proc, args=(xcp_setup, pid))
+        p = Process(target=remote_select_proc, args=(xprofile, xcp_setup, pid))
         sel_pros.append(p)
         p.start()
 
@@ -391,18 +369,18 @@ def test_cdc_remote_basic(xcp_setup, xdbzm, xprofile, xkfssh):
     ins_pros = []
     for pid in range(1, NUM_INSEL_PROCS + 1):
         # insert 프로세스
-        p = Process(target=_remote_insert_proc, args=(xcp_setup, pid, 100, 100))
+        p = Process(target=remote_insert_proc, args=(xprofile, xcp_setup, pid))
         ins_pros.append(p)
         p.start()
 
     # 카프카 토픽 확인 (timeout 되기전에 다 받아야 함)
     cnt = count_topic_message(xkfssh, f'db1.test.person', timeout=10)
-    assert 10000 * NUM_INSEL_PROCS + DB_PRE_ROWS == cnt
+    assert DB_ROWS + DB_PRE_ROWS == cnt
 
     for p in ins_pros:
         p.join()
-    print("All insert processes are done.")
+    linfo("All insert processes are done.")
 
     for p in sel_pros:
         p.join()
-    print("All select processes are done.")
+    linfo("All select processes are done.")

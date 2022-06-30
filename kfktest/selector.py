@@ -7,7 +7,7 @@ import argparse
 import pymssql
 from mysql.connector import connect
 
-from kfktest.util import load_setup, count_rows
+from kfktest.util import load_setup, count_rows, linfo
 
 # CLI 용 파서
 parser = argparse.ArgumentParser(description="MySQL DB 에서 데이터 셀렉트.",
@@ -49,13 +49,13 @@ def select(db_type, db_name=parser.get_default('db_name'),
     db_user = setup['db_user']['value']
     db_passwd = setup['db_passwd']['value']['result']
 
-    print(f"Selector {pid} connect DB at {db_host} batch {batch}")
+    linfo(f"Selector {pid} connect DB at {db_host} batch {batch}")
     if db_type == 'mysql':
         conn = connect(host=db_host, user=db_user, password=db_passwd, db=db_name)
     else:
         conn = pymssql.connect(host=db_host, user=db_user, password=db_passwd, database=db_name)
     cursor = conn.cursor()
-    print("Connect done.")
+    linfo("Connect done.")
 
     if db_type == 'mysql':
         sql = f'''
@@ -78,7 +78,7 @@ def select(db_type, db_name=parser.get_default('db_name'),
     equal = 0
     while True:
         i += 1
-        print(f"Selector {pid} row_prev: {row_prev}, row_cnt: {row_cnt} equal {equal}")
+        linfo(f"Selector {pid} row_prev: {row_prev}, row_cnt: {row_cnt} equal {equal}")
         conn.commit()
         time.sleep(1)
         cursor.execute(sql)
@@ -96,7 +96,7 @@ def select(db_type, db_name=parser.get_default('db_name'),
 
     elapsed = time.time() - st
     vel = tot_read / elapsed
-    print(f"Selector {pid} selects {tot_read} rows. {int(vel)} rows per seconds.")
+    linfo(f"Selector {pid} selects {tot_read} rows. {int(vel)} rows per seconds.")
     return tot_read
 
 

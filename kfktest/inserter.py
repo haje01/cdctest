@@ -8,7 +8,7 @@ import json
 import pymssql
 from mysql.connector import connect
 
-from kfktest.util import insert_fake, load_setup
+from kfktest.util import insert_fake, load_setup, DB_BATCH, DB_EPOCH, linfo
 
 # CLI 용 파서
 parser = argparse.ArgumentParser(description="MySQL DB 에 가짜 데이터 인서트.",
@@ -17,8 +17,8 @@ parser = argparse.ArgumentParser(description="MySQL DB 에 가짜 데이터 인�
 parser.add_argument('db_type', type=str, choices=['mysql', 'mssql'], help="DBMS 종류.")
 parser.add_argument('--db-name', type=str, default='test', help="이용할 데이터베이스 이름.")
 parser.add_argument('-p', '--pid', type=int, default=0, help="인서트 프로세스 ID.")
-parser.add_argument('-e', '--epoch', type=int, default=100, help="에포크 수.")
-parser.add_argument('-b', '--batch', type=int, default=100, help="에포크당 행수.")
+parser.add_argument('-e', '--epoch', type=int, default=DB_EPOCH, help="에포크 수.")
+parser.add_argument('-b', '--batch', type=int, default=DB_BATCH, help="에포크당 행수.")
 parser.add_argument('-d', '--dev', action='store_true', default=False,
     help="개발 PC 에서 실행 여부.")
 
@@ -53,13 +53,13 @@ def insert(db_type, db_name=parser.get_default('db_name'),
     db_user = setup['db_user']['value']
     db_passwd = setup['db_passwd']['value']['result']
 
-    print(f"Inserter {pid} connect DB at {db_host}")
+    linfo(f"Inserter {pid} connect DB at {db_host}")
     if db_type == 'mysql':
         conn = connect(host=db_host, user=db_user, password=db_passwd, db=db_name)
     else:
         conn = pymssql.connect(host=db_host, user=db_user, password=db_passwd, database=db_name)
     cursor = conn.cursor()
-    print("Connect done.")
+    linfo("Connect done.")
 
     st = time.time()
     insert_fake(conn, cursor, epoch, batch, pid, db_type)
@@ -68,7 +68,7 @@ def insert(db_type, db_name=parser.get_default('db_name'),
     elapsed = time.time() - st
     vel = epoch * batch / elapsed
     if show_result:
-        print(f"Insert {batch * epoch} rows. {int(vel)} rows per seconds with batch of {batch}.")
+        linfo(f"Insert {batch * epoch} rows. {int(vel)} rows per seconds with batch of {batch}.")
 
 
 if __name__ == '__main__':

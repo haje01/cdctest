@@ -6,7 +6,7 @@ from collections import defaultdict
 
 from kafka import KafkaConsumer
 
-from kfktest.util import load_setup
+from kfktest.util import load_setup, linfo
 
 # CLI 용 파서
 parser = argparse.ArgumentParser(description="프로파일에 맞는 토픽 컨슘.",
@@ -31,7 +31,7 @@ def consume(profile,
         dev=parser.get_default('dev')
         ):
     topic = f'{profile}-person'
-    print(f"[ ] consume {topic}.")
+    linfo(f"[ ] consume {topic}.")
 
     setup = load_setup(profile)
     ip_key = 'kafka_public_ip' if dev else 'kafka_private_ip'
@@ -48,7 +48,7 @@ def consume(profile,
                     consumer_timeout_ms=timeout * 1000,
                     )
 
-    print("Connected")
+    linfo("Connected")
     cnt = 0
     dup_cnt = 0
     idmsgs = defaultdict(list)
@@ -61,20 +61,20 @@ def consume(profile,
             idmsgs[id].append((msg.topic, msg.partition, msg.offset, data['payload']))
         else:
             if not count_only:
-                print(f'{msg.topic}:{msg.partition}:{msg.offset} key={msg.key} value={msg.value}')
+                linfo(f'{msg.topic}:{msg.partition}:{msg.offset} key={msg.key} value={msg.value}')
 
     if duplicate:
         for id, msgs in idmsgs.items():
             dcnt = len(msgs) - 1
             if dcnt > 0:
                 dup_cnt += dcnt
-                print(f"msgid {id} has {dcnt} duplicate messages:")
+                linfo(f"msgid {id} has {dcnt} duplicate messages:")
                 for msg in msgs:
-                    print(f"   > {msg}")
+                    linfo(f"   > {msg}")
 
-    print(f"[v] consume {cnt} messages.")
+    linfo(f"[v] consume {cnt} messages.")
     if duplicate:
-        print(f"Total {dup_cnt} duplicate messages ({dup_cnt * 100/ float(cnt):.2f} %).")
+        linfo(f"Total {dup_cnt} duplicate messages ({dup_cnt * 100/ float(cnt):.2f} %).")
     return cnt
 
 
