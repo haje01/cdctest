@@ -53,8 +53,18 @@ def test_ct_local_basic(xsetup, xjdbc, xprofile, xkfssh):
 def test_ct_broker_stop(xsetup, xjdbc, xprofile, xkfssh, xhash):
     """카프카 브로커 정상 정지시 Change Tracking 테스트.
 
-    Insert / Select 시작 후 브로커를 멈추고 (Stop Gracefully) 잠시 후 다시 기동해도
-        메시지 수가 일치.
+    - 기본적으로 Insert / Select 시작 후 브로커를 멈추고 (Stop Gracefully) 다시
+        기동해도 메시지 수가 일치해야 한다.
+    - 그러나, 커넥터가 메시지 생성 ~ 오프셋 커밋 사이에 죽으면, 재기동시
+        커밋하지 않은 오프셋부터 다시 처리하게 되어 메시지 중복이 발생할 수 있다.
+    - Graceful 한 정지시 메시지 생성을 정지하고 처리된 오프셋까지만 커밋하면 해결
+        가능할 듯 한데..
+    - Debezium 도 Exactly Once Semantics 가 아닌 At Least Once 를 지원
+    - KIP-618 (Exactly-Once Support for Source Connectors) 에서 이것을 해결하려 함
+        - 중복이 없게 하려면 Kafka Connect 를 Transactional Producer 로 구현해야
+    - 참고:
+        - https://stackoverflow.com/questions/59785863/exactly-once-semantics-in-kafka-source-connector
+        - https://camel-context.tistory.com/54
 
     """
     # Selector 프로세스들 시작
@@ -73,18 +83,11 @@ def test_ct_broker_stop(xsetup, xjdbc, xprofile, xkfssh, xhash):
         ins_pros.append(p)
         p.start()
 
-    # 주: 브로커 정지 시간에 따른 메시지 중복 발생 가능
-    # EPOCH 10, BATCH 10 일 때
-    #   sleep 6, 7, 10 -> 중복 발생
-    #   sleep 11, 13, 17 -> 중복 없음
-    # EPOCH 100, BATCH 100 일 때
-    #   sleep 1, 5, 7 -> 중복 없음
-    time.sleep(10)
-    # 중요: 의존성을 고려해 Kafka 와 Connect 정지
+    time.sleep(5)
+    # 의존성을 고려해 카프카 브로커와 커넥트 정지
     stop_kafka_and_connect(xprofile, xkfssh, xhash)
-    time.sleep(10)
-    # 중요: 의존성을 고려해 Kafka 와 Connect 재시작
-    restart_kafka_and_connect(xkfssh, xprofile, xhash, False)
+    # 의존성을 고려해 카프카 브로커와 커넥트 재개
+    restart_kafka_and_connect(xprofile, xkfssh, xhash, False)
 
     # 카프카 토픽 확인 (timeout 되기 전에 다 받아야 함)
     cnt = count_topic_message(xkfssh, f'{xprofile}-person', timeout=10)
@@ -99,7 +102,7 @@ def test_ct_broker_stop(xsetup, xjdbc, xprofile, xkfssh, xhash):
     linfo("All select processes are done.")
 
 
-def test_ct_broker_down(xsetup, xjdbc, xprofile, xkfssh):
+def test_ct_broker_kill(xsetup, xjdbc, xprofile, xkfssh):
     """카프카 브로커 다운시 Change Tracking 테스트.
 
     Insert / Select 시작 후 브로커 프로세스를 강제로 죽인 후, 잠시 후 다시 재개해도

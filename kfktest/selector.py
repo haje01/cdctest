@@ -18,7 +18,7 @@ parser.add_argument('--db-name', type=str, default='test', help="이용할 데�
 parser.add_argument('-b', '--batch', type=int, default=1000, help="한 번에 select 할 행수.")
 parser.add_argument('-p', '--pid', type=int, default=0, help="셀렉트 프로세스 ID.")
 parser.add_argument('-d', '--dev', action='store_true', default=False,
-    help="개발 PC 에서 실행 여부.")
+    help="개발 PC 에서 실행.")
 
 
 def select(db_type, db_name=parser.get_default('db_name'),

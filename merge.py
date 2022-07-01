@@ -14,9 +14,9 @@ def get_insel_rps(f):
         if match is None:
             continue
         cnt = int(match.groups()[0])
-        if line.startswith('Insert'):
+        if 'Insert' in line:
             ins.append(cnt)
-        elif line.startswith('Selector'):
+        elif 'Selector' in line:
             sels.append(cnt)
     return ins, sels
 

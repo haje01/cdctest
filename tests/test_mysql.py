@@ -7,12 +7,12 @@ from mysql.connector import connect
 
 from kfktest.util import (SSH, count_topic_message, ssh_exec, stop_kafka_broker,
     start_kafka_broker, kill_proc_by_port, vm_start, vm_stop, vm_hibernate,
-    get_kafka_ssh, stop_kafka_and_connect, start_kafka_and_connect, linfo,
+    get_kafka_ssh, stop_kafka_and_connect, restart_kafka_and_connect, linfo,
     count_table_row, DB_PRE_ROWS, NUM_INSEL_PROCS, local_insert_proc,
     local_select_proc, remote_insert_proc, remote_select_proc, DB_ROWS,
     # 픽스쳐들
     xsetup, xjdbc, xcp_setup, xtable, xtopic_ct, xkafka, xzookeeper, xkvmstart,
-    xconn, xkfssh, xdbzm, xrmcons, xtopic_cdc, xhash
+    xconn, xkfssh, xdbzm, xrmcons, xtopic_cdc, xhash, xcdc
     )
 
 
@@ -56,15 +56,16 @@ def test_ct_local_basic(xjdbc, xkfssh, xsetup, xprofile):
     linfo("All select processes are done.")
 
 
-def test_ct_broker_stop(xsetup, xjdbc, xkfssh, xprofile):
+def test_ct_broker_stop(xsetup, xjdbc, xkfssh, xprofile, xhash):
     """카프카 브로커 정상 정지시 Change Tracking 테스트.
 
     - 기본적으로 Insert / Select 시작 후 브로커를 멈추고 (Stop Gracefully) 다시
         기동해도 메시지 수가 일치해야 한다.
-    - 그러나, 소스 커넥터가 메시지 생성 ~ 오프셋 커밋 사이에 죽으면, 재기동시
+    - 그러나, 커넥터가 메시지 생성 ~ 오프셋 커밋 사이에 죽으면, 재기동시
         커밋하지 않은 오프셋부터 다시 처리하게 되어 메시지 중복이 발생할 수 있다.
     - Debezium 도 Exactly Once Semantics 가 아닌 At Least Once 를 지원
     - KIP-618 (Exactly-Once Support for Source Connectors) 에서 이것을 해결하려 함
+        - 중복이 없게 하려면 Kafka Connect 를 Transactional Producer 로 구현해야
     - 참고:
         - https://stackoverflow.com/questions/59785863/exactly-once-semantics-in-kafka-source-connector
         - https://camel-context.tistory.com/54
@@ -86,30 +87,16 @@ def test_ct_broker_stop(xsetup, xjdbc, xkfssh, xprofile):
         ins_pros.append(p)
         p.start()
 
-    # 주: 브로커 정지 시간에 따른 메시지 중복 발생 가능
-    # EPOCH 10, BATCH 10 일 때 (Insert 에 0초 걸림):
-    #   sleep 6 ~ 10, -> 중복 발생
-    #   sleep ~ 5, 11 ~ -> 중복 없음
-    # 가설:
-    #   poll.interval.ms (테이블에서 새 데이터를 가져오는 간격) = 5000
-    #   offset.flush.interval.ms (커넥터 태스크에서 오프셋 커밋 간격) = 10000
-    #   5초가 지나 새 데이터를 가져왔으나, 10초가 되기전 브로커를 정지하면
-    #     오프셋이 커밋되지 않음 -> 브로커 재시작시 다시 처리! (중복)
-    # EPOCH 50, BATCH 50 일 때 (Insert 에 6초 걸림):
-    #   sleep 7 ~ 11 -> 중복 발생
-    #   sleep ~ 6, 12~ -> 중복 없음
-    # EPOCH 100, BATCH 100 일 때 (Insert 에 11초 걸림):
-    #   sleep 1, 4, 3, 6, 9 (Insert 중) 12, 15, 21 (Insert 종료) -> 중복 없음
-    time.sleep(4)
-    # 중요: 의존성을 고려해 Kafka 와 Connect 정지
-    stop_kafka_and_connect(xkfssh)
-    # 중요: 의존성을 고려해 Kafka 와 Connect 시작
-    start_kafka_and_connect(xkfssh)
-
+    time.sleep(5)
+    # 의존성을 고려해 카프카 브로커와 커넥트 정지
+    stop_kafka_and_connect(xprofile, xkfssh, xhash)
+    # 의존성을 고려해 카프카 브로커와 커넥트 재개
+    restart_kafka_and_connect(xprofile, xkfssh, xhash, False)
 
     # 카프카 토픽 확인 (timeout 되기 전에 다 받아야 함)
     cnt = count_topic_message(xkfssh, f'{xprofile}-person', timeout=10)
-    assert DB_ROWS + DB_PRE_ROWS == cnt
+    # 정지 시점에 따라 중복 발생 가능
+    assert DB_ROWS + DB_PRE_ROWS <= cnt
 
     for p in ins_pros:
         p.join()
@@ -120,7 +107,7 @@ def test_ct_broker_stop(xsetup, xjdbc, xkfssh, xprofile):
     linfo("All select processes are done.")
 
 
-def test_ct_broker_down(xsetup, xjdbc, xkfssh, xprofile):
+def test_ct_broker_kill(xsetup, xjdbc, xkfssh, xprofile):
     """카프카 브로커 다운시 Change Tracking 테스트.
 
     Insert / Select 시작 후 브로커 프로세스를 강제로 죽인 후, 잠시 후 다시 재개해도
@@ -207,6 +194,7 @@ def test_ct_broker_vmstop(xsetup, xjdbc, xkfssh, xprofile):
     linfo("All select processes are done.")
 
 
+@pytest.mark.skip(reason="시간이 많이 걸림.")
 def test_ct_broker_hibernate(xsetup, xjdbc, xkfssh, xprofile):
     """카프카 브로커 VM Hibernate 시 Change Tracking 테스트.
 
@@ -351,7 +339,7 @@ def test_cdc_local_basic(xdbzm, xkfssh, xsetup, xprofile):
     linfo("All select processes are done.")
 
 
-def test_cdc_remote_basic(xcp_setup, xdbzm, xprofile, xkfssh):
+def test_cdc_remote_basic(xcp_setup, xdbzm, xprofile, xkfssh, xcdc):
     """원격 insert / select 로 기본적인 Change Data Capture 테스트.
 
     - 테스트 시작전 이전 토픽을 참고하는 것이 없어야 함. (delete_topic 에러 발생)

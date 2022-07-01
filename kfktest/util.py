@@ -31,12 +31,12 @@ NUM_INSEL_PROCS = 4
 # MSSQL의 경우 사전 100000 행이 들어가 있으면 Insert / Select 성능이 25% 정도 감소
 # MySQL 은 Select 만 10% 정도 감소
 # (AWS I/O Bound 일수도)
-DB_PRE_EPOCH = 10  # DB 초기화시 Insert 에포크 수
-DB_PRE_BATCH = 10  # DB 초기화시 Insert 에포크당 행수
+DB_PRE_EPOCH = 100  # DB 초기화시 Insert 에포크 수
+DB_PRE_BATCH = 100  # DB 초기화시 Insert 에포크당 행수
 DB_PRE_ROWS = DB_PRE_EPOCH * DB_PRE_BATCH * NUM_INSEL_PROCS  #  DB 초기화시 Insert 된 행수
 
-DB_EPOCH = 10  # DB Insert 에포크 수
-DB_BATCH = 10  # DB Insert 에포크당 행수
+DB_EPOCH = 100  # DB Insert 에포크 수
+DB_BATCH = 100  # DB Insert 에포크당 행수
 DB_ROWS = DB_EPOCH * DB_BATCH * NUM_INSEL_PROCS  # DB Insert 된 행수
 
 # Kafka 내장 토픽 이름
@@ -568,7 +568,7 @@ def start_kafka_broker(kfk_ssh):
     ssh_exec(kfk_ssh, "sudo systemctl start kafka")
     # 충분한 시간 경과 후에 동작을 확인해야 한다.
     # kill 시 Zookeeper 의 기존 /brokers/ids/0 겹치는 문제로 기동중 다시 죽을 수 있음
-    time.sleep(15)
+    time.sleep(20)
     # 브로커 시작 확인
     if not is_service_active(kfk_ssh, 'kafka'):
         raise RuntimeError('Broker not launched!')
@@ -728,10 +728,11 @@ def local_select_proc(profile, pid):
     linfo(f"Select process {pid} done")
 
 
-def local_insert_proc(profile, pid, epoch=DB_EPOCH, batch=DB_BATCH):
+def local_insert_proc(profile, pid, epoch=DB_EPOCH, batch=DB_BATCH, hide=False):
     """로컬에서 가짜 데이터 인서트 프로세스 함수."""
     linfo(f"Insert process start: {pid}")
-    cmd = f"cd ../deploy/{profile} && python -m kfktest.inserter {profile} -p {pid} -e {epoch} -b {batch} -d"
+    hide = '-n' if hide else ''
+    cmd = f"cd ../deploy/{profile} && python -m kfktest.inserter {profile} -p {pid} -e {epoch} -b {batch} -d {hide}"
     local_exec(cmd)
     linfo(f"Insert process done: {pid}")
 
@@ -777,7 +778,8 @@ def xtable(xprofile, xkafka):
             # insert 프로세스
             p = Process(target=local_insert_proc, args=(xprofile, pid,
                                                         DB_PRE_EPOCH,
-                                                        DB_PRE_BATCH))
+                                                        DB_PRE_BATCH,
+                                                        True))
             ins_pros.append(p)
             p.start()
 
@@ -789,7 +791,7 @@ def xtable(xprofile, xkafka):
 
 
 @pytest.fixture
-def xconn(xkfssh, xsetup):
+def xconn(xkfssh, xsetup, xkafka):
     """테스트용 카프카 커넥트 기동 요청.
 
     - 커넥트가 기동되지 않았으면 기동
@@ -823,7 +825,7 @@ def start_kafka_connect(kfk_ssh):
     linfo(f"[v] start_kafka_connect")
 
 
-def restart_kafka_and_connect(kfk_ssh, profile, com_hash, cdc):
+def restart_kafka_and_connect(profile, kfk_ssh, com_hash, cdc):
     """의존성을 고려해 Kafka 와 Kafka Connect 재시작.
 
     Args:
@@ -840,55 +842,70 @@ def restart_kafka_and_connect(kfk_ssh, profile, com_hash, cdc):
     time.sleep(7)
     start_kafka_connect(kfk_ssh)
     setup = load_setup(profile)
-    _xsocon(profile, setup, kfk_ssh, com_hash)
-    if cdc:
-        # enable_cdc(profile)  # disable 한 경우
-        _xdbzm(profile, setup, kfk_ssh, com_hash)
+    # 커넥터 등록해제한 경우 재등록
+    # _xjdbc(profile, setup, kfk_ssh, com_hash)
+    # if cdc:
+    #     # enable_cdc(profile)  # disable 한 경우
+    #     _xdbzm(profile, setup, kfk_ssh, com_hash)
 
 
 def stop_kafka_and_connect(profile, kfk_ssh, com_hash):
-    """의존성을 고려해 Kafka 와 Kafka Connect 정지."""
+    """의존성을 고려해 Kafka 브로커와 커넥트 정지.
+
+    - 브로커만 정지해도 커넥트까지 정지되나, 그렇게 하면 메시지 손실이 생길 수 있다.
+    - 메시지 중복은 괜찮아도, 메시지 손실은 곤란하다.
+    - 커넥트를 먼저 정지하고, 브로커를 정지하면 적어도 손실은 없다.
+
+    """
     stop_kafka_connect(profile, kfk_ssh, com_hash)
     stop_kafka_broker(kfk_ssh)
 
 
 def stop_kafka_connect(profile, kfk_ssh, com_hash):
-    """카프카 커넥트 정지."""
+    """카프카 커넥트 정지.
+
+    - 커넥트는 따로 정지 명령이 없고 kill (-9 는 아님!) 로 정지
+    - 커넥트가 정지되면 모든 커넥터도 정지 (= 커넥터 등록 해제까지는 필요 없음)
+    - 특정 커넥터만 정지 시켜야할 때는 해당 커넥터만 등록 해제 한다.
+
+    """
     linfo(f"[ ] stop_kafka_connect")
     # 모든 커넥터 등록 해제 (= stop)
-    unregister_all_kconn(kfk_ssh)
-    time.sleep(3)
+    # unregister_all_kconn(kfk_ssh)
+    # time.sleep(3)
     # CDC 설정 해제 (실제 서비스에서는 해주는 것이 맞을 것)
     # if is_cdc_enabled(profile):
     #     cap_inst = f'dbo_person_{com_hash}'
     #     disable_cdc(profile, cap_inst)
-    # connect 프로세스 kill
+
     ssh_exec(kfk_ssh, "sudo kill $(fuser 8083/tcp)")
     time.sleep(3)
     linfo(f"[v] stop_kafka_connect")
 
 
 @pytest.fixture
-def xrmcons(xkfssh):
+def xrmcons(xkfssh, xconn):
     """등록된 모든 카프카 Connector 등록 해제."""
+    linfo("xrmcons")
     unregister_all_kconn(xkfssh)
 
 
 @pytest.fixture
 def xhash():
     """공용 해쉬."""
+    linfo("xhash")
     return binascii.hexlify(os.urandom(3)).decode('utf8')
 
 
 @pytest.fixture
 def xjdbc(xprofile, xrmcons, xkfssh, xtable, xtopic_ct, xconn, xsetup, xhash):
     """CT용 JDBC 소스 커넥터 초기화 (테이블과 토픽 먼저 생성)."""
-    _xsocon(xprofile, xsetup, xkfssh, xhash)
+    _xjdbc(xprofile, xsetup, xkfssh, xhash)
     time.sleep(5)
     yield
 
 
-def _xsocon(profile, setup, kfssh, com_hash):
+def _xjdbc(profile, setup, kfssh, com_hash):
     linfo("xjdbc")
     db_addr = setup[f'{profile}_private_ip']['value']
     db_user = setup['db_user']['value']
@@ -975,11 +992,18 @@ def vm_hibernate(profile, inst_name):
     linfo(f"[v] vm_hibernate {inst_name} of {profile}")
 
 
+@retry(RuntimeError, tries=10, delay=5)
 def vm_start(profile, inst_name):
     """VM 시작."""
     linfo(f"[ ] vm_start {inst_name} of {profile}")
     inst = ec2inst_by_name(profile, inst_name)
-    inst.start()
+    try:
+        inst.start()
+    except Exception as e:
+        if 'is not in a state from' in str(e):
+            raise RuntimeError(str(e))
+        else:
+            raise e
     inst.wait_until_running()
     # wait_vm_state(profile, inst_name, 'running')
     linfo(f"[v] vm_start {inst_name} of {profile}")
@@ -1024,9 +1048,11 @@ def xcdc(xprofile, xtable, xhash):
         str: SQL Server 의 Capture Instance 명
 
     """
+    linfo("xcdc")
     if xprofile != 'mssql':
-        return
-    yield enable_cdc(xprofile, xhash)
+        yield
+    else:
+        yield enable_cdc(xprofile, xhash)
 
 
 def enable_cdc(profile, com_hash):

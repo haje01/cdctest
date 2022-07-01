@@ -20,7 +20,9 @@ parser.add_argument('-p', '--pid', type=int, default=0, help="인서트 프로�
 parser.add_argument('-e', '--epoch', type=int, default=DB_EPOCH, help="에포크 수.")
 parser.add_argument('-b', '--batch', type=int, default=DB_BATCH, help="에포크당 행수.")
 parser.add_argument('-d', '--dev', action='store_true', default=False,
-    help="개발 PC 에서 실행 여부.")
+    help="개발 PC 에서 실행.")
+parser.add_argument('-n', '--no-result', action='store_true', default=False,
+    help="출력 감추기.")
 
 
 def insert(db_type, db_name=parser.get_default('db_name'),
@@ -28,7 +30,7 @@ def insert(db_type, db_name=parser.get_default('db_name'),
         batch=parser.get_default('batch'),
         pid=parser.get_default('pid'),
         dev=parser.get_default('devs'),
-        show_result=True
+        no_result=parser.get_default('no_result')
         ):
     """가짜 데이터 인서트.
 
@@ -41,7 +43,7 @@ def insert(db_type, db_name=parser.get_default('db_name'),
         batch (int): 에포크당 배치 수
         pid (int): 멀티 프로세스 인서트시 구분용 ID
         dev (bool): 개발 PC 에서 실행 여부
-        show_result (bool): 결과 출력 여부. 기본값 True
+        no_result (bool): 결과 감추기 여부. 기본값 True
 
     """
     setup = load_setup(db_type)
@@ -67,11 +69,11 @@ def insert(db_type, db_name=parser.get_default('db_name'),
 
     elapsed = time.time() - st
     vel = epoch * batch / elapsed
-    if show_result:
+    if not no_result:
         linfo(f"Insert {batch * epoch} rows. {int(vel)} rows per seconds with batch of {batch}.")
 
 
 if __name__ == '__main__':
     args = parser.parse_args()
     insert(args.db_type, args.db_name, args.epoch, args.batch,
-        args.pid, args.dev)
+        args.pid, args.dev, args.no_result)
