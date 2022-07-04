@@ -70,7 +70,7 @@ def insert(db_type, db_name=parser.get_default('db_name'),
     elapsed = time.time() - st
     vel = epoch * batch / elapsed
     if not no_result:
-        linfo(f"Insert {batch * epoch} rows. {int(vel)} rows per seconds with batch of {batch}.")
+        linfo(f"Inserter {pid} inserted {batch * epoch} rows. {int(vel)} rows per seconds with batch of {batch}.")
 
 
 if __name__ == '__main__':

@@ -6,7 +6,7 @@ from collections import defaultdict
 
 from kafka import KafkaConsumer
 
-from kfktest.util import load_setup, linfo
+from kfktest.util import load_setup, linfo, DB_PRE_ROWS, DB_ROWS
 
 # CLI 용 파서
 parser = argparse.ArgumentParser(description="프로파일에 맞는 토픽 컨슘.",
@@ -18,6 +18,7 @@ parser.add_argument('-a', '--auto-commit', action='store_true', default=False, h
 parser.add_argument('-b', '--from-begin', action='store_true', default=False, help="처음부터 컨슘")
 parser.add_argument('-c', '--count-only', action='store_true', default=False, help="메시지 수만 카운팅")
 parser.add_argument('-u', '--duplicate', action='store_true', default=False, help="중복 메시지 출력")
+parser.add_argument('-m', '--miss', action='store_true', default=False, help="누락 메시지 ID 출력")
 parser.add_argument('-d', '--dev', action='store_true', default=False,
     help="개발 PC 에서 실행 여부.")
 
@@ -28,6 +29,7 @@ def consume(profile,
         from_begin=parser.get_default('from_begin'),
         count_only=parser.get_default('count_only'),
         duplicate=parser.get_default('duplicate'),
+        miss=parser.get_default('miss'),
         dev=parser.get_default('dev')
         ):
     topic = f'{profile}-person'
@@ -55,7 +57,7 @@ def consume(profile,
     for msg in consumer:
         cnt += 1
         show = False
-        if duplicate:
+        if duplicate or miss:
             data = json.loads(msg.value.decode('utf8'))
             id = data['payload']['id']
             idmsgs[id].append((msg.topic, msg.partition, msg.offset, data['payload']))
@@ -72,6 +74,14 @@ def consume(profile,
                 for msg in msgs:
                     linfo(f"   > {msg}")
 
+    if miss:
+        aids = set(range(1, DB_PRE_ROWS + DB_ROWS + 1))
+        mids = set(idmsgs.keys())
+        if len(aids) > len(mids):
+            missed = aids - mids
+            print(f"Missed message ids {missed} from 1 to {DB_PRE_ROWS + DB_ROWS})")
+
+
     linfo(f"[v] consume {cnt} messages.")
     if duplicate:
         linfo(f"Total {dup_cnt} duplicate messages ({dup_cnt * 100/ float(cnt):.2f} %).")
@@ -81,4 +91,4 @@ def consume(profile,
 if __name__ == '__main__':
     args = parser.parse_args()
     consume(args.profile, args.timeout, args.auto_commit, args.from_begin,
-        args.count_only, args.duplicate, args.dev)
+        args.count_only, args.duplicate, args.miss, args.dev)

@@ -24,20 +24,21 @@ import pytest
 from retry import retry
 
 # Insert / Select 프로세스 수
-NUM_INSEL_PROCS = 4
+NUM_INS_PROCS = 16
+NUM_SEL_PROCS = 4
 
 # 빠른 테스트를 위해서는 EPOCH 와 BATCH 수를 10 정도로 줄여 테스트
 
 # MSSQL의 경우 사전 100000 행이 들어가 있으면 Insert / Select 성능이 25% 정도 감소
 # MySQL 은 Select 만 10% 정도 감소
 # (AWS I/O Bound 일수도)
-DB_PRE_EPOCH = 100  # DB 초기화시 Insert 에포크 수
+DB_PRE_EPOCH = 25  # DB 초기화시 Insert 에포크 수
 DB_PRE_BATCH = 100  # DB 초기화시 Insert 에포크당 행수
-DB_PRE_ROWS = DB_PRE_EPOCH * DB_PRE_BATCH * NUM_INSEL_PROCS  #  DB 초기화시 Insert 된 행수
+DB_PRE_ROWS = DB_PRE_EPOCH * DB_PRE_BATCH * NUM_INS_PROCS  #  DB 초기화시 Insert 된 행수
 
-DB_EPOCH = 100  # DB Insert 에포크 수
-DB_BATCH = 100  # DB Insert 에포크당 행수
-DB_ROWS = DB_EPOCH * DB_BATCH * NUM_INSEL_PROCS  # DB Insert 된 행수
+DB_EPOCH = 1000  # DB Insert 에포크 수
+DB_BATCH = 1  # DB Insert 에포크당 행수
+DB_ROWS = DB_EPOCH * DB_BATCH * NUM_INS_PROCS  # DB Insert 된 행수
 
 # Kafka 내장 토픽 이름
 INTERNAL_TOPICS = ['__consumer_offsets', 'connect-configs', 'connect-offsets', 'connect-status']
@@ -71,7 +72,11 @@ def insert_fake(conn, cursor, epoch, batch, pid, profile):
         sql = "INSERT INTO person VALUES(%s, %s, %s, %s, %s, %s, %s, %s)"
 
     for j in range(epoch):
-        linfo(f"Inserter {pid} epoch: {j+1}")
+        if batch == 1:
+            if j % 20 == 0:
+                linfo(f"Inserter {pid} epoch: {j+1}")
+        else:
+            linfo(f"Inserter {pid} epoch: {j+1}")
         rows = []
         for i in range(batch):
             row = (
@@ -774,7 +779,7 @@ def xtable(xprofile, xkafka):
         linfo("[ ] insert initial data")
         # Insert 프로세스들 시작
         ins_pros = []
-        for pid in range(1, NUM_INSEL_PROCS + 1):
+        for pid in range(1, NUM_INS_PROCS + 1):
             # insert 프로세스
             p = Process(target=local_insert_proc, args=(xprofile, pid,
                                                         DB_PRE_EPOCH,

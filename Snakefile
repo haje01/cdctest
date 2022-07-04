@@ -99,7 +99,7 @@ rule plot:
     """
     input:
         # lambda wc: _plot_input(wc)
-        expand("temp/{{profile}}/{epoch}/merge.parquet", epoch=range(1,5))
+        expand("temp/{{profile}}/{epoch}/merge.parquet", epoch=range(1,6))
     output:
         "temp/{profile}/plot.png"
     script:
