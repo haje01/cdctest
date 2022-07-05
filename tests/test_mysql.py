@@ -31,7 +31,7 @@ def test_ct_local_basic(xjdbc, xkfssh, xsetup, xprofile):
     # Selector 프로세스들 시작
     sel_pros = []
     for pid in range(1, NUM_SEL_PROCS + 1):
-        # insert 프로세스
+        # select 프로세스
         p = Process(target=local_select_proc, args=(xprofile, pid,))
         sel_pros.append(p)
         p.start()
@@ -74,15 +74,15 @@ def test_ct_broker_stop(xsetup, xjdbc, xkfssh, xprofile, xhash):
     """
     # Selector 프로세스들 시작
     sel_pros = []
-    for pid in range(1, NUM_INS_PROCS + 1):
-        # insert 프로세스
+    for pid in range(1, NUM_SEL_PROCS + 1):
+        # select 프로세스
         p = Process(target=local_select_proc, args=(xprofile, pid,))
         sel_pros.append(p)
         p.start()
 
     # Insert 프로세스들 시작
     ins_pros = []
-    for pid in range(1, NUM_SEL_PROCS + 1):
+    for pid in range(1, NUM_INS_PROCS + 1):
         # insert 프로세스
         p = Process(target=local_insert_proc, args=(xprofile, pid))
         ins_pros.append(p)
@@ -117,15 +117,15 @@ def test_ct_broker_kill(xsetup, xjdbc, xkfssh, xprofile):
     """
     # Selector 프로세스들 시작
     sel_pros = []
-    for pid in range(1, NUM_INS_PROCS + 1):
-        # insert 프로세스
+    for pid in range(1, NUM_SEL_PROCS + 1):
+        # select 프로세스
         p = Process(target=local_select_proc, args=(xprofile, pid,))
         sel_pros.append(p)
         p.start()
 
     # Insert 프로세스들 시작
     ins_pros = []
-    for pid in range(1, NUM_SEL_PROCS + 1):
+    for pid in range(1, NUM_INS_PROCS + 1):
         # insert 프로세스
         p = Process(target=local_insert_proc, args=(xprofile, pid))
         ins_pros.append(p)
@@ -162,7 +162,7 @@ def test_ct_broker_vmstop(xsetup, xjdbc, xkfssh, xprofile):
     # Selector 프로세스들 시작
     sel_pros = []
     for pid in range(1, NUM_SEL_PROCS + 1):
-        # insert 프로세스
+        # select 프로세스
         p = Process(target=local_select_proc, args=(xprofile, pid,))
         sel_pros.append(p)
         p.start()
@@ -205,7 +205,7 @@ def test_ct_broker_hibernate(xsetup, xjdbc, xkfssh, xprofile):
     # Selector 프로세스들 시작
     sel_pros = []
     for pid in range(1, NUM_SEL_PROCS + 1):
-        # insert 프로세스
+        # select 프로세스
         p = Process(target=local_select_proc, args=(xprofile, pid,))
         sel_pros.append(p)
         p.start()
@@ -244,7 +244,7 @@ def test_db(xcp_setup, xprofile, xkfssh, xtable):
     # Selector 프로세스들 시작
     sel_pros = []
     for pid in range(1, NUM_SEL_PROCS + 1):
-        # insert 프로세스
+        # select 프로세스
         p = Process(target=remote_select_proc, args=(xprofile, xcp_setup, pid))
         sel_pros.append(p)
         p.start()
@@ -274,12 +274,13 @@ def test_ct_remote_basic(xcp_setup, xprofile, xkfssh, xjdbc):
     """원격 insert / select 로 기본적인 Change Tracking 테스트.
 
     - Inserter / Selector 출력은 count 가 끝난 뒤 몰아서 나옴.
+    - 가끔씩 1~4 개 정도 메시지 손실이 있는듯?
 
     """
     # Selector 프로세스들 시작
     sel_pros = []
     for pid in range(1, NUM_SEL_PROCS + 1):
-        # insert 프로세스
+        # select 프로세스
         p = Process(target=remote_select_proc, args=(xprofile, xcp_setup, pid))
         sel_pros.append(p)
         p.start()
@@ -314,7 +315,7 @@ def test_cdc_local_basic(xdbzm, xkfssh, xsetup, xprofile):
     # Selector 프로세스들 시작
     sel_pros = []
     for pid in range(1, NUM_SEL_PROCS + 1):
-        # insert 프로세스
+        # select 프로세스
         p = Process(target=local_select_proc, args=(xprofile, pid,))
         sel_pros.append(p)
         p.start()
@@ -344,12 +345,13 @@ def test_cdc_remote_basic(xcp_setup, xdbzm, xprofile, xkfssh, xcdc):
     """원격 insert / select 로 기본적인 Change Data Capture 테스트.
 
     - 테스트 시작전 이전 토픽을 참고하는 것이 없어야 함. (delete_topic 에러 발생)
+    - Inserter / Selector 출력은 count 가 끝난 뒤 몰아서 나옴.
 
     """
     # Selector 프로세스들 시작
     sel_pros = []
     for pid in range(1, NUM_SEL_PROCS + 1):
-        # insert 프로세스
+        # select 프로세스
         p = Process(target=remote_select_proc, args=(xprofile, xcp_setup, pid))
         sel_pros.append(p)
         p.start()

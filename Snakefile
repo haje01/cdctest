@@ -30,11 +30,11 @@ rule test_db:
     input:
         "temp/{profile}/setup.json"
     output:
-        "temp/{profile}/{epoch}/test_db"
+        "temp/{profile}/bench/{epoch}/test_db"
     shell:
         """
-        cd tests && pytest test_{wildcards.profile}.py::test_db -s > ../temp/{wildcards.profile}/test_db.out
-        cd .. && grep "per seconds" temp/{wildcards.profile}/test_db.out > {output}
+        cd tests && pytest test_{wildcards.profile}.py::test_db -s > ../temp/{wildcards.profile}/bench/{wildcards.epoch}/test_db.out
+        cd .. && grep "per seconds" temp/{wildcards.profile}/bench/{wildcards.epoch}/test_db.out > {output}
         """
 
 
@@ -43,11 +43,11 @@ rule test_ct:
     input:
         "temp/{profile}/setup.json"
     output:
-        "temp/{profile}/{epoch}/test_ct"
+        "temp/{profile}/bench/{epoch}/test_ct"
     shell:
         """
-        cd tests && pytest test_{wildcards.profile}.py::test_ct_remote_basic -s > ../temp/{wildcards.profile}/test_ct.out
-        cd .. && grep "per seconds" temp/{wildcards.profile}/test_ct.out > {output}
+        cd tests && pytest test_{wildcards.profile}.py::test_ct_remote_basic -s > ../temp/{wildcards.profile}/bench/{wildcards.epoch}/test_ct.out
+        cd .. && grep "per seconds" temp/{wildcards.profile}/bench/{wildcards.epoch}/test_ct.out > {output}
         """
 
 
@@ -56,33 +56,33 @@ rule test_cdc:
     input:
         "temp/{profile}/setup.json"
     output:
-        "temp/{profile}/{epoch}/test_cdc"
+        "temp/{profile}/bench/{epoch}/test_cdc"
     shell:
         """
-        cd tests && pytest test_{wildcards.profile}.py::test_cdc_remote_basic -s > ../temp/{wildcards.profile}/test_cdc.out
-        cd .. && grep "per seconds" temp/{wildcards.profile}/test_cdc.out > {output}
+        cd tests && pytest test_{wildcards.profile}.py::test_cdc_remote_basic -s > ../temp/{wildcards.profile}/bench/{wildcards.epoch}/test_cdc.out
+        cd .. && grep "per seconds" temp/{wildcards.profile}/bench/{wildcards.epoch}/test_cdc.out > {output}
         """
 
 
 rule merge:
-    """테스트 에포크 결과 결합.
+    """테스트 벤치 결과 결합.
 
     한 번에 하나의 테스트만 실행되도록 -j 1 으로 실행
 
     """
     input:
-        "temp/{profile}/{epoch}/test_db",
-        "temp/{profile}/{epoch}/test_ct",
-        "temp/{profile}/{epoch}/test_cdc"
+        "temp/{profile}/bench/{epoch}/test_db",
+        "temp/{profile}/bench/{epoch}/test_ct",
+        "temp/{profile}/bench/{epoch}/test_cdc"
     output:
-        "temp/{profile}/{epoch}/merge.parquet"
+        "temp/{profile}/bench/{epoch}/merge.parquet"
     script:
         "merge.py"
 
 
 def _plot_input(wc):
     profile = wc[0]
-    files = glob(f'temp/{profile}/*/merge.parquet')
+    files = glob(f'temp/{profile}/bench/*/merge.parquet')
     return files
 
 
@@ -99,8 +99,8 @@ rule plot:
     """
     input:
         # lambda wc: _plot_input(wc)
-        expand("temp/{{profile}}/{epoch}/merge.parquet", epoch=range(1,6))
+        expand("temp/{{profile}}/bench/{epoch}/merge.parquet", epoch=range(1,6))
     output:
-        "temp/{profile}/plot.png"
+        "temp/{profile}/bench/plot.png"
     script:
         "plot.py"

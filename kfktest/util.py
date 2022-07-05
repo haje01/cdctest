@@ -24,19 +24,18 @@ import pytest
 from retry import retry
 
 # Insert / Select 프로세스 수
-NUM_INS_PROCS = 16
+NUM_INS_PROCS = 10  # 10 초과이면 sshd 세션수 문제(?)로 Insert가 안되는 문제 발생
+                    # 10 일때 CT 에서 이따금씩(?) 1~4 개 정도 메시지 손실 발생
 NUM_SEL_PROCS = 4
 
 # 빠른 테스트를 위해서는 EPOCH 와 BATCH 수를 10 정도로 줄여 테스트
 
-# MSSQL의 경우 사전 100000 행이 들어가 있으면 Insert / Select 성능이 25% 정도 감소
-# MySQL 은 Select 만 10% 정도 감소
-# (AWS I/O Bound 일수도)
-DB_PRE_EPOCH = 25  # DB 초기화시 Insert 에포크 수
+# 테스트 시작전 40000행 미래 입력 : 40 (epoch) x 100 (batch) x 10 (process)
+DB_PRE_EPOCH = 40  # DB 초기화시 Insert 에포크 수
 DB_PRE_BATCH = 100  # DB 초기화시 Insert 에포크당 행수
 DB_PRE_ROWS = DB_PRE_EPOCH * DB_PRE_BATCH * NUM_INS_PROCS  #  DB 초기화시 Insert 된 행수
 
-DB_EPOCH = 1000  # DB Insert 에포크 수
+DB_EPOCH = 2000  # DB Insert 에포크 수
 DB_BATCH = 1  # DB Insert 에포크당 행수
 DB_ROWS = DB_EPOCH * DB_BATCH * NUM_INS_PROCS  # DB Insert 된 행수
 
@@ -388,7 +387,7 @@ def register_jdbc(kfk_ssh, profile, db_addr, db_port, db_user, db_passwd,
         "table.whitelist": "{tables}",
         "topic.prefix" : "{topic_prefix}",
         "poll.interval.ms": "{poll_interval}",
-        "tasks.max" : "1"
+        "tasks.max" : 1
     }}'''
     data = _register_connector(kfk_ssh, conn_name, config)
     # 등록된 커넥터 상태 확인
@@ -754,12 +753,13 @@ def remote_select_proc(profile, setup, pid):
     return ret
 
 
-def remote_insert_proc(profile, setup, pid, epoch=DB_EPOCH, batch=DB_BATCH):
+def remote_insert_proc(profile, setup, pid, epoch=DB_EPOCH, batch=DB_BATCH, hide=False):
     """원격 인서트 노드에서 가짜 데이터 인서트 (원격 노드에 setup.json 있어야 함)."""
     linfo(f"[ ] insert process {pid}")
     ins_ip = setup['inserter_public_ip']['value']
+    hide = '-n' if hide else ''
     ssh = SSH(ins_ip, 'inserter')
-    cmd = f"cd kfktest/deploy/{profile} && python3 -m kfktest.inserter {profile} -p {pid} -e {epoch} -b {batch}"
+    cmd = f"cd kfktest/deploy/{profile} && python3 -m kfktest.inserter {profile} -p {pid} -e {epoch} -b {batch} {hide}"
     ret = ssh_exec(ssh, cmd, False)
     linfo(ret)
     linfo(f"[v] insert process {pid}")

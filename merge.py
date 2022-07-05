@@ -1,5 +1,6 @@
 import re
 
+import numpy as np
 import pandas as pd
 
 PTRN = re.compile(r'(\d+) rows per seconds')
@@ -24,8 +25,7 @@ def get_insel_rps(f):
 def type_df(iidx, dtype):
     with open(snakemake.input[iidx], 'rt') as f:
         ins, sels = get_insel_rps(f)
-        df = pd.DataFrame({'ins': ins, 'sels': sels})
-        df = df.assign(type=dtype)
+        df = pd.DataFrame({'ins': np.mean(ins), 'sels': np.mean(sels)}, index=[dtype])
         return df
 
 dfs = []
@@ -36,4 +36,4 @@ dfs.append(type_df(1, 'ct'))
 # CDC 테스트 결과
 dfs.append(type_df(2, 'cdc'))
 df = pd.concat(dfs)
-df.to_parquet(snakemake.output[0])
+df.reset_index().to_parquet(snakemake.output[0])

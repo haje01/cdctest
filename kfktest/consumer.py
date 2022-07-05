@@ -79,7 +79,7 @@ def consume(profile,
         mids = set(idmsgs.keys())
         if len(aids) > len(mids):
             missed = aids - mids
-            print(f"Missed message ids {missed} from 1 to {DB_PRE_ROWS + DB_ROWS})")
+            print(f"Missed message ids {missed} among 1 to {DB_PRE_ROWS + DB_ROWS}")
 
 
     linfo(f"[v] consume {cnt} messages.")
