@@ -53,7 +53,7 @@ def produce(profile,
     st = time.time()
     for i, data in enumerate(gen_fake_data(messages)):
         if i % 500 == 0:
-            linfo("gen {i}th fake data ")
+            linfo(f"gen {i}th fake data")
         producer.send(topic, value=data)
     vel = messages / (time.time() - st)
     producer.flush()
