@@ -673,16 +673,18 @@ def claim_kafka(kfk_ssh):
 def xtopic(xkfssh, xprofile):
     """카프카 토픽 초기화."""
     linfo("xtopic_")
-    reset_topic(xkfssh, f"{xprofile}-person")
-    yield
+    topic = f"{xprofile}-person"
+    reset_topic(xkfssh, topic)
+    yield topic
 
 
 @pytest.fixture
 def xtopic_ct(xkfssh, xprofile, xkafka):
     """CT 테스트용 카프카 토픽 초기화."""
     linfo("xtopic_ct")
-    reset_topic(xkfssh, f"{xprofile}-person")
-    yield
+    topic = f"{xprofile}-person"
+    reset_topic(xkfssh, topic)
+    yield topic
 
 
 @pytest.fixture
@@ -691,8 +693,9 @@ def xtopic_cdc(xkfssh, xprofile, xkafka):
     linfo("xtopic_cdc")
     reset_topic(xkfssh, f"db1")
     scm = 'dbo' if xprofile == 'mssql' else 'test'
-    reset_topic(xkfssh, f"db1.{scm}.person")
-    yield
+    topic = f"db1.{scm}.person"
+    reset_topic(xkfssh, topic)
+    yield topic
 
 
 def setup_path(profile):

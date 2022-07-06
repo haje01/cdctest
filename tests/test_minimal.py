@@ -4,7 +4,7 @@ from multiprocessing import Process, Queue
 import pytest
 
 from kfktest.util import (local_produce_proc, local_consume_proc, local_exec,
-    linfo, remote_produce_proc, remote_consume_proc,
+    linfo, remote_produce_proc, count_topic_message,
     # 픽스쳐들
     xsetup, xtopic, xkfssh, xkvmstart, xcp_setup
 )
@@ -56,16 +56,12 @@ def test_remote_basic(xprofile, xsetup, xcp_setup, xtopic, xkfssh):
         p.start()
         pro_pros.append(p)
 
-    # Consumer 프로세스 시작
-    con = Process(target=remote_consume_proc, args=(xprofile, xsetup, 1))
-    con.start()
-
+    # 카프카 토픽 확인 (timeout 되기전에 다 받아야 함)
+    cnt = count_topic_message(xkfssh, xtopic, timeout=10)
     for p in pro_pros:
         p.join()
-    import pdb; pdb.set_trace()
-    con.join()
 
     tot_msg = PROC_NUM_MSG * NUM_PRO_PROCS
     vel = tot_msg / (time.time() - st)
     linfo (f"Produce and consume total {tot_msg} messages. {int(vel)} rows per seconds.")
-    assert tot_msg == con_cnt
+    assert tot_msg == cnt
