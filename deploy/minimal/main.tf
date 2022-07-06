@@ -12,6 +12,7 @@ module "kafka" {
   tags = var.tags
 }
 
+
 module "producer" {
   source = "../module/kfktest"
   name = var.name

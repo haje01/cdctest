@@ -55,6 +55,27 @@ def db_port(profile):
     return DB_PORTS[profile]
 
 
+def gen_fake_data(count):
+    """Fake 데이터 생성."""
+    fake = Faker()
+    fake.add_provider(internet)
+    fake.add_provider(date_time)
+    fake.add_provider(company)
+    fake.add_provider(phone_number)
+
+    for i in range(count):
+        data = {
+            'id': i + 1,
+            'name': fake.name(),
+            'address': fake.address(),
+            'ip': fake.ipv4_public(),
+            'birth': fake.date(),
+            'company': fake.company(),
+            'phone': fake.phone_number()
+        }
+        yield data
+
+
 def insert_fake(conn, cursor, epoch, batch, pid, profile):
     """Fake 데이터를 DB insert."""
     assert profile in ('mysql', 'mssql')
@@ -311,9 +332,6 @@ def reset_topic(profile, topic, partitions=12, replications=1):
 
 def count_topic_message(kfk_ssh, topic, from_begin=True, timeout=10):
     """토픽의 메시지 수를 카운팅.
-
-    카프카 커넥트가 제대로 동작하지 않는 경우 계속 같은 수가 나와 조기 종료되는
-    문제 있음. 이럴 때는 카프카 커넥트를 재시작해야 한다
 
     Args:
         kfk_ssh : Kafka 노드의 Paramiko SSH 객체
@@ -652,6 +670,14 @@ def claim_kafka(kfk_ssh):
 
 
 @pytest.fixture
+def xtopic(xkfssh, xprofile):
+    """카프카 토픽 초기화."""
+    linfo("xtopic_")
+    reset_topic(xkfssh, f"{xprofile}-person")
+    yield
+
+
+@pytest.fixture
 def xtopic_ct(xkfssh, xprofile, xkafka):
     """CT 테스트용 카프카 토픽 초기화."""
     linfo("xtopic_ct")
@@ -722,6 +748,51 @@ def mysql_exec_many(cursor, stmt):
     results = cursor.execute(stmt, multi=True)
     for res in results:
         linfo(res)
+
+
+def local_produce_proc(profile, pid, msg_cnt):
+    """로컬 프로듀서 프로세스 함수."""
+    from kfktest.producer import produce
+
+    linfo(f"[ ] produce process {pid}")
+    produce(profile, messages=msg_cnt, dev=True)
+    linfo(f"[v] produce process {pid}")
+
+
+def local_consume_proc(profile, pid, q):
+    """로컬 컨슈머 프로세스 함수."""
+    from kfktest.consumer import consume
+
+    linfo(f"[ ] consume process {pid}")
+    cnt = consume(profile, dev=True, count_only=True, from_begin=True, timeout=10)
+    q.put(cnt)
+    linfo(f"[v] consume process {pid}")
+
+
+def remote_produce_proc(profile, setup, pid, msg_cnt):
+    """원격 프로듀서 프로세스 함수."""
+    from kfktest.producer import produce
+
+    linfo(f"[ ] produce process {pid}")
+    pro_ip = setup['producer_public_ip']['value']
+    ssh = SSH(pro_ip, 'producer')
+    cmd = f"cd kfktest/deploy/{profile} && python3 -m kfktest.producer {profile} -p {pid} -m {msg_cnt}"
+    ret = ssh_exec(ssh, cmd, False)
+    linfo(ret)
+    linfo(f"[v] produce process {pid}")
+
+
+def remote_consume_proc(profile, setup, pid):
+    """원격 컨슈머 프로세스 함수."""
+    from kfktest.consumer import consume
+
+    linfo(f"[ ] consumer {pid}")
+    pro_ip = setup['consumer_public_ip']['value']
+    ssh = SSH(pro_ip, 'consumer')
+    cmd = f"cd kfktest/deploy/{profile} && python3 -m kfktest.consumer {profile} -b -c -t 10"
+    ret = ssh_exec(ssh, cmd, False)
+    linfo(f"[v] consumer {pid}")
+    return ret
 
 
 def local_select_proc(profile, pid):

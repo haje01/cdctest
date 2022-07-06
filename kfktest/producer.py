@@ -1,4 +1,4 @@
-import sys
+import time
 import json
 import argparse
 
@@ -6,35 +6,40 @@ from kafka import KafkaProducer
 from faker import Faker
 from faker.providers import internet, date_time, company, phone_number
 
-from kfktest.util import load_setup, linfo
+from kfktest.util import (get_kafka_ssh, load_setup, linfo, gen_fake_data,
+    list_topics, get_kafka_ssh, create_topic
+)
 
 # CLI 용 파서
 parser = argparse.ArgumentParser(description="프로파일에 맞는 토픽에 레코드 생성.",
     formatter_class=argparse.ArgumentDefaultsHelpFormatter
 )
 parser.add_argument('profile', type=str, help="프로파일 이름.")
-parser.add_argument('-c', '--count', type=int, default=10000, help="생성할 레코드 수.")
+parser.add_argument('-m', '--messages', type=int, default=10000, help="생성할 메시지 수.")
 parser.add_argument('--acks', type=int, default=0, help="전송 완료에 필요한 승인 수.")
-parser.add_argument('--compress', type=str,
+parser.add_argument('-c', '--compress', type=str,
     choices=['none', 'gzip', 'snappy', 'lz4'], default='none', help="데이터 압축 방식.")
-parser.add_argument('--callback', action='store_true', default=False, help="Ack 결과 콜백.")
+parser.add_argument('-p', '--pid', type=int, default=0, help="셀렉트 프로세스 ID.")
 parser.add_argument('-d', '--dev', action='store_true', default=False,
     help="개발 PC 에서 실행 여부.")
 
 
 def produce(profile,
-        count=parser.get_default('count'),
+        messages=parser.get_default('messages'),
         acks=parser.get_default('acks'),
         compress=parser.get_default('compress'),
+        pid=parser.get_default('pid'),
         dev=parser.get_default('dev')
         ):
-    """Fake 레코드 생성.
-
-    Dev 모드로 로컬 PC 에서 Kafka 접근하려면 server.properties 에서 Public IP 로 수정 필요.
-
-    """
+    """Fake 레코드 전송."""
     topic = f'{profile}-person'
-    linfo(f"Produce {count} records to {topic}.")
+    linfo(f"[ ] producer {pid} produces {messages} messages to {topic}.")
+
+    # 토픽이 없으면 명시적으로 생성
+    kfkssh = get_kafka_ssh(profile)
+    topics = list_topics(kfkssh)
+    if topic not in topics:
+        create_topic(kfkssh, topic)
 
     setup = load_setup(profile)
     ip_key = 'kafka_public_ip' if dev else 'kafka_private_ip'
@@ -48,28 +53,14 @@ def produce(profile,
         value_serializer=lambda x: json.dumps(x).encode('utf-8')
         )
 
-    fake = Faker()
-    fake.add_provider(internet)
-    fake.add_provider(date_time)
-    fake.add_provider(company)
-    fake.add_provider(phone_number)
-
-    for i in range(count):
-        data = {
-            'id': i + 1,
-            'name': fake.name(),
-            'address': fake.address(),
-            'ip': fake.ipv4_public(),
-            'birth': fake.date(),
-            'company': fake.company(),
-            'phone': fake.phone_number()
-        }
+    st = time.time()
+    for data in gen_fake_data(messages):
         producer.send(topic, value=data)
-
+    vel = messages / (time.time() - st)
     producer.flush()
-    linfo("Produce done.")
+    linfo(f"[ ] producer {pid} produces {messages} messages to {topic}. {int(vel)} rows per seconds.")
 
 
 if __name__ == '__main__':
     args = parser.parse_args()
-    produce(args.profile, args.count, args.acks, args.compress, args.dev)
+    produce(args.profile, args.messages, args.acks, args.compress, args.pid, args.dev)
