@@ -6,8 +6,7 @@ from kafka import KafkaProducer
 from faker import Faker
 from faker.providers import internet, date_time, company, phone_number
 
-from kfktest.util import (get_kafka_ssh, load_setup, linfo, gen_fake_data,
-    list_topics, get_kafka_ssh, create_topic
+from kfktest.util import (get_kafka_ssh, load_setup, linfo, gen_fake_data
 )
 
 # CLI 용 파서
@@ -31,15 +30,13 @@ def produce(profile,
         pid=parser.get_default('pid'),
         dev=parser.get_default('dev')
         ):
-    """Fake 레코드 전송."""
+    """Fake 레코드 전송.
+
+    - 대상 토픽은 미리 존재하거나 브로커 설정에서 auto.create.topics.enable=true 여야 한다.
+
+    """
     topic = f'{profile}-person'
     linfo(f"[ ] producer {pid} produces {messages} messages to {topic}.")
-
-    # 토픽이 없으면 명시적으로 생성
-    kfkssh = get_kafka_ssh(profile)
-    topics = list_topics(kfkssh)
-    if topic not in topics:
-        create_topic(kfkssh, topic)
 
     setup = load_setup(profile)
     ip_key = 'kafka_public_ip' if dev else 'kafka_private_ip'
