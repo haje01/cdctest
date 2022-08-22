@@ -62,8 +62,8 @@ resource "aws_instance" "kfktest" {
 
   provisioner "remote-exec" {
     inline = [<<EOT
-cloud-init status --wait
 sudo apt update
+sudo sed -i 's/#$nrconf{restart} = '"'"'i'"'"';/$nrconf{restart} = '"'"'a'"'"';/g' /etc/needrestart/needrestart.conf
 sudo apt install -y python3-pip unzip
 
 # 코드 설치

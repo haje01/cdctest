@@ -1,6 +1,7 @@
 import time
 from multiprocessing import Process
 
+import pymssql
 import pytest
 
 from kfktest.util import (SSH, count_topic_message, get_kafka_ssh, ssh_exec,
@@ -8,7 +9,7 @@ from kfktest.util import (SSH, count_topic_message, get_kafka_ssh, ssh_exec,
     vm_stop, vm_start, restart_kafka_and_connect, stop_kafka_and_connect,
     count_table_row, DB_PRE_ROWS, local_select_proc, local_insert_proc, linfo,
     NUM_INS_PROCS, NUM_SEL_PROCS, remote_insert_proc, remote_select_proc,
-    DB_ROWS,
+    DB_ROWS, load_setup,
     # 픽스쳐들
     xsetup, xcp_setup, xjdbc, xtable, xtopic_ct, xkafka, xzookeeper, xkvmstart,
     xconn, xkfssh, xdbzm, xtopic_cdc, xrmcons, xcdc, xhash
@@ -293,3 +294,53 @@ def test_cdc_remote_basic(xcp_setup, xdbzm, xprofile, xkfssh, xtable):
     linfo("All select processes are done.")
 
     linfo(f"CDC Test Elapsed: {time.time() - xtable:.2f}")
+
+
+def test_ct_modify(xcp_setup, xjdbc, xprofile, xkfssh):
+    """CT 방식에서 기존 행이 변하는 경우 동작 확인."""
+    # Selector 프로세스들 시작
+    sel_pros = []
+    for pid in range(1, NUM_SEL_PROCS + 1):
+        # insert 프로세스
+        p = Process(target=local_select_proc, args=(xprofile, pid,))
+        sel_pros.append(p)
+        p.start()
+
+    # Insert 프로세스들 시작
+    ins_pros = []
+    for pid in range(1, NUM_INS_PROCS + 1):
+        # insert 프로세스
+        p = Process(target=local_insert_proc, args=(xprofile, pid))
+        ins_pros.append(p)
+        p.start()
+
+    # 카프카 토픽 확인 (timeout 되기 전에 다 받아야 함)
+    cnt = count_topic_message(xkfssh, f'{xprofile}-person', timeout=10)
+    assert DB_ROWS + DB_PRE_ROWS == cnt
+
+    for p in ins_pros:
+        p.join()
+    linfo("All insert processes are done.")
+
+    for p in sel_pros:
+        p.join()
+    linfo("All select processes are done.")
+
+    # 일부 행을 변경
+    import pdb; pdb.set_trace()
+    setup = load_setup('mssql')
+    db_host = setup['mssql_private_ip']['value']
+    db_user = setup['db_user']['value']
+    db_passwd = setup['db_passwd']['value']['result']
+    db_name = 'test'
+
+    conn = pymssql.connect(host=db_host, user=db_user, password=db_passwd, database=db_name)
+    cursor = conn.cursor()
+    linfo("Connect done.")
+    sql = "UPDATE person SET name='MODIFIED' WHERE pid=1 and sid=1"
+    cursor.execute(sql)
+    conn.commit()
+    conn.close()
+
+    # cli 툴로 변경 확인 후 자동 테스트 작성
+    time.sleep(1000000)

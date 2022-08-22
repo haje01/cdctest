@@ -108,6 +108,7 @@ resource "aws_instance" "mysql" {
     inline = [<<EOT
 cloud-init status --wait
 sudo apt update
+sudo sed -i 's/#$nrconf{restart} = '"'"'i'"'"';/$nrconf{restart} = '"'"'a'"'"';/g' /etc/needrestart/needrestart.conf
 sudo apt install -y mysql-server
 sleep 5
 sudo sed -i 's/bind-address.*/bind-address = 0.0.0.0/' /etc/mysql/mysql.conf.d/mysqld.cnf

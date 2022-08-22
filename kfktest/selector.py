@@ -10,7 +10,7 @@ from mysql.connector import connect
 from kfktest.util import load_setup, count_rows, linfo
 
 # CLI 용 파서
-parser = argparse.ArgumentParser(description="MySQL DB 에서 데이터 셀렉트.",
+parser = argparse.ArgumentParser(description="DB 에서 데이터 셀렉트.",
     formatter_class=argparse.ArgumentDefaultsHelpFormatter
 )
 parser.add_argument('db_type', type=str, choices=['mysql', 'mssql'], help="DBMS 종류.")

@@ -110,6 +110,7 @@ kafka_file=${basename(var.kafka_url)}
 kafka_dir=$(basename $kafka_file .tgz)
 
 sudo apt update
+sudo sed -i 's/#$nrconf{restart} = '"'"'i'"'"';/$nrconf{restart} = '"'"'a'"'"';/g' /etc/needrestart/needrestart.conf
 sudo apt install -y unzip
 # Kafka 설치
 sudo apt install -y openjdk-8-jdk

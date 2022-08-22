@@ -168,6 +168,7 @@ kjc_file=${basename(var.kafka_jdbc_connector)}
 kjc_dir=$(basename $kjc_file .zip)
 
 sudo apt update
+sudo sed -i 's/#$nrconf{restart} = '"'"'i'"'"';/$nrconf{restart} = '"'"'a'"'"';/g' /etc/needrestart/needrestart.conf
 sudo apt install -y unzip
 # Kafka 설치
 sudo apt install -y openjdk-8-jdk

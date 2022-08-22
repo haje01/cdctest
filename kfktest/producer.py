@@ -42,6 +42,7 @@ def produce(profile,
     ip_key = 'kafka_public_ip' if dev else 'kafka_private_ip'
     broker_addr = setup[ip_key]['value']
     broker_port = 19092 if dev else 9092
+    linfo(f"kafka broker at {broker_addr}:{broker_port}")
     compress = compress if compress != 'none' else None
     producer = KafkaProducer(
         acks=acks,
@@ -52,8 +53,8 @@ def produce(profile,
 
     st = time.time()
     for i, data in enumerate(gen_fake_data(messages)):
-        if i % 500 == 0:
-            linfo(f"gen {i}th fake data")
+        if (i + 1) % 500 == 0:
+            linfo(f"gen {i + 1} th fake data")
         producer.send(topic, value=data)
     vel = messages / (time.time() - st)
     producer.flush()

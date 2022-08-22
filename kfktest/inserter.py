@@ -11,7 +11,7 @@ from mysql.connector import connect
 from kfktest.util import insert_fake, load_setup, DB_BATCH, DB_EPOCH, linfo
 
 # CLI 용 파서
-parser = argparse.ArgumentParser(description="MySQL DB 에 가짜 데이터 인서트.",
+parser = argparse.ArgumentParser(description="DB 에 가짜 데이터 인서트.",
     formatter_class=argparse.ArgumentDefaultsHelpFormatter
 )
 parser.add_argument('db_type', type=str, choices=['mysql', 'mssql'], help="DBMS 종류.")
