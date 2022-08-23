@@ -1,15 +1,18 @@
+import pdb
 import time
 from multiprocessing import Process
+import json
 
 import pymssql
 import pytest
+from kafka import KafkaConsumer
 
-from kfktest.util import (SSH, count_topic_message, get_kafka_ssh, ssh_exec,
-    local_exec, start_kafka_broker, stop_kafka_broker, kill_proc_by_port,
-    vm_stop, vm_start, restart_kafka_and_connect, stop_kafka_and_connect,
-    count_table_row, DB_PRE_ROWS, local_select_proc, local_insert_proc, linfo,
-    NUM_INS_PROCS, NUM_SEL_PROCS, remote_insert_proc, remote_select_proc,
-    DB_ROWS, load_setup,
+from kfktest.table import reset_table
+from kfktest.util import (count_topic_message, get_kafka_ssh,
+    start_kafka_broker, kill_proc_by_port, vm_stop, vm_start,
+    restart_kafka_and_connect, stop_kafka_and_connect, count_table_row,
+    local_select_proc, local_insert_proc, linfo, NUM_INS_PROCS, NUM_SEL_PROCS,
+    remote_insert_proc, remote_select_proc, DB_ROWS, load_setup, insert_fake,
     # 픽스쳐들
     xsetup, xcp_setup, xjdbc, xtable, xtopic_ct, xkafka, xzookeeper, xkvmstart,
     xconn, xkfssh, xdbzm, xtopic_cdc, xrmcons, xcdc, xhash
@@ -19,7 +22,6 @@ from kfktest.util import (SSH, count_topic_message, get_kafka_ssh, ssh_exec,
 @pytest.fixture(scope="session")
 def xprofile():
     return 'mssql'
-
 
 def test_ct_local_basic(xsetup, xjdbc, xprofile, xkfssh):
     """로컬 insert / select 로 기본적인 Change Tracking 테스트."""
@@ -41,7 +43,7 @@ def test_ct_local_basic(xsetup, xjdbc, xprofile, xkfssh):
 
     # 카프카 토픽 확인 (timeout 되기 전에 다 받아야 함)
     cnt = count_topic_message(xkfssh, f'{xprofile}-person', timeout=10)
-    assert DB_ROWS + DB_PRE_ROWS == cnt
+    assert DB_ROWS == cnt
 
     for p in ins_pros:
         p.join()
@@ -93,7 +95,7 @@ def test_ct_broker_stop(xsetup, xjdbc, xprofile, xkfssh, xhash):
 
     # 카프카 토픽 확인 (timeout 되기 전에 다 받아야 함)
     cnt = count_topic_message(xkfssh, f'{xprofile}-person', timeout=10)
-    assert DB_ROWS + DB_PRE_ROWS == cnt
+    assert DB_ROWS == cnt
 
     for p in ins_pros:
         p.join()
@@ -138,7 +140,7 @@ def test_ct_broker_kill(xsetup, xjdbc, xprofile, xkfssh):
     cnt = count_topic_message(xkfssh, f'{xprofile}-person', timeout=20)
     # 브로커만 강제 Kill 된 경우, 커넥터가 offset 을 flush 하지 못해 다시 시도
     # -> 중복 메시지 발생 가능!
-    assert DB_ROWS + DB_PRE_ROWS <= cnt
+    assert DB_ROWS <= cnt
 
     for p in ins_pros:
         p.join()
@@ -180,7 +182,7 @@ def test_ct_broker_vmstop(xsetup, xjdbc, xprofile, xkfssh):
     kfssh = get_kafka_ssh(xprofile)
     # 카프카 토픽 확인 (timeout 되기 전에 다 받아야 함)
     cnt = count_topic_message(kfssh, f'{xprofile}-person', timeout=20)
-    assert DB_ROWS + DB_PRE_ROWS == cnt
+    assert DB_ROWS == cnt
 
     for p in ins_pros:
         p.join()
@@ -219,7 +221,7 @@ def test_db(xcp_setup, xprofile, xkfssh, xtable):
 
     # 테이블 행수 확인
     cnt = count_table_row(xprofile)
-    assert DB_ROWS + DB_PRE_ROWS == cnt
+    assert DB_ROWS  == cnt
 
 
 def test_ct_remote_basic(xcp_setup, xjdbc, xprofile, xkfssh):
@@ -246,7 +248,7 @@ def test_ct_remote_basic(xcp_setup, xjdbc, xprofile, xkfssh):
 
     # 카프카 토픽 확인 (timeout 되기전에 다 받아야 함)
     cnt = count_topic_message(xkfssh, f'{xprofile}-person', timeout=10)
-    assert DB_ROWS + DB_PRE_ROWS == cnt
+    assert DB_ROWS == cnt
 
     for p in ins_pros:
         p.join()
@@ -283,7 +285,7 @@ def test_cdc_remote_basic(xcp_setup, xdbzm, xprofile, xkfssh, xtable):
 
     # 카프카 토픽 확인 (timeout 되기전에 다 받아야 함)
     cnt = count_topic_message(xkfssh, f'db1.dbo.person', timeout=10)
-    assert DB_ROWS + DB_PRE_ROWS == cnt
+    assert DB_ROWS == cnt
 
     for p in ins_pros:
         p.join()
@@ -296,40 +298,54 @@ def test_cdc_remote_basic(xcp_setup, xdbzm, xprofile, xkfssh, xtable):
     linfo(f"CDC Test Elapsed: {time.time() - xtable:.2f}")
 
 
-def test_ct_modify(xcp_setup, xjdbc, xprofile, xkfssh):
-    """CT 방식에서 기존 행이 변하는 경우 동작 확인."""
-    # Selector 프로세스들 시작
-    sel_pros = []
-    for pid in range(1, NUM_SEL_PROCS + 1):
-        # insert 프로세스
-        p = Process(target=local_select_proc, args=(xprofile, pid,))
-        sel_pros.append(p)
-        p.start()
+def test_ct_modify(xcp_setup, xjdbc, xtable, xprofile, xkfssh):
+    """CT 방식에서 기존 행이 변하는 경우 동작 확인.
 
+    - CT 방식은 기존행이 변경 (update) 된 것은 전송하지 않는다.
+    - 새 행이 추가된 것은 잘 보냄
+    - 테이블 초기화 후 새로 insert 하면 ID 가 같은 것은 기존 데이터를 유지하고
+      새 ID 의 데이터는 가져옴
+
+    """
+    num_msg = 10
     # Insert 프로세스들 시작
     ins_pros = []
-    for pid in range(1, NUM_INS_PROCS + 1):
-        # insert 프로세스
-        p = Process(target=local_insert_proc, args=(xprofile, pid))
-        ins_pros.append(p)
-        p.start()
-
-    # 카프카 토픽 확인 (timeout 되기 전에 다 받아야 함)
-    cnt = count_topic_message(xkfssh, f'{xprofile}-person', timeout=10)
-    assert DB_ROWS + DB_PRE_ROWS == cnt
+    # insert 프로세스
+    p = Process(target=local_insert_proc, args=(xprofile, 1, 1, num_msg))
+    ins_pros.append(p)
+    p.start()
 
     for p in ins_pros:
         p.join()
     linfo("All insert processes are done.")
 
-    for p in sel_pros:
-        p.join()
-    linfo("All select processes are done.")
+    setup = load_setup('mssql')
+    topic = 'mssql-person'
+    broker_addr = setup['kafka_public_ip']['value']
+    broker_port = 19092
+
+    def consume():
+        consumer = KafkaConsumer(topic,
+                        group_id=f'my-group-mssql',
+                        bootstrap_servers=[f'{broker_addr}:{broker_port}'],
+                        auto_offset_reset='earliest',
+                        value_deserializer=lambda x: json.loads(x.decode('utf8')),
+                        enable_auto_commit=False,
+                        consumer_timeout_ms=1000 * 10
+                        )
+        return consumer
+
+    cnt = 0
+    frow = org_name = None
+    for _msg in consume():
+        msg = _msg.value['payload']
+        cnt += 1
+        if msg['id'] == 1:
+            org_name = msg['name']
+    assert cnt == num_msg
 
     # 일부 행을 변경
-    import pdb; pdb.set_trace()
-    setup = load_setup('mssql')
-    db_host = setup['mssql_private_ip']['value']
+    db_host = setup['mssql_public_ip']['value']
     db_user = setup['db_user']['value']
     db_passwd = setup['db_passwd']['value']['result']
     db_name = 'test'
@@ -337,10 +353,118 @@ def test_ct_modify(xcp_setup, xjdbc, xprofile, xkfssh):
     conn = pymssql.connect(host=db_host, user=db_user, password=db_passwd, database=db_name)
     cursor = conn.cursor()
     linfo("Connect done.")
-    sql = "UPDATE person SET name='MODIFIED' WHERE pid=1 and sid=1"
+    sql = "UPDATE person SET name='MODIFIED' WHERE id=1"
     cursor.execute(sql)
     conn.commit()
+
+    cnt = mcnt = 0
+    fname = None
+    for _msg in consume():
+        msg = _msg.value['payload']
+        cnt += 1
+        if msg['id'] == 1:
+            fname = msg['name']
+            assert fname == org_name
+            mcnt += 1
+    assert mcnt == 1
+
+    # 새 행을 추가
+    insert_fake(conn, cursor, 1, 1, 1, 'mssql')
     conn.close()
 
-    # cli 툴로 변경 확인 후 자동 테스트 작성
-    time.sleep(1000000)
+    cnt = mcnt = 0
+    for _msg in consume():
+        msg = _msg.value['payload']
+        cnt += 1
+        if msg['id'] == 1:
+            mcnt += 1
+    assert cnt == 11
+    assert mcnt == 1
+
+    # 테이블을 리셋 후 행 추가 (rotation 흉내)
+    conn, cursor = reset_table(xprofile)
+    insert_fake(conn, cursor, 1, 15, 1, 'mssql')
+
+    cnt = 0
+    for _msg in consume():
+        msg = _msg.value['payload']
+        cnt += 1
+        if msg['id'] == 1:
+            # 같은 ID 에 대해서는 기존 값이 그대로 옴
+            assert fname == msg['name']
+    # 새로 추가된 행은 들어옴
+    assert cnt == 15
+
+
+@pytest.mark.parametrize('xjdbc', [{'inc_col': 'id', 'ts_col': 'regdt'}], indirect=True)
+def test_ct_modify2(xcp_setup, xjdbc, xtable, xprofile, xkfssh):
+    """CT 방식에서 Current Timestamp 를 쓸 때 기존 행이 변하는 경우 동작 확인.
+
+    - Incremental 과 Timestamp 컬럼을 함께 쓰는 경우
+    - update 를 하면서 Timestamp 컬럼을 갱신하면 커넥터는 그 행을 다시 가져온다.
+    - 토픽에는 기존에 가져온 행 + 다시 가져온 행의 메시지가 있게 됨
+
+    """
+    num_msg = 10
+    # Insert 프로세스들 시작
+    ins_pros = []
+    # insert 프로세스
+    p = Process(target=local_insert_proc, args=(xprofile, 1, 1, num_msg))
+    ins_pros.append(p)
+    p.start()
+
+    for p in ins_pros:
+        p.join()
+    linfo("All insert processes are done.")
+
+    setup = load_setup('mssql')
+    topic = 'mssql-person'
+    broker_addr = setup['kafka_public_ip']['value']
+    broker_port = 19092
+
+    def consume():
+        consumer = KafkaConsumer(topic,
+                        group_id=f'my-group-mssql',
+                        bootstrap_servers=[f'{broker_addr}:{broker_port}'],
+                        auto_offset_reset='earliest',
+                        value_deserializer=lambda x: json.loads(x.decode('utf8')),
+                        enable_auto_commit=False,
+                        consumer_timeout_ms=1000 * 10
+                        )
+        return consumer
+
+    cnt = 0
+    frow = org_name = None
+    for _msg in consume():
+        msg = _msg.value['payload']
+        cnt += 1
+        if msg['id'] == 1:
+            org_name = msg['name']
+    assert cnt == num_msg
+
+    # 일부 행을 변경
+    db_host = setup['mssql_public_ip']['value']
+    db_user = setup['db_user']['value']
+    db_passwd = setup['db_passwd']['value']['result']
+    db_name = 'test'
+
+    conn = pymssql.connect(host=db_host, user=db_user, password=db_passwd, database=db_name)
+    cursor = conn.cursor()
+    linfo("Connect done.")
+    sql = "UPDATE person SET regdt=CURRENT_TIMESTAMP, name='MODIFIED' WHERE id=1"
+    cursor.execute(sql)
+    conn.commit()
+
+    time.sleep(10)
+
+    cnt = mcnt = 0
+    fnames = []
+    for _msg in consume():
+        msg = _msg.value['payload']
+        cnt += 1
+        if msg['id'] == 1:
+            fname = msg['name']
+            fnames.append(fname)
+    assert len(fnames) == 2
+    assert 'MODIFIED' in fnames
+    assert cnt == 11

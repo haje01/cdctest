@@ -30,13 +30,15 @@ NUM_SEL_PROCS = 4
 
 # 빠른 테스트를 위해서는 EPOCH 와 BATCH 수를 10 정도로 줄여 테스트
 
-# 테스트 시작전 40000행 미래 입력 : 40 (epoch) x 100 (batch) x 10 (process)
+# 테스트 시작전 미리 행 입력 : 40 (epoch) x 100 (batch) x 10 (process)
+# 성능 테스트시 테스트 함수에 아래 데코레이터 추가
+# @pytest.mark.parametrize('xtable', [(DB_PRE_EPOCH, DB_PRE_BATCH, None)], indirect=True)
 DB_PRE_EPOCH = 40  # DB 초기화시 Insert 에포크 수
 DB_PRE_BATCH = 100  # DB 초기화시 Insert 에포크당 행수
 DB_PRE_ROWS = DB_PRE_EPOCH * DB_PRE_BATCH * NUM_INS_PROCS  #  DB 초기화시 Insert 된 행수
 
-DB_EPOCH = 2000  # DB Insert 에포크 수
-DB_BATCH = 1  # DB Insert 에포크당 행수
+DB_EPOCH = 10  # DB Insert 에포크 수
+DB_BATCH = 100  # DB Insert 에포크당 행수
 DB_ROWS = DB_EPOCH * DB_BATCH * NUM_INS_PROCS  # DB Insert 된 행수
 
 # Kafka 내장 토픽 이름
@@ -76,7 +78,7 @@ def gen_fake_data(count):
         yield data
 
 
-def insert_fake(conn, cursor, epoch, batch, pid, profile):
+def insert_fake(conn, cursor, epoch, batch, pid, profile, repeat=False):
     """Fake 데이터를 DB insert."""
     assert profile in ('mysql', 'mssql')
 
@@ -86,17 +88,18 @@ def insert_fake(conn, cursor, epoch, batch, pid, profile):
     fake.add_provider(company)
     fake.add_provider(phone_number)
 
-    if profile == 'mysql':
-        sql = "INSERT INTO person(pid, sid, name, address, ip, birth, company, phone) VALUES(%s, %s, %s, %s, %s, %s, %s, %s)"
-    else:
-        sql = "INSERT INTO person VALUES(%s, %s, %s, %s, %s, %s, %s, %s)"
+    sql = "INSERT INTO person(pid, sid, name, address, ip, birth, company, phone) VALUES(%s, %s, %s, %s, %s, %s, %s, %s)"
+    # if profile == 'mysql':
+    #     sql = "INSERT INTO person(pid, sid, name, address, ip, birth, company, phone) VALUES(%s, %s, %s, %s, %s, %s, %s, %s)"
+    # else:
+    #     sql = "INSERT INTO person(pid, sid, name, address, ip, birth, company, phone) VALUES(%s, %s, %s, %s, %s, %s, %s, %s, %s)"
 
     for j in range(epoch):
         if batch == 1:
             if j % 20 == 0:
-                linfo(f"Inserter {pid} epoch: {j+1}")
+                linfo(f"Inserter {pid} epoch: {j+1} repeat: {repeat}")
         else:
-            linfo(f"Inserter {pid} epoch: {j+1}")
+            linfo(f"Inserter {pid} epoch: {j+1} repeat: {repeat}")
         rows = []
         for i in range(batch):
             row = (
@@ -112,6 +115,11 @@ def insert_fake(conn, cursor, epoch, batch, pid, profile):
             rows.append(row)
         cursor.executemany(sql, rows)
         conn.commit()
+        # JDBC Source Connect 에서 Timestamp 컬럼 테스트를 위해 사용
+        if repeat:
+            time.sleep(1)
+            cursor.executemany(sql, rows)
+            conn.commit()
 
 
 @retry(RuntimeError, tries=10, delay=3)
@@ -359,7 +367,7 @@ def count_topic_message(kfk_ssh, topic, from_begin=True, timeout=10):
 
 @retry(RuntimeError, tries=6, delay=5)
 def register_jdbc(kfk_ssh, profile, db_addr, db_port, db_user, db_passwd,
-        db_name, tables, topic_prefix, com_hash, poll_interval=5000):
+        db_name, tables, topic_prefix, com_hash, poll_interval=5000, idx_cols=None):
     """카프카 JDBC Source 커넥터 등록.
 
     설정에 관한 참조:
@@ -377,6 +385,7 @@ def register_jdbc(kfk_ssh, profile, db_addr, db_port, db_user, db_passwd,
         topic_prefix (str): 테이블을 넣을 토픽의 접두사
         com_hash (str): 커넥터 이름에 붙을 해쉬
         poll_interval (int): ms 단위 폴링 간격. 기본값 5000
+        idx_cols (dict): Incremental 또는 Timestamp 를 위한 컬럼 (Incremental 은 항상 필요)
 
     """
     assert profile in ('mysql', 'mssql')
@@ -386,8 +395,10 @@ def register_jdbc(kfk_ssh, profile, db_addr, db_port, db_user, db_passwd,
         db_url = f"jdbc:mysql://{db_addr}:{db_port}/{db_name}"
 
     conn_name = f'jdbc-{profile}-{com_hash}'
-    linfo(f"[ ] register_jdbc {conn_name}")
+    inc_col, ts_col = idx_cols['inc_col'], idx_cols['ts_col']
+    linfo(f"[ ] register_jdbc {conn_name} {inc_col} {ts_col}")
     isolation = 'READ_UNCOMMITTED' if profile == 'mssql' else 'DEFAULT'
+    mode = 'timestamp+incrementing' if len(ts_col) > 0 else 'incrementing'
 
     config = f'''{{
         "connector.class" : "io.confluent.connect.jdbc.JdbcSourceConnector",
@@ -400,8 +411,9 @@ def register_jdbc(kfk_ssh, profile, db_addr, db_port, db_user, db_passwd,
         "table.poll.interval.ms": 60000,
         "delete.enabled": true,
         "transaction.isolation.mode": "{isolation}",
-        "mode": "incrementing",
-        "incrementing.column.name" : "id",
+        "mode": "{mode}",
+        "incrementing.column.name" : "{inc_col}",
+        "timestamp.column.name": "{ts_col}",
         "table.whitelist": "{tables}",
         "topic.prefix" : "{topic_prefix}",
         "poll.interval.ms": "{poll_interval}",
@@ -413,7 +425,7 @@ def register_jdbc(kfk_ssh, profile, db_addr, db_port, db_user, db_passwd,
     status = get_connector_status(kfk_ssh, conn_name)
     if status['tasks'][0]['state'] == 'FAILED':
         raise RuntimeError(status['tasks'][0]['trace'])
-    linfo(f"[v] register_jdbc {conn_name}")
+    linfo(f"[v] register_jdbc {conn_name} {inc_col} {ts_col}")
     return data
 
 
@@ -481,7 +493,12 @@ def get_connector_status(kfk_ssh, conn_name):
     cmd = f'''curl -s http://localhost:8083/connectors/{conn_name}/status'''
     ret = ssh_exec(kfk_ssh, cmd)
     status = json.loads(ret)
-    linfo(f"[v] get_connector_status {conn_name} {status['tasks'][0]['state']}")
+    try:
+        linfo(f"[v] get_connector_status {conn_name} {status['tasks'][0]['state']}")
+    except KeyError:
+        msg = str(status)
+        print(msg)
+        raise RuntimeError(msg)
     return status
 
 
@@ -504,6 +521,9 @@ curl -vs -X POST 'http://localhost:8083/connectors' \
 }}' '''
 
     ret = ssh_exec(kfk_ssh, cmd)
+    if 'error_code' in ret:
+        raise RuntimeError(ret)
+
     try:
         data = json.loads(ret)
     except Exception as e:
@@ -806,11 +826,14 @@ def local_select_proc(profile, pid):
     linfo(f"Select process {pid} done")
 
 
-def local_insert_proc(profile, pid, epoch=DB_EPOCH, batch=DB_BATCH, hide=False):
+def local_insert_proc(profile, pid, epoch=DB_EPOCH, batch=DB_BATCH, hide=False,
+        repeat=False):
     """로컬에서 가짜 데이터 인서트 프로세스 함수."""
-    linfo(f"Insert process start: {pid}")
+    linfo(f"Insert process start: {pid} repeat: {repeat}")
     hide = '-n' if hide else ''
     cmd = f"cd ../deploy/{profile} && python -m kfktest.inserter {profile} -p {pid} -e {epoch} -b {batch} -d {hide}"
+    if repeat:
+        cmd += " -r"
     local_exec(cmd)
     linfo(f"Insert process done: {pid}")
 
@@ -840,13 +863,14 @@ def remote_insert_proc(profile, setup, pid, epoch=DB_EPOCH, batch=DB_BATCH, hide
     return ret
 
 
-@pytest.fixture
-def xtable(xprofile, xkafka):
+@pytest.fixture(params=[[0, 0, None]])
+def xtable(xprofile, xkafka, request):
     """테스트용 테이블 초기화."""
     linfo("xtable")
     from kfktest.table import reset_table
 
-    conn, cursor = reset_table(xprofile)
+    pre_epoch, pre_batch, fix_regdt = request.param
+    conn, cursor = reset_table(xprofile, fix_regdt)
 
     from kfktest.inserter import insert
     if DB_PRE_ROWS > 0 :
@@ -856,8 +880,8 @@ def xtable(xprofile, xkafka):
         for pid in range(1, NUM_INS_PROCS + 1):
             # insert 프로세스
             p = Process(target=local_insert_proc, args=(xprofile, pid,
-                                                        DB_PRE_EPOCH,
-                                                        DB_PRE_BATCH,
+                                                        pre_epoch,
+                                                        pre_batch,
                                                         True))
             ins_pros.append(p)
             p.start()
@@ -976,22 +1000,23 @@ def xhash():
     return binascii.hexlify(os.urandom(3)).decode('utf8')
 
 
-@pytest.fixture
-def xjdbc(xprofile, xrmcons, xkfssh, xtable, xtopic_ct, xconn, xsetup, xhash):
+@pytest.fixture(params=[{'inc_col': 'id', 'ts_col': ''}])
+def xjdbc(xprofile, xrmcons, xkfssh, xtable, xtopic_ct, xconn, xsetup, xhash, request):
     """CT용 JDBC 소스 커넥터 초기화 (테이블과 토픽 먼저 생성)."""
-    _xjdbc(xprofile, xsetup, xkfssh, xhash)
+    _xjdbc(xprofile, xsetup, xkfssh, xhash, request.param)
     time.sleep(5)
     yield
 
 
-def _xjdbc(profile, setup, kfssh, com_hash):
+def _xjdbc(profile, setup, kfssh, com_hash, cols):
     linfo("xjdbc")
     db_addr = setup[f'{profile}_private_ip']['value']
     db_user = setup['db_user']['value']
     db_passwd = setup['db_passwd']['value']['result']
 
     ret = register_jdbc(kfssh, profile, db_addr, DB_PORTS[profile],
-        db_user, db_passwd, "test", "person", f"{profile}-", com_hash)
+        db_user, db_passwd, "test", "person", f"{profile}-", com_hash,
+        idx_cols=cols)
     if 'error_code' in ret:
         raise RuntimeError(ret['message'])
 

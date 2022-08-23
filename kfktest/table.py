@@ -16,9 +16,11 @@ parser.add_argument('-d', '--dev', action='store_true', default=False,
     help="개발 PC 에서 실행 여부.")
 
 
-def reset_table(profile):
-    linfo(f"[ ] reset_table for {profile}")
+def reset_table(profile, fix_regdt=None):
+    regdt_def = 'CURRENT_TIMESTAMP' if fix_regdt is None else f"'{fix_regdt}'"
+    linfo(f"[ ] reset_table for {profile} {regdt_def}")
     conn, cursor = db_concur(profile)
+
 
     if profile == 'mysql':
         head = '''
@@ -31,11 +33,12 @@ def reset_table(profile):
         tail = ', PRIMARY KEY(id)'
     else:
         # MSSQL
-        head = '''
+        head = f'''
     IF OBJECT_ID('person', 'U') IS NOT NULL
         DROP TABLE person
     CREATE TABLE person (
         id int IDENTITY(1,1) PRIMARY KEY,
+        regdt DATETIME2 DEFAULT {regdt_def} NOT NULL,
         pid INT NOT NULL,
         sid INT NOT NULL,
             '''
@@ -57,7 +60,7 @@ def reset_table(profile):
     else:
         cursor.execute(sql)
     conn.commit()
-    linfo(f"[v] reset_table for {profile}")
+    linfo(f"[v] reset_table for {profile} {regdt_def}")
     return conn, cursor
 
 

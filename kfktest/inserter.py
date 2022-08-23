@@ -23,14 +23,18 @@ parser.add_argument('-d', '--dev', action='store_true', default=False,
     help="개발 PC 에서 실행.")
 parser.add_argument('-n', '--no-result', action='store_true', default=False,
     help="출력 감추기.")
+parser.add_argument('-r', '--repeat', action='store_true', default=False,
+    help="에포크 인서트 후 다시 인서트.")
 
 
-def insert(db_type, db_name=parser.get_default('db_name'),
+def insert(db_type,
+        db_name=parser.get_default('db_name'),
         epoch=parser.get_default('epoch'),
         batch=parser.get_default('batch'),
         pid=parser.get_default('pid'),
         dev=parser.get_default('devs'),
-        no_result=parser.get_default('no_result')
+        no_result=parser.get_default('no_result'),
+        repeat=parser.get_default('repeat')
         ):
     """가짜 데이터 인서트.
 
@@ -44,6 +48,8 @@ def insert(db_type, db_name=parser.get_default('db_name'),
         pid (int): 멀티 프로세스 인서트시 구분용 ID
         dev (bool): 개발 PC 에서 실행 여부
         no_result (bool): 결과 감추기 여부. 기본값 True
+        repeat (bool): 에포크 인서트 후 다시 인서트 여부. 기본값 False
+            JDBC Source Connect 에서 Timestamp 컬럼 테스트를 위해 사용.
 
     """
     setup = load_setup(db_type)
@@ -64,7 +70,7 @@ def insert(db_type, db_name=parser.get_default('db_name'),
     linfo("Connect done.")
 
     st = time.time()
-    insert_fake(conn, cursor, epoch, batch, pid, db_type)
+    insert_fake(conn, cursor, epoch, batch, pid, db_type, repeat=repeat)
     conn.close()
 
     elapsed = time.time() - st
@@ -76,4 +82,4 @@ def insert(db_type, db_name=parser.get_default('db_name'),
 if __name__ == '__main__':
     args = parser.parse_args()
     insert(args.db_type, args.db_name, args.epoch, args.batch,
-        args.pid, args.dev, args.no_result)
+        args.pid, args.dev, args.no_result, args.repeat)
