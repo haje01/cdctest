@@ -4,6 +4,7 @@ import time
 import sys
 import argparse
 import json
+from multiprocessing import Process
 
 import pymssql
 from mysql.connector import connect
@@ -15,7 +16,7 @@ parser = argparse.ArgumentParser(description="DB 에 가짜 데이터 인서트.
     formatter_class=argparse.ArgumentDefaultsHelpFormatter
 )
 parser.add_argument('db_type', type=str, choices=['mysql', 'mssql'], help="DBMS 종류.")
-parser.add_argument('--db-name', type=str, default='test', help="이용할 데이터베이스 이름.")
+parser.add_argument('--db-name', type=str, default='test', help="이용할 데이터베이스 이름. 하나 이상인 경우 ',' 로 구분.")
 parser.add_argument('-t', '--table', type=str, default='person', help="대상 테이블 이름.")
 parser.add_argument('-p', '--pid', type=int, default=0, help="인서트 프로세스 ID.")
 parser.add_argument('-e', '--epoch', type=int, default=DB_EPOCH, help="에포크 수.")
@@ -24,6 +25,7 @@ parser.add_argument('-d', '--dev', action='store_true', default=False,
     help="개발 PC 에서 실행.")
 parser.add_argument('-n', '--no-result', action='store_true', default=False,
     help="출력 감추기.")
+
 
 def insert(db_type,
         db_name=parser.get_default('db_name'),
@@ -78,5 +80,21 @@ def insert(db_type,
 
 if __name__ == '__main__':
     args = parser.parse_args()
-    insert(args.db_type, args.db_name, args.table, args.epoch, args.batch,
-        args.pid, args.dev, args.no_result)
+    tables = [tbl.strip() for tbl in args.table.split(',')]
+    if len(tables) == 1:
+        insert(args.db_type, args.db_name, args.table, args.epoch, args.batch,
+            args.pid, args.dev, args.no_result)
+    else:
+        # 테이블이 하나 이상 지정되면 병렬 처리
+        procs = []
+        for table in tables:
+            p = Process(target=insert, args=(args.db_type, args.db_name,
+                                             table, args.epoch, args.batch,
+                                             args.pid, args.dev, args.no_result
+                                             ))
+            procs.append(p)
+            p.start()
+        for p in procs:
+            p.join()
+
+

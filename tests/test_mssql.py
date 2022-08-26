@@ -543,6 +543,7 @@ def test_ct_query(xcp_setup, xjdbc, xtable, xprofile, xkfssh):
 
 # 대상 날짜 (3개월 = 2022-06-01 부터 2022-08-31 까지)
 ctm_dates = pd.date_range(start='20220601', end='20220831')
+# ctm_dates = pd.date_range(start='20220801', end='20220810')
 # 대상 테이블명
 ctm_tables = [dt.strftime('person_%Y%m%d') for dt in ctm_dates]
 # 대상 토픽명
@@ -578,8 +579,8 @@ def test_ct_multitable(xcp_setup, xjdbc, xtable, xprofile, xtopic, xkfssh):
     # Insert 부하를 줄이기 위해 대상 테이블 10개 단위로 쪼개기 (DB 커넥션 수도 문제?)
     # table_chunks = chunks(ctm_tables, 10)
 
-    num_epoch = 1
-    num_batch = 1000
+    num_epoch = 10
+    num_batch = 10000
     num_rows = num_epoch * num_batch
 
     def gen_insert_func(remote):
@@ -593,7 +594,8 @@ def test_ct_multitable(xcp_setup, xjdbc, xtable, xprofile, xtopic, xkfssh):
 
     # Insert 로컬 / 원격에서 할지 여부
     # 프로세스당 10만 행의 경우 인서트에 걸린 시간
-    #   로컬 : 약 24분
+    #   로컬 : 약 1058 Rows Per Seconds
+    #   원격 : 약 3000 Rows Per Seconds
     insert_remote = True
     insert_func = gen_insert_func(insert_remote)
 
@@ -621,7 +623,7 @@ def test_ct_multitable(xcp_setup, xjdbc, xtable, xprofile, xtopic, xkfssh):
     linfo(f"All insert processes are done in {elapsed:.2f} sec.")
     linfo(f"Average speed {(num_rows * len(ctm_tables)) / elapsed:.1f} RPS.\n")
 
-    input("=== Press enter key to start consume ===")
+    input("=== Press Enter key to start consume ===")
 
     # Kafka Connector 시작
     ssh_exec(xkfssh, "sudo service kafka-connect start")

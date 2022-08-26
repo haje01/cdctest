@@ -751,7 +751,7 @@ def claim_kafka(kfk_ssh):
 
 
 @pytest.fixture(params=[{
-        'topics': [],  # 리셋할 토픽들
+        'topics': [],  # 명시적으로 리셋할 토픽들
         'partitions': TOPIC_PARTITIONS,
         'replications': TOPIC_REPLICATIONS,
         'cdc': False    # CDC 여부
@@ -766,7 +766,9 @@ def xtopic(xkfssh, xprofile, request):
         topic = f"db1.{scm}.person"
     else:
         topic = f"{xprofile}-person"
-    topics = request.param.get('topics', []) + [topic]
+    topics = request.param.get('topics', [])
+    if len(topics) == 0:
+        topics = [topic]
     partitions = request.param.get('partitions', TOPIC_PARTITIONS)
     replications = request.param.get('replications', TOPIC_REPLICATIONS)
     delete_all_topics(xkfssh, xprofile)

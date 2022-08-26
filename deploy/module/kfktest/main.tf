@@ -65,6 +65,7 @@ resource "aws_instance" "kfktest" {
 cloud-init status --wait
 sudo apt update
 sudo sed -i 's/#$nrconf{restart} = '"'"'i'"'"';/$nrconf{restart} = '"'"'a'"'"';/g' /etc/needrestart/needrestart.conf
+sudo sed -i 's/#MaxSessions 10/MaxSessions 100/g' /etc/ssh/sshd_config
 sudo apt install -y python3-pip unzip
 
 # 코드 설치
