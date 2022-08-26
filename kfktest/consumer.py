@@ -1,3 +1,4 @@
+from distutils.ccompiler import get_default_compiler
 from os import dup
 import sys
 import json
@@ -21,6 +22,10 @@ parser.add_argument('-u', '--duplicate', action='store_true', default=False, hel
 parser.add_argument('-m', '--miss', action='store_true', default=False, help="누락 메시지 ID 출력")
 parser.add_argument('-d', '--dev', action='store_true', default=False,
     help="개발 PC 에서 실행 여부.")
+parser.add_argument('--topic', type=str, default=None, help="읽을 토픽 지정.")
+parser.add_argument('-f', '--fields', type=str, default=None, help="일치하는 필드만 표시 (',' 로 구분).")
+parser.add_argument('--field-types', type=str, default=None, help="일치하는 필드별 표시 타입 (',' 로 구분).")
+
 
 
 def consume(profile,
@@ -30,9 +35,11 @@ def consume(profile,
         count_only=parser.get_default('count_only'),
         duplicate=parser.get_default('duplicate'),
         miss=parser.get_default('miss'),
-        dev=parser.get_default('dev')
+        dev=parser.get_default('dev'),
+        topic=parser.get_default('topic'),
+        fields=parser.get_default('fields'),
         ):
-    topic = f'{profile}-person'
+    topic = f'{profile}-person' if topic is None else topic
     linfo(f"[ ] consume {topic}.")
 
     setup = load_setup(profile)
@@ -63,7 +70,16 @@ def consume(profile,
             idmsgs[id].append((msg.topic, msg.partition, msg.offset, data['payload']))
         else:
             if not count_only:
-                linfo(f'{msg.topic}:{msg.partition}:{msg.offset} key={msg.key} value={msg.value}')
+                if fields is None:
+                    linfo(f'{msg.topic}:{msg.partition}:{msg.offset} key={msg.key} value={msg.value}')
+                else:
+                    data = json.loads(msg.value.decode('utf8'))
+                    values = []
+                    for f in fields.split(','):
+                        field = f.strip()
+                        if field in data['payload']:
+                            values.append(data['payload'][field])
+                    linfo(f'{msg.topic}:{msg.partition}:{msg.offset} key={msg.key} value={values}')
 
     if duplicate:
         for id, msgs in idmsgs.items():
@@ -91,4 +107,5 @@ def consume(profile,
 if __name__ == '__main__':
     args = parser.parse_args()
     consume(args.profile, args.timeout, args.auto_commit, args.from_begin,
-        args.count_only, args.duplicate, args.miss, args.dev)
+        args.count_only, args.duplicate, args.miss, args.dev, args.topic,
+        args.fields)

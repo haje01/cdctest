@@ -41,6 +41,9 @@ DB_EPOCH = 10  # DB Insert 에포크 수
 DB_BATCH = 100  # DB Insert 에포크당 행수
 DB_ROWS = DB_EPOCH * DB_BATCH * NUM_INS_PROCS  # DB Insert 된 행수
 
+TOPIC_PARTITIONS = 12  # 토픽 기본 파티션 수
+TOPIC_REPLICATIONS = 1     # 토픽 기본 복제 수
+
 # Kafka 내장 토픽 이름
 INTERNAL_TOPICS = ['__consumer_offsets', 'connect-configs', 'connect-offsets', 'connect-status']
 DB_PORTS = {'mysql': 3306, 'mssql': 1433}
@@ -78,17 +81,17 @@ def gen_fake_data(count):
         yield data
 
 
-def insert_fake(conn, cursor, epoch, batch, pid, profile, repeat=False):
+def insert_fake(conn, cursor, epoch, batch, pid, profile, table='person'):
     """Fake 데이터를 DB insert."""
     assert profile in ('mysql', 'mssql')
-
+    linfo(f"[ ] insert_fake {epoch} {batch} {table}")
     fake = Faker()
     fake.add_provider(internet)
     fake.add_provider(date_time)
     fake.add_provider(company)
     fake.add_provider(phone_number)
 
-    sql = "INSERT INTO person(pid, sid, name, address, ip, birth, company, phone) VALUES(%s, %s, %s, %s, %s, %s, %s, %s)"
+    sql = f"INSERT INTO {table}(pid, sid, name, address, ip, birth, company, phone) VALUES(%s, %s, %s, %s, %s, %s, %s, %s)"
     # if profile == 'mysql':
     #     sql = "INSERT INTO person(pid, sid, name, address, ip, birth, company, phone) VALUES(%s, %s, %s, %s, %s, %s, %s, %s)"
     # else:
@@ -97,9 +100,9 @@ def insert_fake(conn, cursor, epoch, batch, pid, profile, repeat=False):
     for j in range(epoch):
         if batch == 1:
             if j % 20 == 0:
-                linfo(f"Inserter {pid} epoch: {j+1} repeat: {repeat}")
+                linfo(f"Inserter {pid} epoch: {j+1}")
         else:
-            linfo(f"Inserter {pid} epoch: {j+1} repeat: {repeat}")
+            linfo(f"Inserter {pid} epoch: {j+1}")
         rows = []
         for i in range(batch):
             row = (
@@ -115,11 +118,7 @@ def insert_fake(conn, cursor, epoch, batch, pid, profile, repeat=False):
             rows.append(row)
         cursor.executemany(sql, rows)
         conn.commit()
-        # JDBC Source Connect 에서 Timestamp 컬럼 테스트를 위해 사용
-        if repeat:
-            time.sleep(1)
-            cursor.executemany(sql, rows)
-            conn.commit()
+    linfo(f"[v] insert_fake {epoch} {batch} {table}")
 
 
 @retry(RuntimeError, tries=10, delay=3)
@@ -220,7 +219,8 @@ def list_topics(kfk_ssh, skip_internal=True):
     return topics
 
 
-def create_topic(kfk_ssh, topic, partitions=12, replications=1):
+def create_topic(kfk_ssh, topic, partitions=TOPIC_PARTITIONS,
+                 replications=TOPIC_REPLICATIONS):
     """토픽 생성.
 
     Args:
@@ -235,7 +235,8 @@ def create_topic(kfk_ssh, topic, partitions=12, replications=1):
 
 
 
-def claim_topic(kfk_ssh, topic, partitions=12, replications=1):
+def claim_topic(kfk_ssh, topic, partitions=TOPIC_PARTITIONS,
+                replications=TOPIC_REPLICATIONS):
     """토픽이 없는 경우만 생성.
 
     Args:
@@ -322,19 +323,52 @@ def delete_topic(kfk_ssh, topic, ignore_not_exist=False):
     linfo(f"[v] delete_topic '{topic}'")
     return ret
 
+@retry(RuntimeError, tries=7, delay=3)
+def delete_all_topics(kfk_ssh, profile):
+    """대상 카프카의 모든 토픽 삭제.
 
-def delete_all_topics(profile):
-    """내장 토픽을 제외한 모든 토픽 제거."""
-    topics = list_topics(profile)
-    for topic in topics:
-        delete_topic(profile, topic)
+    person* 패턴 토픽 한정
+
+    Args:
+        kfk_ssh : Kafka 노드의 Paramiko SSH 객체
+
+    """
+    def get_topics():
+        topics = list_topics(kfk_ssh)
+        return [topic for topic in topics if f'{profile}-person' in topic]
+
+    linfo(f"[ ] delete_all_topics")
+    topics = get_topics()
+    if len(topics) > 0:
+        topics = ','.join(topics)
+        try:
+            ret = ssh_exec(kfk_ssh, f"kafka-topics.sh --delete --topic '{topics}' --bootstrap-server localhost:9092")
+        except Exception as e:
+            import pdb; pdb.set_trace()
+            raise e
+
+        # 남은 토픽 확인
+        topics = get_topics()
+        num_topic = sum(topics)
+        if num_topic > 0:
+            raise RuntimeError(f"Topics {topics} still remain.")
+    linfo(f"[v] delete_all_topics")
+    return
 
 
-def reset_topic(profile, topic, partitions=12, replications=1):
+# def delete_all_topics(profile):
+#     """내장 토픽을 제외한 모든 토픽 제거."""
+#     topics = list_topics(profile)
+#     for topic in topics:
+#         delete_topic(profile, topic)
+
+
+def reset_topic(ssh, topic, partitions=TOPIC_PARTITIONS,
+        replications=TOPIC_REPLICATIONS):
     """특정 토픽 초기화."""
     linfo(f"[ ] reset_topic '{topic}'")
-    delete_topic(profile, topic, True)
-    create_topic(profile, topic, partitions, replications)
+    delete_topic(ssh, topic, True)
+    create_topic(ssh, topic, partitions, replications)
     linfo(f"[v] reset_topic '{topic}'")
 
 
@@ -367,7 +401,8 @@ def count_topic_message(kfk_ssh, topic, from_begin=True, timeout=10):
 
 @retry(RuntimeError, tries=6, delay=5)
 def register_jdbc(kfk_ssh, profile, db_addr, db_port, db_user, db_passwd,
-        db_name, tables, topic_prefix, com_hash, poll_interval=5000, idx_cols=None):
+        db_name, topic_prefix, com_hash, poll_interval=5000,
+        params=None):
     """카프카 JDBC Source 커넥터 등록.
 
     설정에 관한 참조:
@@ -381,11 +416,17 @@ def register_jdbc(kfk_ssh, profile, db_addr, db_port, db_user, db_passwd,
         db_name (str): 사용할 DB 이름
         db_user (str): DB 유저
         db_passwd (str): DB 유저 암호
-        tables (str): 대상 테이블 이름. 하나 이상인 경우 ',' 로 구분
         topic_prefix (str): 테이블을 넣을 토픽의 접두사
         com_hash (str): 커넥터 이름에 붙을 해쉬
         poll_interval (int): ms 단위 폴링 간격. 기본값 5000
-        idx_cols (dict): Incremental 또는 Timestamp 를 위한 컬럼 (Incremental 은 항상 필요)
+        params (dict): 추가 인자들
+            idx_col: Incremental 컬럼 (항상 필요)
+            ts_col: Timestamp 컬럼 (선택)
+            query: 테이블이 아닌 Query Based Ingest 를 위한 쿼리 (tables 는 무시됨)
+            query_topic : query 이용시 토픽 명
+            tables: 대상 테이블들 이름. 하나 이상인 경우 ',' 로 구분. 기본값 person
+                빈 문자열이면 대상 DB 의 모든 테이블
+            tasks: 커넥터가 사용하는 테스크 수. 기본값 1
 
     """
     assert profile in ('mysql', 'mssql')
@@ -395,37 +436,55 @@ def register_jdbc(kfk_ssh, profile, db_addr, db_port, db_user, db_passwd,
         db_url = f"jdbc:mysql://{db_addr}:{db_port}/{db_name}"
 
     conn_name = f'jdbc-{profile}-{com_hash}'
-    inc_col, ts_col = idx_cols['inc_col'], idx_cols['ts_col']
-    linfo(f"[ ] register_jdbc {conn_name} {inc_col} {ts_col}")
+    tables = params.get('tables', '')
+    inc_col, ts_col = params['inc_col'], params.get('ts_col')
+    query = params.get('query')
+    tasks = params.get('tasks', 1)
+    linfo(f"[ ] register_jdbc {conn_name} {inc_col} {ts_col} {tables} {tasks}")
     isolation = 'READ_UNCOMMITTED' if profile == 'mssql' else 'DEFAULT'
-    mode = 'timestamp+incrementing' if len(ts_col) > 0 else 'incrementing'
+    mode = 'timestamp+incrementing' if ts_col is not None else 'incrementing'
 
-    config = f'''{{
-        "connector.class" : "io.confluent.connect.jdbc.JdbcSourceConnector",
-        "connection.url":"{db_url}",
-        "connection.user":"{db_user}",
-        "connection.password":"{db_passwd}",
-        "auto.create": false,
-        "auto.evolve": false,
-        "poll.interval.ms": 5000,
-        "table.poll.interval.ms": 60000,
-        "delete.enabled": true,
-        "transaction.isolation.mode": "{isolation}",
-        "mode": "{mode}",
-        "incrementing.column.name" : "{inc_col}",
-        "timestamp.column.name": "{ts_col}",
-        "table.whitelist": "{tables}",
-        "topic.prefix" : "{topic_prefix}",
-        "poll.interval.ms": "{poll_interval}",
-        "tasks.max" : 1
-    }}'''
+    data = {
+        'connector.class' : 'io.confluent.connect.jdbc.JdbcSourceConnector',
+        'connection.url': db_url,
+        'connection.user':db_user,
+        'connection.password':db_passwd,
+        'auto.create': False,
+        'auto.evolve': False,
+        'poll.interval.ms': 5000,
+        'table.poll.interval.ms': 60000,
+        'delete.enabled': True,
+        'transaction.isolation.mode': isolation,
+        'mode': mode,
+        'incrementing.column.name' : inc_col,
+        'poll.interval.ms': poll_interval,
+        'tasks.max' : tasks
+    }
+    if query is None:
+        if len(tables) > 0:
+            data['table.whitelist'] = tables
+        else:
+            if profile == 'mssql':
+                data['table.blacklist'] = 'sys.trace_xe_event_map'
+        data['topic.prefix'] = topic_prefix
+        data['catalog.pattern'] = 'test'
+    else:
+        data['query'] = query
+        # 주의: query 가 있는 경우 topic.prefix 에 완전한 토픽이름이 지정되어야 한다.
+        assert 'query_topic' in params
+        data['topic.prefix'] = params['query_topic']
+
+    if ts_col is not None:
+        data['timestamp.column.name'] = ts_col
+
+    config = json.dumps(data)
     data = _register_connector(kfk_ssh, conn_name, config)
     # 등록된 커넥터 상태 확인
     time.sleep(5)
     status = get_connector_status(kfk_ssh, conn_name)
     if status['tasks'][0]['state'] == 'FAILED':
         raise RuntimeError(status['tasks'][0]['trace'])
-    linfo(f"[v] register_jdbc {conn_name} {inc_col} {ts_col}")
+    linfo(f"[v] register_jdbc {conn_name} {inc_col} {ts_col} {tables} {tasks}")
     return data
 
 
@@ -512,6 +571,8 @@ def _register_connector(kfk_ssh, name, config, poll_interval=5000):
         poll_interval (int): ms 단위 폴링 간격. 기본값 5000
 
     """
+    # curl 용 single-quote escape
+    config = config.replace("'", r"'\''")
     cmd = f'''
 curl -vs -X POST 'http://localhost:8083/connectors' \
     -H 'Content-Type: application/json' \
@@ -689,33 +750,67 @@ def claim_kafka(kfk_ssh):
     linfo("[v] claim_kafka")
 
 
-@pytest.fixture
-def xtopic(xkfssh, xprofile):
+@pytest.fixture(params=[{
+        'topics': [],  # 리셋할 토픽들
+        'partitions': TOPIC_PARTITIONS,
+        'replications': TOPIC_REPLICATIONS,
+        'cdc': False    # CDC 여부
+    }])
+def xtopic(xkfssh, xprofile, request):
     """카프카 토픽 초기화."""
     linfo("xtopic_")
-    topic = f"{xprofile}-person"
-    reset_topic(xkfssh, topic)
-    yield topic
+
+    if request.param.get('cdc', False):
+        reset_topic(xkfssh, f"db1")
+        scm = 'dbo' if xprofile == 'mssql' else 'test'
+        topic = f"db1.{scm}.person"
+    else:
+        topic = f"{xprofile}-person"
+    topics = request.param.get('topics', []) + [topic]
+    partitions = request.param.get('partitions', TOPIC_PARTITIONS)
+    replications = request.param.get('replications', TOPIC_REPLICATIONS)
+    delete_all_topics(xkfssh, xprofile)
+    for _topic in topics:
+        create_topic(xkfssh, _topic, partitions, replications)
+    yield
 
 
-@pytest.fixture
-def xtopic_ct(xkfssh, xprofile, xkafka):
-    """CT 테스트용 카프카 토픽 초기화."""
-    linfo("xtopic_ct")
-    topic = f"{xprofile}-person"
-    reset_topic(xkfssh, topic)
-    yield topic
+# @pytest.fixture(params=[{
+#         'topics': [],  # 리셋할 토픽들
+#         'partitions': 12,
+#         'replications': 1
+#     }])
+# def xtopic_ct(xkfssh, xprofile, xkafka, request):
+#     """CT 테스트용 카프카 토픽 초기화."""
+#     linfo("xtopic_ct")
+#     topic = f"{xprofile}-person"
+#     topics = request.param['topics'] + [topic]
+#     partitions = request.param['partitions']
+#     replications = request.param['replications']
+#     delete_all_topics(xkfssh)
+#     for _topic in topics:
+#         create_topic(xkfssh, topic, partitions, replications)
+#     yield
 
 
-@pytest.fixture
-def xtopic_cdc(xkfssh, xprofile, xkafka):
-    """CDC 테스트용 카프카 토픽 초기화."""
-    linfo("xtopic_cdc")
-    reset_topic(xkfssh, f"db1")
-    scm = 'dbo' if xprofile == 'mssql' else 'test'
-    topic = f"db1.{scm}.person"
-    reset_topic(xkfssh, topic)
-    yield topic
+# @pytest.fixture(params=[{
+#         'topics': [],  # 리셋할 토픽들
+#         'partitions': 12,
+#         'replications': 1
+#     }])
+# def xtopic_cdc(xkfssh, xprofile, xkafka, request):
+#     """CDC 테스트용 카프카 토픽 초기화."""
+#     linfo("xtopic_cdc")
+#     reset_topic(xkfssh, f"db1")
+#     scm = 'dbo' if xprofile == 'mssql' else 'test'
+#     topic = f"db1.{scm}.person"
+#     topics = request.param['topics'] + [topic]
+#     partitions = request.param['partitions']
+#     replications = request.param['replications']
+#     delete_all_topics(xkfssh)
+#     for _topic in topics:
+#         create_topic(xkfssh, topic, partitions, replications)
+#     yield
 
 
 def setup_path(profile):
@@ -782,12 +877,13 @@ def local_produce_proc(profile, pid, msg_cnt):
     linfo(f"[v] produce process {pid}")
 
 
-def local_consume_proc(profile, pid, q):
+def local_consume_proc(profile, pid, q, topic=None, timeout=10):
     """로컬 컨슈머 프로세스 함수."""
     from kfktest.consumer import consume
 
     linfo(f"[ ] consume process {pid}")
-    cnt = consume(profile, dev=True, count_only=True, from_begin=True, timeout=10)
+    cnt = consume(profile, dev=True, count_only=True, from_begin=True,
+                  timeout=timeout, topic=topic)
     q.put(cnt)
     linfo(f"[v] consume process {pid}")
 
@@ -827,15 +923,15 @@ def local_select_proc(profile, pid):
 
 
 def local_insert_proc(profile, pid, epoch=DB_EPOCH, batch=DB_BATCH, hide=False,
-        repeat=False):
+        table=None):
     """로컬에서 가짜 데이터 인서트 프로세스 함수."""
-    linfo(f"Insert process start: {pid} repeat: {repeat}")
+    linfo(f"[ ] local insert process {pid} {epoch} {table}")
     hide = '-n' if hide else ''
     cmd = f"cd ../deploy/{profile} && python -m kfktest.inserter {profile} -p {pid} -e {epoch} -b {batch} -d {hide}"
-    if repeat:
-        cmd += " -r"
+    if table is not None:
+        cmd += f' -t {table}'
     local_exec(cmd)
-    linfo(f"Insert process done: {pid}")
+    linfo(f"[v] local insert process {pid} {epoch} {table}")
 
 
 def remote_select_proc(profile, setup, pid):
@@ -850,31 +946,49 @@ def remote_select_proc(profile, setup, pid):
     return ret
 
 
-def remote_insert_proc(profile, setup, pid, epoch=DB_EPOCH, batch=DB_BATCH, hide=False):
+def remote_insert_proc(profile, setup, pid, epoch=DB_EPOCH, batch=DB_BATCH,
+        hide=False, table=None):
     """원격 인서트 노드에서 가짜 데이터 인서트 (원격 노드에 setup.json 있어야 함)."""
-    linfo(f"[ ] insert process {pid}")
+    linfo(f"[ ] remote insert process {pid}")
     ins_ip = setup['inserter_public_ip']['value']
     hide = '-n' if hide else ''
     ssh = SSH(ins_ip, 'inserter')
     cmd = f"cd kfktest/deploy/{profile} && python3 -m kfktest.inserter {profile} -p {pid} -e {epoch} -b {batch} {hide}"
+    if table is not None:
+        cmd += f' -t {table}'
     ret = ssh_exec(ssh, cmd, False)
     linfo(ret)
-    linfo(f"[v] insert process {pid}")
+    linfo(f"[v] remote insert process {pid}")
     return ret
 
 
-@pytest.fixture(params=[[0, 0, None]])
+@pytest.fixture(params=[{'pre_epoch': 0, 'pre_batch': 0, 'fix_regdt': None, 'tables': ['person']}])
 def xtable(xprofile, xkafka, request):
     """테스트용 테이블 초기화."""
+    from kfktest.table import drop_all_tables
+
     linfo("xtable")
+    # 기존 테이블 삭제
+    drop_all_tables(xprofile)
+
+    # 생성
+    for table in request.param['tables']:
+        _xtable(xprofile, table, request)
+
+    yield time.time()
+
+
+def _xtable(xprofile, table, request):
     from kfktest.table import reset_table
 
-    pre_epoch, pre_batch, fix_regdt = request.param
-    conn, cursor = reset_table(xprofile, fix_regdt)
+    pre_epoch = request.param.get('pre_epoch', 0)
+    pre_batch = request.param.get('pre_batch', 0)
+    fix_regdt = request.param.get('fix_regdt', None)
+    conn, cursor = reset_table(xprofile, table, fix_regdt)
 
     from kfktest.inserter import insert
-    if DB_PRE_ROWS > 0 :
-        linfo("[ ] insert initial data")
+    if pre_epoch > 0 :
+        linfo(f"[ ] insert initial data to {table}")
         # Insert 프로세스들 시작
         ins_pros = []
         for pid in range(1, NUM_INS_PROCS + 1):
@@ -882,15 +996,14 @@ def xtable(xprofile, xkafka, request):
             p = Process(target=local_insert_proc, args=(xprofile, pid,
                                                         pre_epoch,
                                                         pre_batch,
-                                                        True))
+                                                        True,
+                                                        table))
             ins_pros.append(p)
             p.start()
 
         for p in ins_pros:
             p.join()
-        linfo("[v] insert initial data")
-
-    yield time.time()
+        linfo(f"[v] insert initial data to {table}")
 
 
 @pytest.fixture
@@ -1000,29 +1113,32 @@ def xhash():
     return binascii.hexlify(os.urandom(3)).decode('utf8')
 
 
-@pytest.fixture(params=[{'inc_col': 'id', 'ts_col': ''}])
-def xjdbc(xprofile, xrmcons, xkfssh, xtable, xtopic_ct, xconn, xsetup, xhash, request):
+@pytest.fixture(params=[{
+        'inc_col': 'id', 'ts_col': None, 'query': None, 'query_topic': None,
+        'tables': "person", "tasks": 1
+    }])
+def xjdbc(xprofile, xrmcons, xkfssh, xtable, xtopic, xconn, xsetup, xhash, request):
     """CT용 JDBC 소스 커넥터 초기화 (테이블과 토픽 먼저 생성)."""
     _xjdbc(xprofile, xsetup, xkfssh, xhash, request.param)
     time.sleep(5)
     yield
 
 
-def _xjdbc(profile, setup, kfssh, com_hash, cols):
+def _xjdbc(profile, setup, kfssh, com_hash, params):
     linfo("xjdbc")
     db_addr = setup[f'{profile}_private_ip']['value']
     db_user = setup['db_user']['value']
     db_passwd = setup['db_passwd']['value']['result']
-
     ret = register_jdbc(kfssh, profile, db_addr, DB_PORTS[profile],
-        db_user, db_passwd, "test", "person", f"{profile}-", com_hash,
-        idx_cols=cols)
+        db_user, db_passwd, "test", f"{profile}-", com_hash,
+        params=params)
     if 'error_code' in ret:
         raise RuntimeError(ret['message'])
 
 
 @pytest.fixture
-def xdbzm(xprofile, xkfssh, xrmcons, xtopic_cdc, xconn, xsetup, xcdc, xhash):
+@pytest.mark.parametrize('xtopic', [{'cdc': True}], indirect=True)
+def xdbzm(xprofile, xkfssh, xrmcons, xtopic, xconn, xsetup, xcdc, xhash):
     """CDC 용 Debezium Source 커넥터 초기화 (테이블과 토픽 먼저 생성)."""
     _xdbzm(xprofile, xsetup, xkfssh, xhash)
     time.sleep(5)

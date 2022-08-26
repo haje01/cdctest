@@ -16,6 +16,7 @@ parser = argparse.ArgumentParser(description="DB 에 가짜 데이터 인서트.
 )
 parser.add_argument('db_type', type=str, choices=['mysql', 'mssql'], help="DBMS 종류.")
 parser.add_argument('--db-name', type=str, default='test', help="이용할 데이터베이스 이름.")
+parser.add_argument('-t', '--table', type=str, default='person', help="대상 테이블 이름.")
 parser.add_argument('-p', '--pid', type=int, default=0, help="인서트 프로세스 ID.")
 parser.add_argument('-e', '--epoch', type=int, default=DB_EPOCH, help="에포크 수.")
 parser.add_argument('-b', '--batch', type=int, default=DB_BATCH, help="에포크당 행수.")
@@ -23,18 +24,15 @@ parser.add_argument('-d', '--dev', action='store_true', default=False,
     help="개발 PC 에서 실행.")
 parser.add_argument('-n', '--no-result', action='store_true', default=False,
     help="출력 감추기.")
-parser.add_argument('-r', '--repeat', action='store_true', default=False,
-    help="에포크 인서트 후 다시 인서트.")
-
 
 def insert(db_type,
         db_name=parser.get_default('db_name'),
+        table=parser.get_default('table'),
         epoch=parser.get_default('epoch'),
         batch=parser.get_default('batch'),
         pid=parser.get_default('pid'),
         dev=parser.get_default('devs'),
-        no_result=parser.get_default('no_result'),
-        repeat=parser.get_default('repeat')
+        no_result=parser.get_default('no_result')
         ):
     """가짜 데이터 인서트.
 
@@ -43,13 +41,12 @@ def insert(db_type,
     Args:
         db_type (str): DBMS 종류. mysql / mssql
         db_name (str): DB 이름
+        table (str): 테이블 이름. 기본값 person
         epoch (int): 에포크 수
         batch (int): 에포크당 배치 수
         pid (int): 멀티 프로세스 인서트시 구분용 ID
         dev (bool): 개발 PC 에서 실행 여부
         no_result (bool): 결과 감추기 여부. 기본값 True
-        repeat (bool): 에포크 인서트 후 다시 인서트 여부. 기본값 False
-            JDBC Source Connect 에서 Timestamp 컬럼 테스트를 위해 사용.
 
     """
     setup = load_setup(db_type)
@@ -70,7 +67,7 @@ def insert(db_type,
     linfo("Connect done.")
 
     st = time.time()
-    insert_fake(conn, cursor, epoch, batch, pid, db_type, repeat=repeat)
+    insert_fake(conn, cursor, epoch, batch, pid, db_type, table=table)
     conn.close()
 
     elapsed = time.time() - st
@@ -81,5 +78,5 @@ def insert(db_type,
 
 if __name__ == '__main__':
     args = parser.parse_args()
-    insert(args.db_type, args.db_name, args.epoch, args.batch,
-        args.pid, args.dev, args.no_result, args.repeat)
+    insert(args.db_type, args.db_name, args.table, args.epoch, args.batch,
+        args.pid, args.dev, args.no_result)

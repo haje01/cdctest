@@ -1,11 +1,13 @@
 import pdb
 import time
-from multiprocessing import Process
+from multiprocessing import Process, Queue
 import json
+from datetime import datetime, timedelta
 
 import pymssql
 import pytest
 from kafka import KafkaConsumer
+import pandas as pd
 
 from kfktest.table import reset_table
 from kfktest.util import (count_topic_message, get_kafka_ssh,
@@ -13,9 +15,10 @@ from kfktest.util import (count_topic_message, get_kafka_ssh,
     restart_kafka_and_connect, stop_kafka_and_connect, count_table_row,
     local_select_proc, local_insert_proc, linfo, NUM_INS_PROCS, NUM_SEL_PROCS,
     remote_insert_proc, remote_select_proc, DB_ROWS, load_setup, insert_fake,
+    local_consume_proc, ssh_exec,
     # 픽스쳐들
-    xsetup, xcp_setup, xjdbc, xtable, xtopic_ct, xkafka, xzookeeper, xkvmstart,
-    xconn, xkfssh, xdbzm, xtopic_cdc, xrmcons, xcdc, xhash
+    xsetup, xcp_setup, xjdbc, xtable, xkafka, xzookeeper, xkvmstart,
+    xconn, xkfssh, xdbzm, xrmcons, xcdc, xhash, xtopic
     )
 
 
@@ -468,3 +471,184 @@ def test_ct_modify2(xcp_setup, xjdbc, xtable, xprofile, xkfssh):
     assert len(fnames) == 2
     assert 'MODIFIED' in fnames
     assert cnt == 11
+
+
+def yesterday():
+    return (datetime.today() - timedelta(days=1)).strftime('%Y%m%d')
+
+#
+# 어제 날짜 테이블이 있으면 그것과 당일을 UNION
+# 아니면, 당일만 SELECT 하는 쿼리
+# 그러나, 이런 방식은 쓸 수 없다.. ㅠㅠ
+#   - 커넥터에서 WHERE 조건을 건다
+#   - MSSQL 에서 Dynamic SQL 을 Subquery 처럼 쓸 수 없다.
+#
+# query = """
+# DECLARE @_today DATETIME = GETDATE()
+# DECLARE @_yesterday DATETIME = DATEADD(day, -1, CAST(GETDATE() AS date))
+# DECLARE @today NCHAR(8) = CONVERT(NCHAR(8), @_today, 112)
+# DECLARE @yesterday NCHAR(8) = CONVERT(NCHAR(8), @_yesterday, 112)
+
+# DECLARE @tblName NCHAR(30) = N'person'
+# DECLARE @ytblName NCHAR(30) = N'person_' + @yesterday
+
+# DECLARE @query NVARCHAR(4000)
+# SET @query = '
+# IF EXISTS ( SELECT * FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = ''' + @ytblName + ''' )
+# BEGIN
+#     SELECT * FROM (
+#         SELECT * FROM ' + @ytblName + '
+#         UNION ALL
+#         SELECT * FROM ' + @tblName + '
+#     ) AS T
+#      WHERE "id" > ? ORDER BY "id" ASC (io.confluent.connect.jdbc.source.TableQuerier:179)
+# END
+# ELSE
+# 	SELECT * FROM ' + @tblName
+
+# SELECT *
+# EXEC sp_executesql @query
+# """
+
+ctq_query = """
+SELECT * FROM person
+"""
+
+# @pytest.mark.parametrize('xtable', [{'tables':
+#    [f'person', f"person_{yesterday()}"]}], indirect=True)
+@pytest.mark.parametrize('xjdbc', [{
+        'inc_col': 'id',
+        'query': ctq_query,
+        'query_topic': 'mssql-person'  # 대상 토픽 이름 명시
+        }], indirect=True)
+def test_ct_query(xcp_setup, xjdbc, xtable, xprofile, xkfssh):
+    """CT 방식에서 테이블이 아닌 쿼리로 가져오기."""
+    num_msg = 5
+
+    # Insert 프로세스들 시작
+    ins_pros = []
+    # 당일 데이터
+    p = Process(target=local_insert_proc, args=(xprofile, 1, 1, num_msg, False,
+            f'person'))
+    ins_pros.append(p)
+    p.start()
+
+    for p in ins_pros:
+        p.join()
+    linfo("All insert processes are done.")
+
+    # 카프카 토픽 확인 (timeout 되기전에 다 받아야 함)
+    cnt = count_topic_message(xkfssh, f'{xprofile}-person', timeout=10)
+    assert num_msg == cnt
+
+# 대상 날짜 (3개월 = 2022-06-01 부터 2022-08-31 까지)
+ctm_dates = pd.date_range(start='20220601', end='20220831')
+# 대상 테이블명
+ctm_tables = [dt.strftime('person_%Y%m%d') for dt in ctm_dates]
+# 대상 토픽명
+ctm_topics = [f'mssql-{t}' for t in ctm_tables]
+@pytest.mark.parametrize('xtable', [{'tables': ctm_tables}], indirect=True)
+# 대상 DB 내 모든 테이블을 대상으로 하도록 커넥터에는 테이블 정보를 주지 않음
+@pytest.mark.parametrize('xjdbc', [{'inc_col': 'id', 'tasks': 1}],indirect=True)
+# 테이블명에 해당하는 토픽 리셋
+@pytest.mark.parametrize('xtopic', [{'topics': ctm_topics}], indirect=True)
+def test_ct_multitable(xcp_setup, xjdbc, xtable, xprofile, xtopic, xkfssh):
+    """여러 테이블을 대상으로 할 때 퍼포먼스 테스트.
+
+    - 주기적으로 로테이션되는 테이블은 타겟 설정이 곤란
+    - 이 경우 whitelist 없이 DB 를 타겟으로 해두면 생성되는 모든 테이블이 타겟
+    - 이렇게 하면 잦은 설정 변경이나 query 없이 로테이션에 대응되나,
+      많은 테이블이 대상이 되면 퍼포먼스 확인 필요
+
+    퍼포먼스 확인
+    - 필요한 개수가 되도록 일별 대상 테이블 날짜 범위 지정
+    - 테스트 실행 초기 토픽 리셋 및 더미 데이터 인서트 단계에서 시간이 많이 걸림!
+    - 인서트가 끝나고 커넥터가 테이블을 다 가져온 후,
+    - 아이들 상태에서 DB 장비의 CPU 부하를 모니터링
+
+    """
+    # DB 에 더미 데이터를 넣는 동안 Kafka Connector 잠시 중단
+    ssh_exec(xkfssh, "sudo service kafka-connect stop")
+
+    # def chunks(lst, n):
+    #     """Yield successive n-sized chunks from lst."""
+    #     for i in range(0, len(lst), n):
+    #         yield lst[i:i + n]
+
+    # Insert 부하를 줄이기 위해 대상 테이블 10개 단위로 쪼개기 (DB 커넥션 수도 문제?)
+    # table_chunks = chunks(ctm_tables, 10)
+
+    num_epoch = 1
+    num_batch = 1000
+    num_rows = num_epoch * num_batch
+
+    def gen_insert_func(remote):
+        if remote:
+            fn = lambda pid: Process(target=remote_insert_proc, args=(xprofile, xcp_setup, pid,
+                        num_epoch, num_batch, False, table))
+        else:
+            fn = lambda pid: Process(target=local_insert_proc, args=(xprofile, pid, num_epoch,
+                        num_batch, False, table))
+        return fn
+
+    # Insert 로컬 / 원격에서 할지 여부
+    # 프로세스당 10만 행의 경우 인서트에 걸린 시간
+    #   로컬 : 약 24분
+    insert_remote = True
+    insert_func = gen_insert_func(insert_remote)
+
+    st = time.time()
+    # Insert 프로세스들 시작
+    insert_proc = remote_insert_proc if insert_remote else local_insert_proc
+    ins_pros = []
+    for pid, table in enumerate(ctm_tables):
+        p = insert_func(pid)
+        ins_pros.append(p)
+        p.start()
+    for p in ins_pros:
+        p.join()
+    # for chunk in table_chunks:
+    #     print(chunk)
+    #     for pid, table in enumerate(chunk):
+    #         p = Process(target=local_insert_proc, args=(xprofile, pid, num_epoch,
+    #                     num_batch, False, table))
+    #         ins_pros.append(p)
+    #         p.start()
+    #     for p in ins_pros:
+    #         p.join()
+
+    elapsed = time.time() - st
+    linfo(f"All insert processes are done in {elapsed:.2f} sec.")
+    linfo(f"Average speed {(num_rows * len(ctm_tables)) / elapsed:.1f} RPS.\n")
+
+    input("=== Press enter key to start consume ===")
+
+    # Kafka Connector 시작
+    ssh_exec(xkfssh, "sudo service kafka-connect start")
+
+    # 모든 토픽의 메시지 수 확인
+    cnt_procs = []
+    cnt_qs = []
+    for pid, topic in enumerate(ctm_topics):
+        q = Queue()
+        p = Process(target=local_consume_proc, args=(xprofile, pid, q, topic, 20))
+        cnt_procs.append(p)
+        cnt_qs.append(q)
+        p.start()
+
+    total = 0
+    for i, p in enumerate(cnt_procs):
+        cnt = cnt_qs[i].get()
+        print(f'cnt_proc {i} cnt {cnt}')
+        total += cnt
+        p.join()
+
+    assert num_rows * len(ctm_topics) == total
+
+    input("=== Press enter key to insert new data ===")
+
+    # 최근 날짜에 새 데이터 인서트하며 DB 상태 확인
+    table = ctm_tables[-1]
+    p = insert_func(1)
+    p.start()
+    p.join()
