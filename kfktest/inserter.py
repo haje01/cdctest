@@ -25,6 +25,7 @@ parser.add_argument('-d', '--dev', action='store_true', default=False,
     help="개발 PC 에서 실행.")
 parser.add_argument('-n', '--no-result', action='store_true', default=False,
     help="출력 감추기.")
+parser.add_argument('--delay', type=int, default=0, help="여러 테이블에 인서트시 지연 시간 범위 (초).")
 
 
 def insert(db_type,
@@ -34,7 +35,8 @@ def insert(db_type,
         batch=parser.get_default('batch'),
         pid=parser.get_default('pid'),
         dev=parser.get_default('devs'),
-        no_result=parser.get_default('no_result')
+        no_result=parser.get_default('no_result'),
+        delay=0
         ):
     """가짜 데이터 인서트.
 
@@ -51,6 +53,9 @@ def insert(db_type,
         no_result (bool): 결과 감추기 여부. 기본값 True
 
     """
+    # 프로세스간 commit 이 몰리지 않게
+    time.sleep(random.random() * delay)
+
     setup = load_setup(db_type)
     if db_type == 'mysql':
         db_ip_key = 'mysql_public_ip' if dev else 'mysql_private_ip'
@@ -90,11 +95,9 @@ if __name__ == '__main__':
         for table in tables:
             p = Process(target=insert, args=(args.db_type, args.db_name,
                                              table, args.epoch, args.batch,
-                                             args.pid, args.dev, args.no_result
-                                             ))
+                                             args.pid, args.dev, args.no_result,
+                                             args.delay))
             procs.append(p)
-            # 프로세스간 commit 이 몰리지 않게
-            time.sleep(random.random() * 60)
             p.start()
         for p in procs:
             p.join()
