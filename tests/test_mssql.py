@@ -542,8 +542,8 @@ def test_ct_query(xcp_setup, xjdbc, xtable, xprofile, xkfssh):
     assert num_msg == cnt
 
 # 대상 날짜 (3개월 = 2022-06-01 부터 2022-08-31 까지)
-ctm_dates = pd.date_range(start='20220601', end='20220831')
-# ctm_dates = pd.date_range(start='20220801', end='20220803')
+# ctm_dates = pd.date_range(start='20220601', end='20220831')
+ctm_dates = pd.date_range(start='20220801', end='20220831')
 # 대상 테이블명
 ctm_tables = [dt.strftime('person_%Y%m%d') for dt in ctm_dates]
 # 대상 토픽명
@@ -579,7 +579,7 @@ def test_ct_multitable(xcp_setup, xjdbc, xtable, xprofile, xtopic, xkfssh):
     # Insert 부하를 줄이기 위해 대상 테이블 10개 단위로 쪼개기 (DB 커넥션 수도 문제?)
     # table_chunks = chunks(ctm_tables, 10)
 
-    num_epoch = 10
+    num_epoch = 2
     num_batch = 10000
     num_rows = num_epoch * num_batch
 
@@ -589,7 +589,7 @@ def test_ct_multitable(xcp_setup, xjdbc, xtable, xprofile, xtopic, xkfssh):
             # 원격 insert 는 모든 테이블명을 건내주어 그곳에서 병렬처리
             tables = ','.join(tables)
             ret = remote_insert_proc(xprofile, xcp_setup, 1, num_epoch, num_batch,
-                                    False, tables)
+                                    False, tables, 60)
         else:
             # 로컬 insert 는 프로세스 여럿 이용
             ins_pros = []
@@ -642,6 +642,35 @@ def test_ct_multitable(xcp_setup, xjdbc, xtable, xprofile, xtopic, xkfssh):
         print(f'cnt_proc {i} cnt {cnt}')
         total += cnt
         p.join()
+
+    tot = num_rows * len(ctm_topics)
+    if tot != total:
+        linfo(f"#1 tot {tot} != total {total}")
+    else:
+        linfo(f"#1 tot {tot} == total {total}")
+
+    # 모든 토픽의 메시지 수 확인 #2
+    cnt_procs = []
+    cnt_qs = []
+    for pid, topic in enumerate(ctm_topics):
+        q = Queue()
+        p = Process(target=local_consume_proc, args=(xprofile, pid, q, topic, 20))
+        cnt_procs.append(p)
+        cnt_qs.append(q)
+        p.start()
+
+    total = 0
+    for i, p in enumerate(cnt_procs):
+        cnt = cnt_qs[i].get()
+        print(f'cnt_proc {i} cnt {cnt}')
+        total += cnt
+        p.join()
+
+    tot = num_rows * len(ctm_topics)
+    if tot != total:
+        linfo(f"#2 tot {tot} != total {total}")
+    else:
+        linfo(f"#2 tot {tot} == total {total}")
 
     assert num_rows * len(ctm_topics) == total
 

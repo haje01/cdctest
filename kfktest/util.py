@@ -949,13 +949,13 @@ def remote_select_proc(profile, setup, pid):
 
 
 def remote_insert_proc(profile, setup, pid, epoch=DB_EPOCH, batch=DB_BATCH,
-        hide=False, table=None):
+        hide=False, table=None, delay=0):
     """원격 인서트 노드에서 가짜 데이터 인서트 (원격 노드에 setup.json 있어야 함)."""
     linfo(f"[ ] remote insert process {pid}")
     ins_ip = setup['inserter_public_ip']['value']
     hide = '-n' if hide else ''
     ssh = SSH(ins_ip, 'inserter')
-    cmd = f"cd kfktest/deploy/{profile} && python3 -m kfktest.inserter {profile} -p {pid} -e {epoch} -b {batch} {hide}"
+    cmd = f"cd kfktest/deploy/{profile} && python3 -m kfktest.inserter {profile} -p {pid} -e {epoch} -b {batch} {hide} --delay {delay}"
     if table is not None:
         cmd += f' -t {table}'
     ret = ssh_exec(ssh, cmd, False)
@@ -1342,3 +1342,10 @@ COMMIT;
     '''
     cursor.execute(sql)
     linfo(f"[v] disable_cdc for {cap_inst}")
+
+
+def count_msg_from_topics(ssh, topics):
+    for topic in topics:
+        cmd = f"""kafka-run-class.sh kafka.tools.GetOffsetShell --bootstrap-server=localhost:9092 --topic {topic} | awk -F ':' '{{sum += $3}} END {print sum}'"""
+        ret = ssh_exec(ssh, cmd)
+        import pdb; pdb.set_trace()

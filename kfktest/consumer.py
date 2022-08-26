@@ -7,7 +7,8 @@ from collections import defaultdict
 
 from kafka import KafkaConsumer
 
-from kfktest.util import load_setup, linfo, DB_PRE_ROWS, DB_ROWS
+from kfktest.util import load_setup, linfo, DB_PRE_ROWS, DB_ROWS, \
+    count_msg_from_topics, SSH
 
 # CLI 용 파서
 parser = argparse.ArgumentParser(description="프로파일에 맞는 토픽 컨슘.",
@@ -22,7 +23,7 @@ parser.add_argument('-u', '--duplicate', action='store_true', default=False, hel
 parser.add_argument('-m', '--miss', action='store_true', default=False, help="누락 메시지 ID 출력")
 parser.add_argument('-d', '--dev', action='store_true', default=False,
     help="개발 PC 에서 실행 여부.")
-parser.add_argument('--topic', type=str, default=None, help="읽을 토픽 지정.")
+parser.add_argument('--topic', type=str, default=None, help="읽을 토픽 지정. (카운팅시 하나 이상 토픽을 ','로 구분해 지정 가능)")
 parser.add_argument('-f', '--fields', type=str, default=None, help="일치하는 필드만 표시 (',' 로 구분).")
 parser.add_argument('--field-types', type=str, default=None, help="일치하는 필드별 표시 타입 (',' 로 구분).")
 
@@ -47,6 +48,13 @@ def consume(profile,
     broker_addr = setup[ip_key]['value']
     broker_port = 19092 if dev else 9092
     if count_only:
+        topics = topic.split(',')
+        if len(topics) > 1:
+            # count only 모드에서 토픽이 여럿이면 Kafka 의 GetOffsetShell 이용
+            ssh = SSH(broker_addr)
+            total = count_msg_from_topics(ssh, topics)
+            linfo(f"[v] consume {topics} with {total} messages.")
+            return
         from_begin = True
 
     consumer = KafkaConsumer(topic,
@@ -98,7 +106,7 @@ def consume(profile,
             print(f"Missed message ids {missed} among 1 to {DB_PRE_ROWS + DB_ROWS}")
 
 
-    linfo(f"[v] consume {cnt} messages.")
+    linfo(f"[v] consume {topic} with {cnt} messages.")
     if duplicate:
         linfo(f"Total {dup_cnt} duplicate messages ({dup_cnt * 100/ float(cnt):.2f} %).")
     return cnt
