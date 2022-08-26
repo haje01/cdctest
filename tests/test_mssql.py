@@ -15,7 +15,7 @@ from kfktest.util import (count_topic_message, get_kafka_ssh,
     restart_kafka_and_connect, stop_kafka_and_connect, count_table_row,
     local_select_proc, local_insert_proc, linfo, NUM_INS_PROCS, NUM_SEL_PROCS,
     remote_insert_proc, remote_select_proc, DB_ROWS, load_setup, insert_fake,
-    local_consume_proc, ssh_exec,
+    local_consume_proc, ssh_exec, inserter_kill_processes,
     # 픽스쳐들
     xsetup, xcp_setup, xjdbc, xtable, xkafka, xzookeeper, xkvmstart,
     xconn, xkfssh, xdbzm, xrmcons, xcdc, xhash, xtopic
@@ -543,7 +543,7 @@ def test_ct_query(xcp_setup, xjdbc, xtable, xprofile, xkfssh):
 
 # 대상 날짜 (3개월 = 2022-06-01 부터 2022-08-31 까지)
 ctm_dates = pd.date_range(start='20220601', end='20220831')
-# ctm_dates = pd.date_range(start='20220801', end='20220810')
+# ctm_dates = pd.date_range(start='20220801', end='20220803')
 # 대상 테이블명
 ctm_tables = [dt.strftime('person_%Y%m%d') for dt in ctm_dates]
 # 대상 토픽명
@@ -583,47 +583,45 @@ def test_ct_multitable(xcp_setup, xjdbc, xtable, xprofile, xtopic, xkfssh):
     num_batch = 10000
     num_rows = num_epoch * num_batch
 
-    def gen_insert_func(remote):
+    # 인서트
+    def insert(remote, tables):
         if remote:
-            fn = lambda pid: Process(target=remote_insert_proc, args=(xprofile, xcp_setup, pid,
-                        num_epoch, num_batch, False, table))
+            # 원격 insert 는 모든 테이블명을 건내주어 그곳에서 병렬처리
+            tables = ','.join(tables)
+            ret = remote_insert_proc(xprofile, xcp_setup, 1, num_epoch, num_batch,
+                                    False, tables)
         else:
-            fn = lambda pid: Process(target=local_insert_proc, args=(xprofile, pid, num_epoch,
-                        num_batch, False, table))
-        return fn
+            # 로컬 insert 는 프로세스 여럿 이용
+            ins_pros = []
+            for pid, table in enumerate(tables):
+                p = Process(target=local_insert_proc, args=(xprofile, pid, num_epoch,
+                            num_batch, False, table))
+                ins_pros.append(p)
+                p.start()
+            for p in ins_pros:
+                p.join()
 
-    # Insert 로컬 / 원격에서 할지 여부
+    # 원격 Insert 여부
+    insert_remote = True
     # 프로세스당 10만 행의 경우 인서트에 걸린 시간
     #   로컬 : 약 1058 Rows Per Seconds
     #   원격 : 약 3000 Rows Per Seconds
-    insert_remote = True
-    insert_func = gen_insert_func(insert_remote)
+
+    # 원격 insert 의 경우 기존에 종료되지 않은 프로세스가 있으면 중단
+    if insert_remote:
+        inserter_kill_processes(xprofile, xcp_setup, 'python3 -m kfktest.inserter mssql.*')
 
     st = time.time()
-    # Insert 프로세스들 시작
-    insert_proc = remote_insert_proc if insert_remote else local_insert_proc
-    ins_pros = []
-    for pid, table in enumerate(ctm_tables):
-        p = insert_func(pid)
-        ins_pros.append(p)
-        p.start()
-    for p in ins_pros:
-        p.join()
-    # for chunk in table_chunks:
-    #     print(chunk)
-    #     for pid, table in enumerate(chunk):
-    #         p = Process(target=local_insert_proc, args=(xprofile, pid, num_epoch,
-    #                     num_batch, False, table))
-    #         ins_pros.append(p)
-    #         p.start()
-    #     for p in ins_pros:
-    #         p.join()
+    #
+    # Insert 시작
+    #
+    insert(insert_remote, ctm_tables)
 
     elapsed = time.time() - st
     linfo(f"All insert processes are done in {elapsed:.2f} sec.")
-    linfo(f"Average speed {(num_rows * len(ctm_tables)) / elapsed:.1f} RPS.\n")
+    linfo(f"Average speed {(num_rows * len(ctm_tables)) / elapsed:.1f} RPS.")
 
-    input("=== Press Enter key to start consume ===")
+    input("\n=== Press Enter key to start consume ===\n")
 
     # Kafka Connector 시작
     ssh_exec(xkfssh, "sudo service kafka-connect start")
@@ -647,10 +645,7 @@ def test_ct_multitable(xcp_setup, xjdbc, xtable, xprofile, xtopic, xkfssh):
 
     assert num_rows * len(ctm_topics) == total
 
-    input("=== Press enter key to insert new data ===")
+    input("\n=== Press enter key to insert new data ===\n")
 
     # 최근 날짜에 새 데이터 인서트하며 DB 상태 확인
-    table = ctm_tables[-1]
-    p = insert_func(1)
-    p.start()
-    p.join()
+    insert(insert_remote, [ctm_tables[-1]])

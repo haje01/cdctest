@@ -1,7 +1,7 @@
 import os
 import io
 import time
-import sys
+import random
 import argparse
 import json
 from multiprocessing import Process
@@ -93,6 +93,8 @@ if __name__ == '__main__':
                                              args.pid, args.dev, args.no_result
                                              ))
             procs.append(p)
+            # 프로세스간 commit 이 몰리지 않게
+            time.sleep(random.random() * 60)
             p.start()
         for p in procs:
             p.join()

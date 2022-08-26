@@ -964,6 +964,16 @@ def remote_insert_proc(profile, setup, pid, epoch=DB_EPOCH, batch=DB_BATCH,
     return ret
 
 
+def inserter_kill_processes(profile, setup, cmd_ptrn):
+    """원격 인서트 장비에서 명령 패턴으로 프로세스들 제거."""
+    linfo(f"[ ] remote deleter insert")
+    ins_ip = setup['inserter_public_ip']['value']
+    ssh = SSH(ins_ip, 'delete')
+    cmd = f'pkill -f "{cmd_ptrn}"'
+    ret = ssh_exec(ssh, cmd, False)
+    return ret
+
+
 @pytest.fixture(params=[{'pre_epoch': 0, 'pre_batch': 0, 'fix_regdt': None, 'tables': ['person']}])
 def xtable(xprofile, xkafka, request):
     """테스트용 테이블 초기화."""
