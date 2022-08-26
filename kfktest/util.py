@@ -12,7 +12,7 @@ from datetime import datetime
 import time
 import binascii
 import subprocess
-from multiprocessing import Process
+from multiprocessing import Process, Queue
 
 import pymssql
 from mysql.connector import connect
@@ -372,31 +372,75 @@ def reset_topic(ssh, topic, partitions=TOPIC_PARTITIONS,
     linfo(f"[v] reset_topic '{topic}'")
 
 
-def count_topic_message(kfk_ssh, topic, from_begin=True, timeout=10):
+def count_topic_message(profile, topic, from_begin=True, timeout=10):
     """토픽의 메시지 수를 카운팅.
 
     Args:
-        kfk_ssh : Kafka 노드의 Paramiko SSH 객체
-        topic (str): 토픽명
+        profile : 프로파일
+        topic (str): 토픽명. (하나 이상이면 ',' 로 구분)
         from_begin (bool): 토픽의 첫 메시지부터. 기본값 True
         timeout (int): 컨슘 타임아웃 초. 기본값 10초
             너무 작은 값이면 카운팅이 끝나기 전에 종료될 수 있다.
 
     """
     linfo(f"[ ] count_topic_message - topic: {topic}, timeout: {timeout}")
-    cmd = f'''kafka-console-consumer.sh --bootstrap-server localhost:9092 --topic {topic} --timeout-ms {timeout * 1000}'''
-    if from_begin:
-        cmd += ' --from-beginning'
-    cmd += ' | tail -n 10 | grep Processed'
-    ret = ssh_exec(kfk_ssh, cmd, stderr_type="stdout")
-    msg = ret.strip().split('\n')[-1]
-    match = re.search(r'Processed a total of (\d+) messages', msg)
-    if match is not None:
-        cnt = int(match.groups()[0])
-    else:
-        raise Exception(f"Not matching result: {msg}")
+    setup = load_setup(profile)
+    kfk_ip = setup['kafka_public_ip']['value']
+    topics = topic.split(',')
+    procs = []
+    qs = []
+    for topic in topics:
+        q = Queue()
+        p = Process(target=_count_topic_message,
+                    args=(kfk_ip, topic, q, from_begin, timeout))
+        procs.append(p)
+        qs.append(q)
+        p.start()
+
+    total = 0
+    for i, p in enumerate(procs):
+        cnt = qs[i].get()
+        total += cnt
+        p.join()
+
     linfo(f"[v] count_topic_message - topic: {topic}, timeout: {timeout}")
     return cnt
+
+
+def _count_topic_message(kfk_ip, topic, q, from_begin=True, timeout=10):
+    linfo(f"[ ] _count_topic_message {kfk_ip} {topic}")
+    cmd = f'''kafka-console-consumer.sh --bootstrap-server localhost:9092 --topic {topic} --timeout-ms {timeout * 1000}'''
+    kfk_ssh = SSH(kfk_ip)
+    # 타임아웃까지 기다림
+    ssh_exec(kfk_ssh, cmd)
+    if from_begin:
+        cmd = f"""kafka-run-class.sh kafka.tools.GetOffsetShell --bootstrap-server=localhost:9092 --topic {topic} | awk -F ':' '{{sum += $3}} END {{print sum}}'"""
+        ret = ssh_exec(kfk_ssh, cmd)
+        print(topic, ret)
+        cnt = int(ret.strip())
+        q.put(cnt)
+    else:
+        cmd += ' | tail -n 10 | grep Processed'
+        ret = ssh_exec(kfk_ssh, cmd, stderr_type="stdout")
+        msg = ret.strip().split('\n')[-1]
+        match = re.search(r'Processed a total of (\d+) messages', msg)
+        if match is not None:
+            cnt = int(match.groups()[0])
+        else:
+            raise Exception(f"Not matching result: {msg}")
+    linfo(f"[v] _count_topic_message {kfk_ip} {topic}")
+    return cnt
+
+
+# def count_msg_from_topic(ssh, topics):
+#     total = 0
+#     for topic in topics:
+#         cmd = f"""kafka-run-class.sh kafka.tools.GetOffsetShell --bootstrap-server=localhost:9092 --topic {topic} | awk -F ':' '{{sum += $3}} END {{print sum}}'"""
+#         ret = ssh_exec(ssh, cmd)
+#         print(topic, ret)
+#         cnt = int(ret.strip())
+#         total += cnt
+#     return total
 
 
 @retry(RuntimeError, tries=6, delay=5)
@@ -1343,9 +1387,3 @@ COMMIT;
     cursor.execute(sql)
     linfo(f"[v] disable_cdc for {cap_inst}")
 
-
-def count_msg_from_topics(ssh, topics):
-    for topic in topics:
-        cmd = f"""kafka-run-class.sh kafka.tools.GetOffsetShell --bootstrap-server=localhost:9092 --topic {topic} | awk -F ':' '{{sum += $3}} END {print sum}'"""
-        ret = ssh_exec(ssh, cmd)
-        import pdb; pdb.set_trace()

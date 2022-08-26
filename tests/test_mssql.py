@@ -45,7 +45,7 @@ def test_ct_local_basic(xsetup, xjdbc, xprofile, xkfssh):
         p.start()
 
     # 카프카 토픽 확인 (timeout 되기 전에 다 받아야 함)
-    cnt = count_topic_message(xkfssh, f'{xprofile}-person', timeout=10)
+    cnt = count_topic_message(xprofile, f'{xprofile}-person', timeout=10)
     assert DB_ROWS == cnt
 
     for p in ins_pros:
@@ -97,7 +97,7 @@ def test_ct_broker_stop(xsetup, xjdbc, xprofile, xkfssh, xhash):
     restart_kafka_and_connect(xprofile, xkfssh, xhash, False)
 
     # 카프카 토픽 확인 (timeout 되기 전에 다 받아야 함)
-    cnt = count_topic_message(xkfssh, f'{xprofile}-person', timeout=10)
+    cnt = count_topic_message(xprofile, f'{xprofile}-person', timeout=10)
     assert DB_ROWS == cnt
 
     for p in ins_pros:
@@ -140,7 +140,7 @@ def test_ct_broker_kill(xsetup, xjdbc, xprofile, xkfssh):
     start_kafka_broker(xkfssh)
 
     # 카프카 토픽 확인 (timeout 되기 전에 다 받아야 함)
-    cnt = count_topic_message(xkfssh, f'{xprofile}-person', timeout=20)
+    cnt = count_topic_message(xprofile, f'{xprofile}-person', timeout=20)
     # 브로커만 강제 Kill 된 경우, 커넥터가 offset 을 flush 하지 못해 다시 시도
     # -> 중복 메시지 발생 가능!
     assert DB_ROWS <= cnt
@@ -184,7 +184,7 @@ def test_ct_broker_vmstop(xsetup, xjdbc, xprofile, xkfssh):
     # Reboot 후 ssh 객체 재생성 필요!
     kfssh = get_kafka_ssh(xprofile)
     # 카프카 토픽 확인 (timeout 되기 전에 다 받아야 함)
-    cnt = count_topic_message(kfssh, f'{xprofile}-person', timeout=20)
+    cnt = count_topic_message(xprofile, f'{xprofile}-person', timeout=20)
     assert DB_ROWS == cnt
 
     for p in ins_pros:
@@ -250,7 +250,7 @@ def test_ct_remote_basic(xcp_setup, xjdbc, xprofile, xkfssh):
         p.start()
 
     # 카프카 토픽 확인 (timeout 되기전에 다 받아야 함)
-    cnt = count_topic_message(xkfssh, f'{xprofile}-person', timeout=10)
+    cnt = count_topic_message(xprofile, f'{xprofile}-person', timeout=10)
     assert DB_ROWS == cnt
 
     for p in ins_pros:
@@ -287,7 +287,7 @@ def test_cdc_remote_basic(xcp_setup, xdbzm, xprofile, xkfssh, xtable):
         p.start()
 
     # 카프카 토픽 확인 (timeout 되기전에 다 받아야 함)
-    cnt = count_topic_message(xkfssh, f'db1.dbo.person', timeout=10)
+    cnt = count_topic_message(xprofile, f'db1.dbo.person', timeout=10)
     assert DB_ROWS == cnt
 
     for p in ins_pros:
@@ -538,12 +538,12 @@ def test_ct_query(xcp_setup, xjdbc, xtable, xprofile, xkfssh):
     linfo("All insert processes are done.")
 
     # 카프카 토픽 확인 (timeout 되기전에 다 받아야 함)
-    cnt = count_topic_message(xkfssh, f'{xprofile}-person', timeout=10)
+    cnt = count_topic_message(xprofile, f'{xprofile}-person', timeout=10)
     assert num_msg == cnt
 
 # 대상 날짜 (3개월 = 2022-06-01 부터 2022-08-31 까지)
 # ctm_dates = pd.date_range(start='20220601', end='20220831')
-ctm_dates = pd.date_range(start='20220801', end='20220831')
+ctm_dates = pd.date_range(start='20220801', end='20220803')
 # 대상 테이블명
 ctm_tables = [dt.strftime('person_%Y%m%d') for dt in ctm_dates]
 # 대상 토픽명
@@ -580,7 +580,7 @@ def test_ct_multitable(xcp_setup, xjdbc, xtable, xprofile, xtopic, xkfssh):
     # table_chunks = chunks(ctm_tables, 10)
 
     num_epoch = 2
-    num_batch = 10000
+    num_batch = 1000
     num_rows = num_epoch * num_batch
 
     # 인서트
@@ -627,51 +627,7 @@ def test_ct_multitable(xcp_setup, xjdbc, xtable, xprofile, xtopic, xkfssh):
     ssh_exec(xkfssh, "sudo service kafka-connect start")
 
     # 모든 토픽의 메시지 수 확인
-    cnt_procs = []
-    cnt_qs = []
-    for pid, topic in enumerate(ctm_topics):
-        q = Queue()
-        p = Process(target=local_consume_proc, args=(xprofile, pid, q, topic, 20))
-        cnt_procs.append(p)
-        cnt_qs.append(q)
-        p.start()
-
-    total = 0
-    for i, p in enumerate(cnt_procs):
-        cnt = cnt_qs[i].get()
-        print(f'cnt_proc {i} cnt {cnt}')
-        total += cnt
-        p.join()
-
-    tot = num_rows * len(ctm_topics)
-    if tot != total:
-        linfo(f"#1 tot {tot} != total {total}")
-    else:
-        linfo(f"#1 tot {tot} == total {total}")
-
-    # 모든 토픽의 메시지 수 확인 #2
-    cnt_procs = []
-    cnt_qs = []
-    for pid, topic in enumerate(ctm_topics):
-        q = Queue()
-        p = Process(target=local_consume_proc, args=(xprofile, pid, q, topic, 20))
-        cnt_procs.append(p)
-        cnt_qs.append(q)
-        p.start()
-
-    total = 0
-    for i, p in enumerate(cnt_procs):
-        cnt = cnt_qs[i].get()
-        print(f'cnt_proc {i} cnt {cnt}')
-        total += cnt
-        p.join()
-
-    tot = num_rows * len(ctm_topics)
-    if tot != total:
-        linfo(f"#2 tot {tot} != total {total}")
-    else:
-        linfo(f"#2 tot {tot} == total {total}")
-
+    total = count_topic_message(xprofile, f'{xprofile}-person')
     assert num_rows * len(ctm_topics) == total
 
     input("\n=== Press enter key to insert new data ===\n")

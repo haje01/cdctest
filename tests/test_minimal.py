@@ -57,7 +57,7 @@ def test_remote_basic(xprofile, xsetup, xcp_setup, xtopic, xkfssh):
         pro_pros.append(p)
 
     # 카프카 토픽 확인 (timeout 되기전에 다 받아야 함)
-    cnt = count_topic_message(xkfssh, xtopic, timeout=10)
+    cnt = count_topic_message(xprofile, xtopic, timeout=10)
     for p in pro_pros:
         p.join()
 

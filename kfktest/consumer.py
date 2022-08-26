@@ -8,7 +8,7 @@ from collections import defaultdict
 from kafka import KafkaConsumer
 
 from kfktest.util import load_setup, linfo, DB_PRE_ROWS, DB_ROWS, \
-    count_msg_from_topics, SSH
+    count_topic_message, SSH
 
 # CLI 용 파서
 parser = argparse.ArgumentParser(description="프로파일에 맞는 토픽 컨슘.",
@@ -48,14 +48,10 @@ def consume(profile,
     broker_addr = setup[ip_key]['value']
     broker_port = 19092 if dev else 9092
     if count_only:
-        topics = topic.split(',')
-        if len(topics) > 1:
-            # count only 모드에서 토픽이 여럿이면 Kafka 의 GetOffsetShell 이용
-            ssh = SSH(broker_addr)
-            total = count_msg_from_topics(ssh, topics)
-            linfo(f"[v] consume {topics} with {total} messages.")
-            return
-        from_begin = True
+        ssh = SSH(broker_addr)
+        total = count_topic_message(profile, topic, True, timeout)
+        linfo(f"[v] consume {topic} with {total} messages.")
+        return
 
     consumer = KafkaConsumer(topic,
                     group_id=f'my-group-{profile}',
