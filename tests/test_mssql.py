@@ -15,7 +15,7 @@ from kfktest.util import (count_topic_message, get_kafka_ssh,
     restart_kafka_and_connect, stop_kafka_and_connect, count_table_row,
     local_select_proc, local_insert_proc, linfo, NUM_INS_PROCS, NUM_SEL_PROCS,
     remote_insert_proc, remote_select_proc, DB_ROWS, load_setup, insert_fake,
-    local_consume_proc, ssh_exec, inserter_kill_processes,
+    db_concur,
     # 픽스쳐들
     xsetup, xcp_setup, xjdbc, xtable, xkafka, xzookeeper, xkvmstart,
     xconn, xkfssh, xdbzm, xrmcons, xcdc, xhash, xtopic
@@ -541,96 +541,46 @@ def test_ct_query(xcp_setup, xjdbc, xtable, xprofile, xkfssh):
     cnt = count_topic_message(xprofile, f'{xprofile}-person', timeout=10)
     assert num_msg == cnt
 
-# 대상 날짜 (3개월 = 2022-06-01 부터 2022-08-31 까지)
-# ctm_dates = pd.date_range(start='20220601', end='20220831')
-ctm_dates = pd.date_range(start='20220801', end='20220803')
+# 대상 날짜는 Snakemake batch_fake 에서 만든 테이블의 그것과 일치해야 한다!
+ctm_dates = pd.date_range(start='20220801', end='20220831')
 # 대상 테이블명
 ctm_tables = [dt.strftime('person_%Y%m%d') for dt in ctm_dates]
 # 대상 토픽명
 ctm_topics = [f'mssql-{t}' for t in ctm_tables]
-@pytest.mark.parametrize('xtable', [{'tables': ctm_tables}], indirect=True)
-# 대상 DB 내 모든 테이블을 대상으로 하도록 커넥터에는 테이블 정보를 주지 않음
 @pytest.mark.parametrize('xjdbc', [{'inc_col': 'id', 'tasks': 1}],indirect=True)
 # 테이블명에 해당하는 토픽 리셋
 @pytest.mark.parametrize('xtopic', [{'topics': ctm_topics}], indirect=True)
+@pytest.mark.parametrize('xtable', [{'skip': True}], indirect=True)
 def test_ct_multitable(xcp_setup, xjdbc, xtable, xprofile, xtopic, xkfssh):
     """여러 테이블을 대상으로 할 때 퍼포먼스 테스트.
 
+    다음과 같은 목적:
     - 주기적으로 로테이션되는 테이블은 타겟 설정이 곤란
     - 이 경우 whitelist 없이 DB 를 타겟으로 해두면 생성되는 모든 테이블이 타겟
     - 이렇게 하면 잦은 설정 변경이나 query 없이 로테이션에 대응되나,
       많은 테이블이 대상이 되면 퍼포먼스 확인 필요
 
-    퍼포먼스 확인
-    - 필요한 개수가 되도록 일별 대상 테이블 날짜 범위 지정
-    - 테스트 실행 초기 토픽 리셋 및 더미 데이터 인서트 단계에서 시간이 많이 걸림!
-    - 인서트가 끝나고 커넥터가 테이블을 다 가져온 후,
-    - 아이들 상태에서 DB 장비의 CPU 부하를 모니터링
+    퍼포먼스 확인:
+    - 필요한 개수가 되도록 일별 대상 테이블을 snakemake 의 batch_fake 로 만들어 둠
+    - 테스트 실행 초기 모든 테이블에 대해 커넥터가 가져올 때 부하가 많이 걸릴 것
+    - 초기 데이터 가져오기가 끝난 후 DB 장비의 CPU 부하를 모니터링
+    - 키를 눌러 추가 데이터 가져오기 확인
+
+    실행 조건:
+    - 가짜 데이터 테이블들을 snakemake 의 batch_fake 로 미리 만둘어 두어야 함.
 
     """
-    # DB 에 더미 데이터를 넣는 동안 Kafka Connector 잠시 중단
-    ssh_exec(xkfssh, "sudo service kafka-connect stop")
 
-    # def chunks(lst, n):
-    #     """Yield successive n-sized chunks from lst."""
-    #     for i in range(0, len(lst), n):
-    #         yield lst[i:i + n]
+    # 시작하자 마자 Connect 동작 -> DB 장비의 상태를 확인
 
-    # Insert 부하를 줄이기 위해 대상 테이블 10개 단위로 쪼개기 (DB 커넥션 수도 문제?)
-    # table_chunks = chunks(ctm_tables, 10)
-
-    num_epoch = 2
-    num_batch = 1000
-    num_rows = num_epoch * num_batch
-
-    # 인서트
-    def insert(remote, tables):
-        if remote:
-            # 원격 insert 는 모든 테이블명을 건내주어 그곳에서 병렬처리
-            tables = ','.join(tables)
-            ret = remote_insert_proc(xprofile, xcp_setup, 1, num_epoch, num_batch,
-                                    False, tables, 60)
-        else:
-            # 로컬 insert 는 프로세스 여럿 이용
-            ins_pros = []
-            for pid, table in enumerate(tables):
-                p = Process(target=local_insert_proc, args=(xprofile, pid, num_epoch,
-                            num_batch, False, table))
-                ins_pros.append(p)
-                p.start()
-            for p in ins_pros:
-                p.join()
-
-    # 원격 Insert 여부
-    insert_remote = True
-    # 프로세스당 10만 행의 경우 인서트에 걸린 시간
-    #   로컬 : 약 1058 Rows Per Seconds
-    #   원격 : 약 3000 Rows Per Seconds
-
-    # 원격 insert 의 경우 기존에 종료되지 않은 프로세스가 있으면 중단
-    if insert_remote:
-        inserter_kill_processes(xprofile, xcp_setup, 'python3 -m kfktest.inserter mssql.*')
-
-    st = time.time()
-    #
-    # Insert 시작
-    #
-    insert(insert_remote, ctm_tables)
-
-    elapsed = time.time() - st
-    linfo(f"All insert processes are done in {elapsed:.2f} sec.")
-    linfo(f"Average speed {(num_rows * len(ctm_tables)) / elapsed:.1f} RPS.")
-
-    input("\n=== Press Enter key to start consume ===\n")
-
-    # Kafka Connector 시작
-    ssh_exec(xkfssh, "sudo service kafka-connect start")
+    input("\n=== Press Enter key to check topic messages ===\n")
 
     # 모든 토픽의 메시지 수 확인
-    total = count_topic_message(xprofile, f'{xprofile}-person')
-    assert num_rows * len(ctm_topics) == total
+    total = count_topic_message(xprofile, ','.join(ctm_topics))
+    assert 100000 * len(ctm_topics) == total
 
     input("\n=== Press enter key to insert new data ===\n")
 
+    conn, cursor = db_concur('mssql')
     # 최근 날짜에 새 데이터 인서트하며 DB 상태 확인
-    insert(insert_remote, [ctm_tables[-1]])
+    insert_fake(conn, cursor, 1, 10000, 1, 'mssql', table=ctm_tables[-1])

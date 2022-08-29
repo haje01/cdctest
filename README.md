@@ -65,13 +65,46 @@ terraform init
 `snakemake -f temp/mysql/setup.json -j` 로 인프라를 생성하고
 `snakemake -f temp/mysql/destroy -j` 로 인프라 삭제한다
 
-### 테스트 방법
+### 기본 테스트 방법
 
 `kfktest/tests` 디렉토리로 이동 후, 원하는 프로파일의 테스트를 수행한다. 예를 들어 `mssql` 프로파일 테스트는
 
 `pytest test_mssql.py`
 
 와 같이 한다.
+
+### DB 일별 로테이션 테이블 테스트
+
+`login_20220801` 식으로 일단위로 로테이션되는 테이블을 테스트하기 위해서는 먼저 Snakemake 를 통해 가짜 테이블들을 생성해 주어야 한다.
+
+예를 들어 아래와 같이 수행하면
+```
+snakemake -f temp/mssql/batch_fake --config start=20220801 --end=20220831
+```
+대상 DB 에 person_20220801, person_20220802, ... , person_20220830, person_20220831 로 일별 테이블이 만들어 진다.
+
+이것을 이용하는 테스트 (예: `test_ct_multitable` ) 에서 pytest 패러미터를 아래와 같이 수정하고
+
+```python
+# 대상 날짜는 Snakemake batch_fake 에서 만든 테이블의 그것과 일치해야 한다!
+ctm_dates = pd.date_range(start='20220801', end='20220831')
+# 대상 테이블명
+ctm_tables = [dt.strftime('person_%Y%m%d') for dt in ctm_dates]
+# 대상 토픽명
+ctm_topics = [f'mssql-{t}' for t in ctm_tables]
+@pytest.mark.parametrize('xjdbc', [{'inc_col': 'id', 'tasks': 1}],indirect=True)
+# 테이블명에 해당하는 토픽 리셋
+@pytest.mark.parametrize('xtopic', [{'topics': ctm_topics}], indirect=True)
+@pytest.mark.parametrize('xtable', [{'skip': True}], indirect=True)
+def test_ct_multitable(xcp_setup, xjdbc, xtable, xprofile, xtopic, xkfssh):
+    ...
+```
+
+`tests/` 디렉토리로 가서 아래처럼 테스트를 수행하면 된다.
+
+```
+pytest test_mssql.py::test_ct_multitable -s
+```
 
 ### 주의할 점
 - 테스트 종료 후에는 꼭 `snakemake -f temp/{profile}/destroy -j` 를 호출해 필요 없게된 인프라를 제거 한다.

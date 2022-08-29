@@ -195,48 +195,48 @@ def test_ct_broker_vmstop(xsetup, xjdbc, xkfssh, xprofile):
     linfo("All select processes are done.")
 
 
-@pytest.mark.skip(reason="시간이 많이 걸림.")
-def test_ct_broker_hibernate(xsetup, xjdbc, xkfssh, xprofile):
-    """카프카 브로커 VM Hibernate 시 Change Tracking 테스트.
+# @pytest.mark.skip(reason="시간이 많이 걸림.")
+# def test_ct_broker_hibernate(xsetup, xjdbc, xkfssh, xprofile):
+#     """카프카 브로커 VM Hibernate 시 Change Tracking 테스트.
 
-    Insert / Select 시작 후 브로커 Hibernate 후 재개해도 메시지 수가 일치.
+#     Insert / Select 시작 후 브로커 Hibernate 후 재개해도 메시지 수가 일치.
 
-    """
-    # Selector 프로세스들 시작
-    sel_pros = []
-    for pid in range(1, NUM_SEL_PROCS + 1):
-        # select 프로세스
-        p = Process(target=local_select_proc, args=(xprofile, pid,))
-        sel_pros.append(p)
-        p.start()
+#     """
+#     # Selector 프로세스들 시작
+#     sel_pros = []
+#     for pid in range(1, NUM_SEL_PROCS + 1):
+#         # select 프로세스
+#         p = Process(target=local_select_proc, args=(xprofile, pid,))
+#         sel_pros.append(p)
+#         p.start()
 
-    # Insert 프로세스들 시작
-    ins_pros = []
-    for pid in range(1, NUM_INS_PROCS + 1):
-        # insert 프로세스
-        p = Process(target=local_insert_proc, args=(xprofile, pid))
-        ins_pros.append(p)
-        p.start()
+#     # Insert 프로세스들 시작
+#     ins_pros = []
+#     for pid in range(1, NUM_INS_PROCS + 1):
+#         # insert 프로세스
+#         p = Process(target=local_insert_proc, args=(xprofile, pid))
+#         ins_pros.append(p)
+#         p.start()
 
-    # 잠시 후 카프카 브로커 VM 정지 + 재시작
-    vm_hibernate(xprofile, 'kafka')
-    linfo("=== wait for a while ===")
-    time.sleep(5)
-    vm_start(xprofile, 'kafka')
+#     # 잠시 후 카프카 브로커 VM 정지 + 재시작
+#     vm_hibernate(xprofile, 'kafka')
+#     linfo("=== wait for a while ===")
+#     time.sleep(5)
+#     vm_start(xprofile, 'kafka')
 
-    # reboot 후 ssh 객체 재생성 필요!
-    kfssh = get_kafka_ssh(xprofile)
-    # 카프카 토픽 확인 (timeout 되기 전에 다 받아야 함)
-    cnt = count_topic_message(xprofile, f'{xprofile}-person', timeout=10)
-    assert DB_ROWS + DB_PRE_ROWS == cnt
+#     # reboot 후 ssh 객체 재생성 필요!
+#     kfssh = get_kafka_ssh(xprofile)
+#     # 카프카 토픽 확인 (timeout 되기 전에 다 받아야 함)
+#     cnt = count_topic_message(xprofile, f'{xprofile}-person', timeout=10)
+#     assert DB_ROWS + DB_PRE_ROWS == cnt
 
-    for p in ins_pros:
-        p.join()
-    linfo("All insert processes are done.")
+#     for p in ins_pros:
+#         p.join()
+#     linfo("All insert processes are done.")
 
-    for p in sel_pros:
-        p.join()
-    linfo("All select processes are done.")
+#     for p in sel_pros:
+#         p.join()
+#     linfo("All select processes are done.")
 
 
 def test_db(xcp_setup, xprofile, xkfssh, xtable):

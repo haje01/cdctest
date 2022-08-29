@@ -28,7 +28,6 @@ parser.add_argument('-f', '--fields', type=str, default=None, help="일치하는
 parser.add_argument('--field-types', type=str, default=None, help="일치하는 필드별 표시 타입 (',' 로 구분).")
 
 
-
 def consume(profile,
         timeout=parser.get_default('timeout'),
         auto_commit=parser.get_default('auto_commit'),
@@ -52,6 +51,8 @@ def consume(profile,
         total = count_topic_message(profile, topic, True, timeout)
         linfo(f"[v] consume {topic} with {total} messages.")
         return
+    else:
+        assert ',' not in topic
 
     consumer = KafkaConsumer(topic,
                     group_id=f'my-group-{profile}',

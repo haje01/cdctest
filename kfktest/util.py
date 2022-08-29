@@ -4,11 +4,13 @@
 
 """
 from cgitb import enable
+import random
 import os
 import json
 from json import JSONDecodeError
 import re
 from datetime import datetime
+from dateutil.parser import parse as parse_dt
 import time
 import binascii
 import subprocess
@@ -22,6 +24,7 @@ import paramiko
 import boto3
 import pytest
 from retry import retry
+import pandas as pd
 
 # Insert / Select 프로세스 수
 NUM_INS_PROCS = 10  # 10 초과이면 sshd 세션수 문제(?)로 Insert가 안되는 문제 발생
@@ -121,6 +124,12 @@ def insert_fake(conn, cursor, epoch, batch, pid, profile, table='person'):
     linfo(f"[v] insert_fake {epoch} {batch} {table}")
 
 
+def insert_fake_tmp(profile, epoch, batch):
+    """임시 테이블에 가짜 데이터 인서트."""
+    con, cur = db_concur(profile)
+    insert_fake(con, cur, epoch, batch, 1, profile, 'fake_tmp')
+
+
 @retry(RuntimeError, tries=10, delay=3)
 def SSH(host, name=None):
     """Paramiko SSH 접속 생성."""
@@ -132,7 +141,7 @@ def SSH(host, name=None):
     pkey = paramiko.RSAKey.from_private_key_file(ssh_pkey)
     try:
         ssh.connect(host, username='ubuntu', pkey=pkey)
-    except paramiko.ssh_exception.NoValidConnectionsError as e:
+    except (paramiko.ssh_exception.NoValidConnectionsError, paramiko.ssh_exception.SSHException) as e:
         raise RuntimeError(f"Can not connect to {host}")
     linfo(f"[v] ssh connect {name}")
     return ssh
@@ -384,6 +393,7 @@ def count_topic_message(profile, topic, from_begin=True, timeout=10):
 
     """
     linfo(f"[ ] count_topic_message - topic: {topic}, timeout: {timeout}")
+    assert type(topic) is str
     setup = load_setup(profile)
     kfk_ip = setup['kafka_public_ip']['value']
     topics = topic.split(',')
@@ -404,19 +414,21 @@ def count_topic_message(profile, topic, from_begin=True, timeout=10):
         p.join()
 
     linfo(f"[v] count_topic_message - topic: {topic}, timeout: {timeout}")
-    return cnt
+    return total
 
 
 def _count_topic_message(kfk_ip, topic, q, from_begin=True, timeout=10):
-    linfo(f"[ ] _count_topic_message {kfk_ip} {topic}")
+    time.sleep(random.random() * 10)
+    linfo(f"[ ] _count_topic_message - topic: {topic}")
     cmd = f'''kafka-console-consumer.sh --bootstrap-server localhost:9092 --topic {topic} --timeout-ms {timeout * 1000}'''
     kfk_ssh = SSH(kfk_ip)
+
     # 타임아웃까지 기다림
     ssh_exec(kfk_ssh, cmd)
     if from_begin:
         cmd = f"""kafka-run-class.sh kafka.tools.GetOffsetShell --bootstrap-server=localhost:9092 --topic {topic} | awk -F ':' '{{sum += $3}} END {{print sum}}'"""
         ret = ssh_exec(kfk_ssh, cmd)
-        print(topic, ret)
+        linfo(f"topic {topic} {ret.strip()}")
         cnt = int(ret.strip())
         q.put(cnt)
     else:
@@ -428,7 +440,7 @@ def _count_topic_message(kfk_ip, topic, q, from_begin=True, timeout=10):
             cnt = int(match.groups()[0])
         else:
             raise Exception(f"Not matching result: {msg}")
-    linfo(f"[v] _count_topic_message {kfk_ip} {topic}")
+    linfo(f"[v] _count_topic_message - topic: {topic}")
     return cnt
 
 
@@ -509,7 +521,7 @@ def register_jdbc(kfk_ssh, profile, db_addr, db_port, db_user, db_passwd,
             data['table.whitelist'] = tables
         else:
             if profile == 'mssql':
-                data['table.blacklist'] = 'sys.trace_xe_event_map'
+                data['table.blacklist'] = 'trace_xe_event_map,trace_xe_action_map,fake_tmp'
         data['topic.prefix'] = topic_prefix
         data['catalog.pattern'] = 'test'
     else:
@@ -1010,17 +1022,24 @@ def remote_insert_proc(profile, setup, pid, epoch=DB_EPOCH, batch=DB_BATCH,
 
 def inserter_kill_processes(profile, setup, cmd_ptrn):
     """원격 인서트 장비에서 명령 패턴으로 프로세스들 제거."""
-    linfo(f"[ ] remote deleter insert")
+    linfo(f"[ ] inserter_kill_processes")
     ins_ip = setup['inserter_public_ip']['value']
     ssh = SSH(ins_ip, 'delete')
     cmd = f'pkill -f "{cmd_ptrn}"'
     ret = ssh_exec(ssh, cmd, False)
+    linfo(f"[v] inserter_kill_processes")
     return ret
 
 
-@pytest.fixture(params=[{'pre_epoch': 0, 'pre_batch': 0, 'fix_regdt': None, 'tables': ['person']}])
+@pytest.fixture(params=[
+        {
+        'pre_epoch': 0, 'pre_batch': 0, 'fix_regdt': None, 'tables': ['person'],
+        'skip': False
+        }])
 def xtable(xprofile, xkafka, request):
     """테스트용 테이블 초기화."""
+    if request.param['skip']:
+        yield
     from kfktest.table import drop_all_tables
 
     linfo("xtable")
@@ -1387,3 +1406,22 @@ COMMIT;
     cursor.execute(sql)
     linfo(f"[v] disable_cdc for {cap_inst}")
 
+
+def batch_fake_data(profile, start, end):
+    """임시 가짜 테이블을 복사해 일별 테이블 생성.
+
+    - fake_tmp 테이블이 생성되어 있어야 함.
+
+    """
+    start = parse_dt(str(start))
+    end = parse_dt(str(end))
+    tables = [dt.strftime('person_%Y%m%d') for dt in pd.date_range(start, end)]
+    conn, cursor = db_concur(profile)
+    for table in tables:
+        sql = f'''
+            DROP TABLE IF EXISTS {table};
+            SELECT * INTO {table}
+            FROM fake_tmp
+        '''
+        cursor.execute(sql)
+        conn.commit()

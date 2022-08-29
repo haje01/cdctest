@@ -112,11 +112,11 @@ resource "aws_instance" "kafka" {
   key_name = var.key_pair_name
 
   root_block_device {
-    encrypted = true  # Hibernate 테스트용
-    volume_size = 20
+    # encrypted = true  # Hibernate 테스트용
+    volume_size = 100
   }
 
-  hibernation = true
+  # hibernation = true
 
   tags = merge(
     {
@@ -169,6 +169,8 @@ kjc_dir=$(basename $kjc_file .zip)
 
 sudo apt update
 sudo sed -i 's/#$nrconf{restart} = '"'"'i'"'"';/$nrconf{restart} = '"'"'a'"'"';/g' /etc/needrestart/needrestart.conf
+sudo sed -i 's/#MaxSessions 10/MaxSessions 200/g' /etc/ssh/sshd_config
+sudo service sshd restart
 sudo apt install -y unzip
 # Kafka 설치
 sudo apt install -y openjdk-8-jdk

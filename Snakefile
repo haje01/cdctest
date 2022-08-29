@@ -1,5 +1,9 @@
 from glob import glob
 
+from kfktest.util import insert_fake_tmp, batch_fake_data
+from kfktest.table import reset_table, drop_all_tables
+
+
 rule setup:
     """프로파일 인프라 설치."""
     output: "temp/{profile}/setup.json"
@@ -23,6 +27,51 @@ rule destroy:
         rm -f temp/{wildcards.profile}/setup.json
         touch {output}
         """
+
+
+rule reset_fake_tmp:
+    """가짜 데이터용 임시 DB 테이블 초기화.
+
+    이미 있을 때는 생략.
+
+    """
+    output:
+        "temp/{profile}/reset_fake_tmp"
+    run:
+        profile = wildcards.profile
+        drop_all_tables(profile)
+        reset_table(profile, 'fake_tmp')
+        shell('touch {output}')
+
+
+rule insert_fake_tmp:
+    """DB의 임시 테이블에 가짜 데이터 인서트."""
+    input:
+        "temp/{profile}/reset_fake_tmp"
+    output:
+        "temp/{profile}/insert_fake_tmp"
+    run:
+        insert_fake_tmp(wildcards.profile, 10, 10000)
+        shell('touch {output}')
+
+
+rule batch_fake:
+    """임시 가짜 테이블에서 일별 가짜 테이블 배치로 생성.
+
+    - insert_fake_tmp 를 통해 fake_tmp 테이블이 만들어져 있어야 함
+    - 시작/종료일 명시
+    - 출력 파일은 대상 기간 식별 불가하기에 -f 옵션을 주어 빌드
+    - 예:
+      `$ snakemake --config start=20200810 end=20200831 -f temp/batch_fake -j`
+
+    """
+    input:
+        "temp/{profile}/insert_fake_tmp"
+    output:
+        "temp/{profile}/batch_fake"
+    run:
+        batch_fake_data(wildcards.profile, config['start'], config['end'])
+        shell('touch {output}')
 
 
 rule test_db:
