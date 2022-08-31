@@ -160,6 +160,9 @@ def ssh_exec(ssh, cmd, kafka_env=True, stderr_type="stderr", ignore_err=False):
             - ignore: 무시
         ignore_err (bool): 에러가 있어도 무시
 
+    Return:
+        string: stdout
+
     """
     env = "source ~/.kenv && " if kafka_env else ""
     cmd = f'{env}{cmd}'
@@ -493,7 +496,8 @@ def register_jdbc(kfk_ssh, profile, db_addr, db_port, db_user, db_passwd,
 
     conn_name = f'jdbc-{profile}-{com_hash}'
     tables = params.get('tables', '')
-    inc_col, ts_col = params['inc_col'], params.get('ts_col')
+    inc_col = params.get('inc_col', 'id')
+    ts_col = params.get('ts_col', 'regdt')
     query = params.get('query')
     tasks = params.get('tasks', 1)
     linfo(f"[ ] register_jdbc {conn_name} {inc_col} {ts_col} {tables} {tasks}")
@@ -1185,6 +1189,10 @@ def xrmcons(xkfssh, xconn):
 def xhash():
     """공용 해쉬."""
     linfo("xhash")
+    _hash()
+
+
+def _hash():
     return binascii.hexlify(os.urandom(3)).decode('utf8')
 
 
@@ -1194,18 +1202,20 @@ def xhash():
     }])
 def xjdbc(xprofile, xrmcons, xkfssh, xtable, xtopic, xconn, xsetup, xhash, request):
     """CT용 JDBC 소스 커넥터 초기화 (테이블과 토픽 먼저 생성)."""
-    _xjdbc(xprofile, xsetup, xkfssh, xhash, request.param)
+    # 명시된 해쉬가 있으면 그것을 이용
+    chash = request.param.get('chash', xhash)
+    _xjdbc(xprofile, xsetup, xkfssh, chash, request.param)
     time.sleep(5)
     yield
 
 
-def _xjdbc(profile, setup, kfssh, com_hash, params):
+def _xjdbc(profile, setup, kfssh, chash, params):
     linfo("xjdbc")
     db_addr = setup[f'{profile}_private_ip']['value']
     db_user = setup['db_user']['value']
     db_passwd = setup['db_passwd']['value']['result']
     ret = register_jdbc(kfssh, profile, db_addr, DB_PORTS[profile],
-        db_user, db_passwd, "test", f"{profile}-", com_hash,
+        db_user, db_passwd, "test", f"{profile}-", chash,
         params=params)
     if 'error_code' in ret:
         raise RuntimeError(ret['message'])

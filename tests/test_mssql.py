@@ -1,4 +1,3 @@
-import pdb
 import time
 from multiprocessing import Process, Queue
 import json
@@ -15,7 +14,7 @@ from kfktest.util import (count_topic_message, get_kafka_ssh,
     restart_kafka_and_connect, stop_kafka_and_connect, count_table_row,
     local_select_proc, local_insert_proc, linfo, NUM_INS_PROCS, NUM_SEL_PROCS,
     remote_insert_proc, remote_select_proc, DB_ROWS, load_setup, insert_fake,
-    db_concur,
+    db_concur, _xjdbc, unregister_kconn, _hash, ssh_exec,
     # 픽스쳐들
     xsetup, xcp_setup, xjdbc, xtable, xkafka, xzookeeper, xkvmstart,
     xconn, xkfssh, xdbzm, xrmcons, xcdc, xhash, xtopic
@@ -584,3 +583,171 @@ def test_ct_multitable(xcp_setup, xjdbc, xtable, xprofile, xtopic, xkfssh):
     conn, cursor = db_concur('mssql')
     # 최근 날짜에 새 데이터 인서트하며 DB 상태 확인
     insert_fake(conn, cursor, 1, 10000, 1, 'mssql', table=ctm_tables[-1])
+
+
+CTR_MESSAGES = 130  # 2 번 로테이션에 충분한 메시지 수
+CTR_MAX_ROTATION = 2
+
+def ctr_insert_proc():
+    """130 초 동안 초당 1 번 insert."""
+    linfo(f"[ ] ctr_insert_proc")
+    conn, cursor = db_concur('mssql')
+
+    for i in range(CTR_MESSAGES):
+        # pid 를 메시지 ID 로 대용
+        insert_fake(conn, cursor, 1, 1, i, 'mssql', table='person')
+        time.sleep(1)
+    linfo(f"[v] ctr_insert_proc")
+
+
+def ctr_rotate_proc():
+    """분당 한 번 테이블 로테이션."""
+    linfo(f"[ ] ctr_rotate_proc")
+    conn, cursor = db_concur('mssql')
+    cnt = 0
+    prev = None
+    while True:
+        now = datetime.now()
+        this = now.strftime('%d%H%M')
+        # 분이 바뀌었으면 로테이션
+        if prev is not None and this != prev:
+            linfo(f"== rotate person to person_{prev} ==")
+            sql = f"""
+                exec sp_rename 'person', person_{prev};
+                CREATE TABLE person (
+                    id int IDENTITY(1,1) PRIMARY KEY,
+                    regdt DATETIME2 DEFAULT CURRENT_TIMESTAMP NOT NULL,
+                    pid INT NOT NULL,
+                    sid INT NOT NULL,
+                    name VARCHAR(40),
+                    address VARCHAR(200),
+                    ip VARCHAR(20),
+                    birth DATE,
+                    company VARCHAR(40),
+                    phone VARCHAR(40)
+                );
+            """
+            cursor.execute(sql)
+            conn.commit()
+            cnt += 1
+            # 최대 로테이션 수 체크
+            if cnt >= CTR_MAX_ROTATION:
+                break
+        prev = this
+        time.sleep(1)
+
+    linfo(f"[v] ctr_rotate_proc")
+
+ctr_query = '''
+    SELECT * FROM (
+        SELECT * FROM person
+        UNION ALL
+        SELECT * FROM person_{0}
+    ) AS T
+'''
+
+def ctr_register_proc(setup, param, prev_hash):
+    """분당 한 번 쿼리 변경후 등록."""
+    linfo(f"[ ] ctr_register_proc")
+    ssh = get_kafka_ssh('mssql')
+    prev = None
+    cnt = 0
+    while True:
+        now = datetime.now()
+        this = now.strftime('%d%H%M')
+        # 분이 바뀌었으면 쿼리 재등록
+        if prev is not None and this != prev:
+            # rotation 이 먼저 되어야 하기에 조금 늦게
+            time.sleep(3)
+            linfo(f"== register new query with person_{prev} ==")
+            # 새 커넥터 등록
+            new_hash = _hash()
+            param['query'] = ctr_query.format(prev)
+            _xjdbc('mssql', setup, ssh, new_hash, param)
+            # 기존 커넥터 제거
+            cname = f'jdbc-mssql-{prev_hash}'
+            unregister_kconn(ssh, cname)
+            prev_hash = new_hash
+            cnt += 1
+            # 최대 로테이션 수 체크
+            if cnt >= CTR_MAX_ROTATION:
+                break
+        prev = this
+        time.sleep(1)
+    linfo(f"[v] ctr_register_proc")
+
+ctr_now = datetime.now()
+ctr_prev = (ctr_now - timedelta(minutes=1)).strftime('%d%H%M')
+ctr_hash = _hash()
+ctr_param = {
+        'query': ctr_query.format(ctr_prev),
+        'query_topic': 'mssql-person',
+        'chash': ctr_hash,
+        'inc_col': 'id',
+        'ts_col': 'regdt'
+    }
+@pytest.mark.parametrize('xjdbc', [ctr_param], indirect=True)
+def test_ct_rotquery(xcp_setup, xjdbc, xtable, xprofile, xtopic, xkfssh):
+    """로테이션되는 테이블을 쿼리로 가져오기.
+
+    동기:
+    - MSSQL 에서 로테이션되는 테이블을 CT 방식으로 가져오는 경우
+    - 현재 테이블과 전 테이블을 가져오는 방식은 각각의 토픽이 되기에 문제
+      - 전 테이블의 모든 메시지를 다시 가져옴
+    - 쿼리 방식은 쿼리가 바뀌어도 하나의 토픽에 저장가능
+
+    테스트 구현:
+    - 이번 테이블과 전 테이블을 가져오는 쿼리 작성
+      - JDBC 커넥터가 이 쿼리에 가져온 ID 중복 체크용 WHERE 절을 추가하게 됨
+      - MSSQL 의 Dynamic SQL 을 이용하면 편리하나, 이경우 커넥터가 붙이는 WHERE 절과 맞지 않음
+    - 이 쿼리는 로테이션 간격마다 Cron Job 등으로 대상 테이블 변경
+    - 기본적으로 모든 메시지는 person 테이블에 추가되고,
+      - 로테이션된 테이블에 일부 가져오지 못한 짜투리 메시지 남을 가능성
+    - 로그 생성기는 별도 프로세스로 지속
+    - 또 다른 프로세스에서 샘플 로그 테이블 1분 간격으로 로테이션
+        예) 현재 11 일 0시 0분 1초인 경우
+        person (현재), person_102359 (전날 23시 59분까지 로테이션)
+    - 커넥터를 바꾸는 동안 잠시 두 개의 커넥터가 공존하게 되고 이때 메시지 중복이 생길 수 있다.
+      - At Least Once
+
+    """
+    # 시작시 이전 테이블이 초기 에러 방지를 위해 만들어 주기
+    reset_table('mssql', table=f'person_{ctr_prev}')
+
+    # insert 프로세스 시작
+    pi = Process(target=ctr_insert_proc)
+    pi.start()
+
+    # rotation 프로세스 시작
+    pr = Process(target=ctr_rotate_proc)
+    pr.start()
+
+    # register 프로세스 시작
+    pq = Process(target=ctr_register_proc, args=(xcp_setup, ctr_param, ctr_hash))
+    pq.start()
+
+    pi.join()
+    pr.join()
+    pq.join()
+
+    time.sleep(7)
+
+    # 토픽 메시지는 적어도 DB 행 수보다 크거나 같아야 한다 (At Least Once)
+    count = count_topic_message('mssql', 'mssql-person')
+    linfo(f"Orignal Messages: {CTR_MESSAGES}, Topic Messages: {count}")
+    assert count >= CTR_MESSAGES
+
+    # 빠진 ID 가 없는지 확인
+    cmd = "kafka-console-consumer.sh --bootstrap-server localhost:9092 --topic mssql-person --from-beginning --timeout-ms 3000"
+    ssh = get_kafka_ssh('mssql')
+    ret = ssh_exec(ssh, cmd)
+    pids = set()
+    for line in ret.split('\n'):
+        try:
+            data = json.loads(line)
+        except json.decoder.JSONDecodeError:
+            print(line)
+            continue
+        pid = data['payload']['pid']
+        pids.add(pid)
+    assert set(range(CTR_MESSAGES)) == pids
