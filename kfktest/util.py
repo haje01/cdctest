@@ -25,11 +25,15 @@ import boto3
 import pytest
 from retry import retry
 import pandas as pd
+import boto3
 
 # Insert / Select 프로세스 수
 NUM_INS_PROCS = 10  # 10 초과이면 sshd 세션수 문제(?)로 Insert가 안되는 문제 발생
                     # 10 일때 CT 에서 이따금씩(?) 1~4 개 정도 메시지 손실 발생
 NUM_SEL_PROCS = 4
+
+KFKTEST_S3_BUCKET = os.environ.get('KFKTEST_S3_BUCKET')
+KFKTEST_S3_DIR = os.environ.get('KFKTEST_S3_DIR')
 
 # 빠른 테스트를 위해서는 EPOCH 와 BATCH 수를 10 정도로 줄여 테스트
 
@@ -518,7 +522,15 @@ def register_jdbc(kfk_ssh, profile, db_addr, db_port, db_user, db_passwd,
         'mode': mode,
         'incrementing.column.name' : inc_col,
         'poll.interval.ms': poll_interval,
-        'tasks.max' : tasks
+        'tasks.max' : tasks,
+        "key.converter": "org.apache.kafka.connect.storage.StringConverter",
+        'value.converter': 'org.apache.kafka.connect.json.JsonConverter',
+        'value.converter.schemas.enable': False,
+        "transforms":"copyFieldToKey,extractKeyFromStruct",
+        "transforms.copyFieldToKey.type":"org.apache.kafka.connect.transforms.ValueToKey",
+        "transforms.copyFieldToKey.fields":"pid",
+        "transforms.extractKeyFromStruct.type":"org.apache.kafka.connect.transforms.ExtractField$Key",
+        "transforms.extractKeyFromStruct.field":"pid"
     }
     if query is None:
         if len(tables) > 0:
@@ -538,13 +550,68 @@ def register_jdbc(kfk_ssh, profile, db_addr, db_port, db_user, db_passwd,
         data['timestamp.column.name'] = ts_col
 
     config = json.dumps(data)
-    data = _register_connector(kfk_ssh, conn_name, config)
+    data = put_connector(kfk_ssh, conn_name, config)
     # 등록된 커넥터 상태 확인
     time.sleep(5)
     status = get_connector_status(kfk_ssh, conn_name)
     if status['tasks'][0]['state'] == 'FAILED':
         raise RuntimeError(status['tasks'][0]['trace'])
     linfo(f"[v] register_jdbc {conn_name} {inc_col} {ts_col} {tables} {tasks}")
+    return data
+
+
+@retry(RuntimeError, tries=6, delay=5)
+def register_s3sink(kfk_ssh, profile, topics, param):
+    """카프카 S3 Sink Connector 등록.
+
+    설정에 관한 참조:
+        https://data-engineer-tech.tistory.com/34
+        https://docs.confluent.io/kafka-connectors/s3-sink/current/overview.html
+
+    Args:
+        kfk_ssh: 카프카 노드로의 Paramiko SSH 객체
+        profile (str): 커넥션 URL 용 DBMS 타입. mysql 또는 mssql
+        topics (str): 대상 토픽
+        params (dict): 추가 인자들
+            s3_bucket (str): 올릴 S3 버킷
+            s3_dir (str): 올릴 S3 디렉토리
+            s3_region (str): 올릴 S3 리전
+            chash (str): 커넥터 이름 해쉬
+
+    """
+    chash = param.get('chash', _hash())
+    s3_bucket = param.get('s3_bucket', KFKTEST_S3_BUCKET)
+    s3_dir = param.get('s3_dir', KFKTEST_S3_DIR)
+    s3_region = param.get('s3_region', 'ap-northeast-2')
+    conn_name = f's3sink-{profile}-{chash}'
+    linfo(f"[ ] register_s3sink {conn_name}")
+    assert profile in ('mysql', 'mssql')
+
+    data = {
+        "name": conn_name,
+        "topics": topics,
+        "tasks.max": 1,
+        "connector.class": "io.confluent.connect.s3.S3SinkConnector",
+        "format.class": "io.confluent.connect.s3.format.json.JsonFormat",
+        "storage.class": "io.confluent.connect.s3.storage.S3Storage",
+        "flush.size": 1000,
+        "s3.bucket.name": s3_bucket,
+        "s3.region": s3_region,
+        "topics.dir": s3_dir,
+        "s3.compression.type": "gzip",
+        "locale": "ko_KR",
+        "timezone": "Asia/Seoul"
+    }
+
+    config = json.dumps(data)
+    cred = boto3.Session().get_credentials()
+    data = put_connector(kfk_ssh, conn_name, config, aws_vars=[cred.access_key, cred.secret_key])
+    # 등록된 커넥터 상태 확인
+    time.sleep(5)
+    status = get_connector_status(kfk_ssh, conn_name)
+    if status['tasks'][0]['state'] == 'FAILED':
+        raise RuntimeError(status['tasks'][0]['trace'])
+    linfo(f"[v] register_s3sink {conn_name}")
     return data
 
 
@@ -596,7 +663,7 @@ def register_dbzm(kfk_ssh, profile, svr_name, db_addr, db_port, db_name,
 
     config['connector.class'] = f"io.debezium.connector.{cls_name}"
 
-    data = _register_connector(kfk_ssh, conn_name, json.dumps(config))
+    data = put_connector(kfk_ssh, conn_name, json.dumps(config))
     # 등록된 커넥터 상태 확인
     time.sleep(5)
     status = get_connector_status(kfk_ssh, conn_name)
@@ -621,25 +688,37 @@ def get_connector_status(kfk_ssh, conn_name):
     return status
 
 
-def _register_connector(kfk_ssh, name, config, poll_interval=5000):
-    """공용 카프카 커넥터 등록.
+def put_connector(kfk_ssh, name, config, poll_interval=5000, aws_vars=None):
+    """공용 카프카 커넥터 설정
 
     Args:
         kfk_ssh: Kafka 노드 Paramiko SSH 객체
         name (str): 커넥터 이름
         config (str): 커넥터 설정
+            업데이트시는 갱신할 필드만 설정해도 됨
         poll_interval (int): ms 단위 폴링 간격. 기본값 5000
 
     """
     # curl 용 single-quote escape
     config = config.replace("'", r"'\''")
+
+    # AWS credential 필요한 경우
+    if aws_vars is not None:
+        cmd = f'''mkdir -p ~/.aws && cat <<EOT > ~/.aws/credentials
+[default]
+aws_access_key_id = {aws_vars[0]}
+aws_secret_access_key = {aws_vars[1]}
+EOT
+'''
+        ret = ssh_exec(kfk_ssh, cmd)
+        if 'error_code' in ret:
+            raise RuntimeError(ret)
+
+    # PUT 을 이용하면 새로 만들때나 갱신할 때 같은 코드를 쓸 수 있다.
     cmd = f'''
-curl -vs -X POST 'http://localhost:8083/connectors' \
+curl -vs -X PUT 'http://localhost:8083/connectors/{name}/config' \
     -H 'Content-Type: application/json' \
-    --data-raw '{{ \
-    "name" : "{name}", \
-    "config" : {config} \
-}}' '''
+    --data-raw '{config}' '''
 
     ret = ssh_exec(kfk_ssh, cmd)
     if 'error_code' in ret:
@@ -674,6 +753,30 @@ def list_kconn(kfk_ssh):
 
 
 @retry(RuntimeError, tries=6, delay=5)
+def pause_kconn(kfk_ssh, conn_name):
+    """카프카 커넥터 정지."""
+    linfo(f"[ ] pause_kconn {conn_name}")
+    cmd = f'''curl -X DELETE http://localhost:8083/connectors/{conn_name}/pause'''
+    try:
+        ssh_exec(kfk_ssh, cmd, ignore_err=True)
+    except json.decoder.JSONDecodeError as e:
+        raise RuntimeError(str(e))
+    linfo(f"[v] pause_kconn {conn_name}")
+
+
+@retry(RuntimeError, tries=6, delay=5)
+def restart_kconn(kfk_ssh, conn_name):
+    """카프카 커넥터 재개."""
+    linfo(f"[ ] restart_kconn {conn_name}")
+    cmd = f'''curl -X DELETE http://localhost:8083/connectors/{conn_name}/restart'''
+    try:
+        ssh_exec(kfk_ssh, cmd, ignore_err=True)
+    except json.decoder.JSONDecodeError as e:
+        raise RuntimeError(str(e))
+    linfo(f"[v] restart_kconn {conn_name}")
+
+
+@retry(RuntimeError, tries=6, delay=5)
 def unregister_kconn(kfk_ssh, conn_name):
     """카프카 커넥터 등록 해제.
 
@@ -683,6 +786,8 @@ def unregister_kconn(kfk_ssh, conn_name):
 
     """
     linfo(f"[ ] unregister_kconn {conn_name}")
+    # pause_kconn(kfk_ssh, conn_name)
+    # time.sleep(5)
     cmd = f'''curl -X DELETE http://localhost:8083/connectors/{conn_name}'''
     try:
         ssh_exec(kfk_ssh, cmd, ignore_err=True)
@@ -1219,6 +1324,13 @@ def _xjdbc(profile, setup, kfssh, chash, params):
         params=params)
     if 'error_code' in ret:
         raise RuntimeError(ret['message'])
+
+
+@pytest.fixture(params=[{}])
+def xs3sink(xprofile, xkfssh, xhash, request):
+    """S3 Sink Connector 등록."""
+    topics = f'{xprofile}-person'
+    register_s3sink(xkfssh, xprofile, topics, request.param)
 
 
 @pytest.fixture

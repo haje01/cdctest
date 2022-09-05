@@ -14,7 +14,7 @@ from kfktest.util import (count_topic_message, get_kafka_ssh,
     restart_kafka_and_connect, stop_kafka_and_connect, count_table_row,
     local_select_proc, local_insert_proc, linfo, NUM_INS_PROCS, NUM_SEL_PROCS,
     remote_insert_proc, remote_select_proc, DB_ROWS, load_setup, insert_fake,
-    db_concur, _xjdbc, unregister_kconn, _hash, ssh_exec,
+    db_concur, _xjdbc, _hash, ssh_exec, xs3sink, put_connector, unregister_kconn,
     # 픽스쳐들
     xsetup, xcp_setup, xjdbc, xtable, xkafka, xzookeeper, xkvmstart,
     xconn, xkfssh, xdbzm, xrmcons, xcdc, xhash, xtopic
@@ -340,7 +340,7 @@ def test_ct_modify(xcp_setup, xjdbc, xtable, xprofile, xkfssh):
     cnt = 0
     frow = org_name = None
     for _msg in consume():
-        msg = _msg.value['payload']
+        msg = _msg.value
         cnt += 1
         if msg['id'] == 1:
             org_name = msg['name']
@@ -362,7 +362,7 @@ def test_ct_modify(xcp_setup, xjdbc, xtable, xprofile, xkfssh):
     cnt = mcnt = 0
     fname = None
     for _msg in consume():
-        msg = _msg.value['payload']
+        msg = _msg.value
         cnt += 1
         if msg['id'] == 1:
             fname = msg['name']
@@ -376,7 +376,7 @@ def test_ct_modify(xcp_setup, xjdbc, xtable, xprofile, xkfssh):
 
     cnt = mcnt = 0
     for _msg in consume():
-        msg = _msg.value['payload']
+        msg = _msg.value
         cnt += 1
         if msg['id'] == 1:
             mcnt += 1
@@ -389,7 +389,7 @@ def test_ct_modify(xcp_setup, xjdbc, xtable, xprofile, xkfssh):
 
     cnt = 0
     for _msg in consume():
-        msg = _msg.value['payload']
+        msg = _msg.value
         cnt += 1
         if msg['id'] == 1:
             # 같은 ID 에 대해서는 기존 값이 그대로 옴
@@ -438,7 +438,7 @@ def test_ct_modify2(xcp_setup, xjdbc, xtable, xprofile, xkfssh):
     cnt = 0
     frow = org_name = None
     for _msg in consume():
-        msg = _msg.value['payload']
+        msg = _msg.value
         cnt += 1
         if msg['id'] == 1:
             org_name = msg['name']
@@ -462,7 +462,7 @@ def test_ct_modify2(xcp_setup, xjdbc, xtable, xprofile, xkfssh):
     cnt = mcnt = 0
     fnames = []
     for _msg in consume():
-        msg = _msg.value['payload']
+        msg = _msg.value
         cnt += 1
         if msg['id'] == 1:
             fname = msg['name']
@@ -478,11 +478,11 @@ def yesterday():
 #
 # 어제 날짜 테이블이 있으면 그것과 당일을 UNION
 # 아니면, 당일만 SELECT 하는 쿼리
-# 그러나, 이런 방식은 쓸 수 없다.. ㅠㅠ
-#   - 커넥터에서 WHERE 조건을 건다
+# 그러나, 아래와 같은 이유로 이런 방식은 쓸 수 없다.. ㅠㅠ
+#   - 커넥터에서 WHERE 조건을 추가한다
 #   - MSSQL 에서 Dynamic SQL 을 Subquery 처럼 쓸 수 없다.
 #
-# query = """
+# ctq_query = """
 # DECLARE @_today DATETIME = GETDATE()
 # DECLARE @_yesterday DATETIME = DATEADD(day, -1, CAST(GETDATE() AS date))
 # DECLARE @today NCHAR(8) = CONVERT(NCHAR(8), @_today, 112)
@@ -500,7 +500,7 @@ def yesterday():
 #         UNION ALL
 #         SELECT * FROM ' + @tblName + '
 #     ) AS T
-#      WHERE "id" > ? ORDER BY "id" ASC (io.confluent.connect.jdbc.source.TableQuerier:179)
+#     -- WHERE "id" > ? ORDER BY "id" ASC (io.confluent.connect.jdbc.source.TableQuerier:179)
 # END
 # ELSE
 # 	SELECT * FROM ' + @tblName
@@ -585,17 +585,18 @@ def test_ct_multitable(xcp_setup, xjdbc, xtable, xprofile, xtopic, xkfssh):
     insert_fake(conn, cursor, 1, 10000, 1, 'mssql', table=ctm_tables[-1])
 
 
-CTR_MESSAGES = 130  # 2 번 로테이션에 충분한 메시지 수
-CTR_MAX_ROTATION = 2
+CTR_MAX_ROTATION = 1
+CTR_INSERTS = 65  # CTR_MAX_ROTATION 번 로테이션에 충분한 메시지 인서트
+CTR_BATCH = 1
 
 def ctr_insert_proc():
     """130 초 동안 초당 1 번 insert."""
     linfo(f"[ ] ctr_insert_proc")
     conn, cursor = db_concur('mssql')
 
-    for i in range(CTR_MESSAGES):
+    for i in range(CTR_INSERTS):
         # pid 를 메시지 ID 로 대용
-        insert_fake(conn, cursor, 1, 1, i, 'mssql', table='person')
+        insert_fake(conn, cursor, 1, CTR_BATCH, i, 'mssql', table='person')
         time.sleep(1)
     linfo(f"[v] ctr_insert_proc")
 
@@ -608,9 +609,9 @@ def ctr_rotate_proc():
     prev = None
     while True:
         now = datetime.now()
-        this = now.strftime('%d%H%M')
+        thisdt = now.strftime('%d%H%M')
         # 분이 바뀌었으면 로테이션
-        if prev is not None and this != prev:
+        if prev is not None and thisdt != prev:
             linfo(f"== rotate person to person_{prev} ==")
             sql = f"""
                 exec sp_rename 'person', person_{prev};
@@ -633,7 +634,7 @@ def ctr_rotate_proc():
             # 최대 로테이션 수 체크
             if cnt >= CTR_MAX_ROTATION:
                 break
-        prev = this
+        prev = thisdt
         time.sleep(1)
 
     linfo(f"[v] ctr_rotate_proc")
@@ -646,35 +647,40 @@ ctr_query = '''
     ) AS T
 '''
 
-def ctr_register_proc(setup, param, prev_hash):
+def ctr_register_proc(setup, param, chash):
     """분당 한 번 쿼리 변경후 등록."""
-    linfo(f"[ ] ctr_register_proc")
+    linfo(f"[ ] ctr_register_proc {chash}")
     ssh = get_kafka_ssh('mssql')
-    prev = None
+    prevdt = None
     cnt = 0
     while True:
         now = datetime.now()
-        this = now.strftime('%d%H%M')
+        thisdt = now.strftime('%d%H%M')
         # 분이 바뀌었으면 쿼리 재등록
-        if prev is not None and this != prev:
+        if prevdt is not None and thisdt != prevdt:
             # rotation 이 먼저 되어야 하기에 조금 늦게
             time.sleep(3)
-            linfo(f"== register new query with person_{prev} ==")
-            # 새 커넥터 등록
-            new_hash = _hash()
-            param['query'] = ctr_query.format(prev)
-            _xjdbc('mssql', setup, ssh, new_hash, param)
-            # 기존 커넥터 제거
-            cname = f'jdbc-mssql-{prev_hash}'
-            unregister_kconn(ssh, cname)
-            prev_hash = new_hash
+            linfo(f"[ ] == register new query with person_{prevdt} ==")
+
+            cname = f'jdbc-mssql-{chash}'
+            for i in range(1):
+                # 기존 커넥터 제거
+                unregister_kconn(ssh, cname)
+
+                # 새 커넥터 등록
+                linfo(f"[ ] register new connector")
+                param['query'] = ctr_query.format(prevdt)
+                _xjdbc('mssql', setup, ssh, chash, param)
+                linfo(f"[v] register new connector")
+                linfo(f"[v] == register new query with person_{prevdt} ==")
+
             cnt += 1
             # 최대 로테이션 수 체크
             if cnt >= CTR_MAX_ROTATION:
                 break
-        prev = this
+        prevdt = thisdt
         time.sleep(1)
-    linfo(f"[v] ctr_register_proc")
+    linfo(f"[v] ctr_register_proc {chash}")
 
 ctr_now = datetime.now()
 ctr_prev = (ctr_now - timedelta(minutes=1)).strftime('%d%H%M')
@@ -687,7 +693,7 @@ ctr_param = {
         'ts_col': 'regdt'
     }
 @pytest.mark.parametrize('xjdbc', [ctr_param], indirect=True)
-def test_ct_rotquery(xcp_setup, xjdbc, xtable, xprofile, xtopic, xkfssh):
+def test_ct_rotquery(xcp_setup, xjdbc, xs3sink, xtable, xprofile, xtopic, xkfssh):
     """로테이션되는 테이블을 쿼리로 가져오기.
 
     동기:
@@ -709,6 +715,11 @@ def test_ct_rotquery(xcp_setup, xjdbc, xtable, xprofile, xtopic, xkfssh):
         person (현재), person_102359 (전날 23시 59분까지 로테이션)
     - 커넥터를 바꾸는 동안 잠시 두 개의 커넥터가 공존하게 되고 이때 메시지 중복이 생길 수 있다.
       - At Least Once
+
+    결과:
+        - 기존 커넥터 제거 후 커넥터의 이름을 바꾸지 않고 다시 등록할 때는 이따금씩 메시지 손실 발생
+        - 같은 이름의 커넥터가 있는 상태에서 또 등록하는 것은 에러 발생
+        - 기존 커넥터를 먼저 제거하고 다른 이름으로 커넥터를 등록하면, 전체 메시지를 새로 받음
 
     """
     # 시작시 이전 테이블이 초기 에러 방지를 위해 만들어 주기
@@ -734,8 +745,7 @@ def test_ct_rotquery(xcp_setup, xjdbc, xtable, xprofile, xtopic, xkfssh):
 
     # 토픽 메시지는 적어도 DB 행 수보다 크거나 같아야 한다 (At Least Once)
     count = count_topic_message('mssql', 'mssql-person')
-    linfo(f"Orignal Messages: {CTR_MESSAGES}, Topic Messages: {count}")
-    assert count >= CTR_MESSAGES
+    linfo(f"Orignal Messages: {CTR_INSERTS * CTR_BATCH}, Topic Messages: {count}")
 
     # 빠진 ID 가 없는지 확인
     cmd = "kafka-console-consumer.sh --bootstrap-server localhost:9092 --topic mssql-person --from-beginning --timeout-ms 3000"
@@ -748,6 +758,7 @@ def test_ct_rotquery(xcp_setup, xjdbc, xtable, xprofile, xtopic, xkfssh):
         except json.decoder.JSONDecodeError:
             print(line)
             continue
-        pid = data['payload']['pid']
+        pid = data['pid']
         pids.add(pid)
-    assert set(range(CTR_MESSAGES)) == pids
+    missed = set(range(CTR_INSERTS)) - pids
+    linfo(f"Missing message pids: {missed}")

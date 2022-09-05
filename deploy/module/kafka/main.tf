@@ -113,12 +113,13 @@ sudo apt update
 sudo sed -i 's/#$nrconf{restart} = '"'"'i'"'"';/$nrconf{restart} = '"'"'a'"'"';/g' /etc/needrestart/needrestart.conf
 sudo sed -i 's/#MaxSessions 10/MaxSessions 200/g' /etc/ssh/sshd_config
 sudo service sshd restart
-sudo apt install -y unzip jq
+sudo apt install -y unzip jq kafkacat
 # Kafka 설치
 sudo apt install -y openjdk-8-jdk
 echo 'export JAVA_HOME=/usr/lib/jvm/java-8-openjdk-amd64' >> ~/.kenv
 echo 'export PATH=$PATH:$JAVA_HOME/bin' >> ~/.kenv
 echo "export KAFKA_HOME=~/$kafka_dir" >> ~/.kenv
+echo "alias kcat=kafkacat" >> ~/.kenv
 wget -nv ${var.kafka_url}
 tar xzf $kafka_file
 rm $kafka_file
@@ -138,6 +139,16 @@ sed -i "s/dataDir=\\/tmp\\/zookeeper/dataDir=\\/data\\/zookeeper/" config/zookee
 sed -i "s/log.dirs=\\/tmp\\/kafka-logs/log.dirs=\\/data\\/kafka/" config/server.properties
 echo "export PATH=$PATH:~/$kafka_dir/bin" >> ~/.kenv
 cat ~/.kenv >> ~/.bashrc
+
+cat <<EOF > ~/.tmux.conf
+set -g mouse on
+set-option -g status-right ""
+set-option -g history-limit 10000
+set-window-option -g mode-keys vi
+bind-key -T copy-mode-vi v send -X begin-selection
+bind-key -T copy-mode-vi V send -X select-line
+bind-key -T copy-mode-vi y send -X copy-pipe-and-cancel 'xclip -in -selection clipboard'
+EOF
 
 # 서비스 등록
 # 참고: https://www.digitalocean.com/community/tutorials/how-to-install-apache-kafka-on-ubuntu-20-04#step-6-mdash-hardening-the-kafka-server

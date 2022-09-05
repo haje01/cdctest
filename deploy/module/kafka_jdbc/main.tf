@@ -68,6 +68,15 @@ rm ${basename(var.kafka_jdbc_connector)}
 sed -i "s/#plugin.path=/plugin.path=\\/home\\/ubuntu\\/$kafka_dir\\/connectors/" ../config/connect-distributed.properties
 cd ..
 EOT
+  install_kafka_s3_sink = <<EOT
+# Kafka S3 Sink Connector 설치
+mkdir -p connectors
+mv /tmp/${basename(var.kafka_s3_sink)} connectors/
+cd connectors/
+unzip ${basename(var.kafka_s3_sink)}
+rm ${basename(var.kafka_s3_sink)}
+cd ..
+EOT
   install_mysql_jdbc_driver = <<EOT
 sudo apt install -y /tmp/${basename(var.mysql_jdbc_driver)}
 cp /usr/share/java/mysql-connector-java-*.jar /home/ubuntu/$kafka_dir/connectors/$kjc_dir/lib
@@ -143,6 +152,11 @@ resource "null_resource" "kafka_public_ip" {
     destination = "/tmp/${basename(var.kafka_jdbc_connector)}"
   }
 
+  provisioner "file" {
+    source = var.kafka_s3_sink
+    destination = "/tmp/${basename(var.kafka_s3_sink)}"
+  }
+
   # MySQL JDBC Driver 복사
   provisioner "file" {
     source = var.mysql_jdbc_driver
@@ -171,12 +185,13 @@ sudo apt update
 sudo sed -i 's/#$nrconf{restart} = '"'"'i'"'"';/$nrconf{restart} = '"'"'a'"'"';/g' /etc/needrestart/needrestart.conf
 sudo sed -i 's/#MaxSessions 10/MaxSessions 200/g' /etc/ssh/sshd_config
 sudo service sshd restart
-sudo apt install -y unzip jq
+sudo apt install -y unzip jq kafkacat
 # Kafka 설치
 sudo apt install -y openjdk-8-jdk
 echo 'export JAVA_HOME=/usr/lib/jvm/java-8-openjdk-amd64' >> ~/.kenv
 echo 'export PATH=$PATH:$JAVA_HOME/bin' >> ~/.kenv
 echo "export KAFKA_HOME=~/$kafka_dir" >> ~/.kenv
+echo "alias kcat=kafkacat" >> ~/.kenv
 wget -nv ${var.kafka_url}
 tar xzf $kafka_file
 rm $kafka_file
@@ -197,8 +212,19 @@ sed -i "s/log.dirs=\\/tmp\\/kafka-logs/log.dirs=\\/data\\/kafka/" config/server.
 echo "export PATH=$PATH:~/$kafka_dir/bin" >> ~/.kenv
 cat ~/.kenv >> ~/.bashrc
 
+cat <<EOF > ~/.tmux.conf
+set -g mouse on
+set-option -g status-right ""
+set-option -g history-limit 10000
+set-window-option -g mode-keys vi
+bind-key -T copy-mode-vi v send -X begin-selection
+bind-key -T copy-mode-vi V send -X select-line
+bind-key -T copy-mode-vi y send -X copy-pipe-and-cancel 'xclip -in -selection clipboard'
+EOF
+
 # 플러그인 설치
 ${local.install_kafka_jdbc_connector}
+${local.install_kafka_s3_sink}
 ${local.install_mysql_jdbc_driver}
 ${local.install_mysql_dbzm_connector}
 ${local.install_mssql_dbzm_connector}
