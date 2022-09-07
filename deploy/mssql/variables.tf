@@ -25,6 +25,7 @@ variable "kafka_s3_sink" {}
 variable "mysql_jdbc_driver" {}
 variable "mysql_dbzm_connector" {}
 variable "mssql_dbzm_connector" {}
+variable "timezone" {}
 variable "tags" {
     type = map(string)
 }

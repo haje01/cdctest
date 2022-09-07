@@ -187,6 +187,7 @@ module "kafka" {
   mysql_jdbc_driver = var.mysql_jdbc_driver
   mysql_dbzm_connector = var.mysql_dbzm_connector
   mssql_dbzm_connector = var.mssql_dbzm_connector
+  timezone = var.timezone
   tags = var.tags
 }
 

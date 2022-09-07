@@ -498,7 +498,10 @@ def register_jdbc(kfk_ssh, profile, db_addr, db_port, db_user, db_passwd,
     else:
         db_url = f"jdbc:mysql://{db_addr}:{db_port}/{db_name}"
 
-    conn_name = f'jdbc-{profile}-{com_hash}'
+    if com_hash is None:
+        conn_name = f'jdbc-{profile}'
+    else:
+        conn_name = f'jdbc-{profile}-{com_hash}'
     tables = params.get('tables', '')
     inc_col = params.get('inc_col', 'id')
     ts_col = params.get('ts_col', 'regdt')

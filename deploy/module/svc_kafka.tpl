@@ -6,7 +6,7 @@ After=zookeeper.service
 [Service]
 Type=simple
 User=${user}
-ExecStart=/home/${user}/${kafka_dir}/bin/kafka-server-start.sh /home/${user}/${kafka_dir}/config/server.properties
+ExecStart=EXTRA_ARGS="-Duser.timezone=${timezone} /home/${user}/${kafka_dir}/bin/kafka-server-start.sh /home/${user}/${kafka_dir}/config/server.properties
 ExecStop=/home/${user}/${kafka_dir}/bin/kafka-server-stop.sh
 Restart=on-abnormal
 

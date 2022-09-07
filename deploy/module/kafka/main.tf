@@ -140,6 +140,8 @@ sed -i "s/log.dirs=\\/tmp\\/kafka-logs/log.dirs=\\/data\\/kafka/" config/server.
 echo "export PATH=$PATH:~/$kafka_dir/bin" >> ~/.kenv
 cat ~/.kenv >> ~/.bashrc
 
+sudo cp -p /usr/share/zoneinfo/Asia/Seoul /etc/localtime
+
 cat <<EOF > ~/.tmux.conf
 set -g mouse on
 set-option -g status-right ""
@@ -187,6 +189,7 @@ data "template_file" "svc_kafka" {
   vars = {
     user = "ubuntu",
     kafka_dir = trimsuffix(basename(var.kafka_url), ".tgz")
+    timezone = var.timezone
   }
 }
 

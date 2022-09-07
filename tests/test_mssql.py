@@ -482,36 +482,40 @@ def yesterday():
 #   - 커넥터에서 WHERE 조건을 추가한다
 #   - MSSQL 에서 Dynamic SQL 을 Subquery 처럼 쓸 수 없다.
 #
-# ctq_query = """
-# DECLARE @_today DATETIME = GETDATE()
-# DECLARE @_yesterday DATETIME = DATEADD(day, -1, CAST(GETDATE() AS date))
-# DECLARE @today NCHAR(8) = CONVERT(NCHAR(8), @_today, 112)
-# DECLARE @yesterday NCHAR(8) = CONVERT(NCHAR(8), @_yesterday, 112)
-
-# DECLARE @tblName NCHAR(30) = N'person'
-# DECLARE @ytblName NCHAR(30) = N'person_' + @yesterday
-
-# DECLARE @query NVARCHAR(4000)
-# SET @query = '
-# IF EXISTS ( SELECT * FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = ''' + @ytblName + ''' )
-# BEGIN
-#     SELECT * FROM (
-#         SELECT * FROM ' + @ytblName + '
-#         UNION ALL
-#         SELECT * FROM ' + @tblName + '
-#     ) AS T
-#     -- WHERE "id" > ? ORDER BY "id" ASC (io.confluent.connect.jdbc.source.TableQuerier:179)
-# END
-# ELSE
-# 	SELECT * FROM ' + @tblName
-
-# SELECT *
-# EXEC sp_executesql @query
-# """
-
 ctq_query = """
-SELECT * FROM person
+DECLARE @_today DATETIME = GETDATE()
+
+---- 하루 간격 로테이션
+-- DECLARE @_prev DATETIME = DATEADD(day, -1, CAST(GETDATE() AS date))
+-- DECLARE @prev NCHAR(8) = FORMAT(DATEADD(day, -1, @_today), 'yyyyMMdd')
+---- 일분 간격 로테이션
+DECLARE @prev NCHAR(6) = FORMAT(DATEADD(minute, -1, @_today), 'ddHHmm')
+
+DECLARE @tblName NCHAR(30) = N'person'
+DECLARE @ptblName NCHAR(30) = N'person_' + @prev
+
+DECLARE @query NVARCHAR(4000)
+
+SET @query = '
+IF EXISTS ( SELECT * FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = ''' + @ytblName + ''' )
+BEGIN
+    SELECT * FROM (
+        SELECT * FROM ' + @ytblName + ' WHERE _JSCOND
+        UNION ALL
+        SELECT * FROM ' + @tblName + ' WHERE _JSCOND
+    ) AS T
+    -- WHERE "id" > ? ORDER BY "id" ASC (io.confluent.connect.jdbc.source.TableQuerier:179)
+END
+ELSE
+	SELECT * FROM ' + @tblName + ' WHERE _JSCOND'
+
+SELECT *
+EXEC sp_executesql @query
 """
+
+# ctq_query = """
+# SELECT * FROM person
+# """
 
 # @pytest.mark.parametrize('xtable', [{'tables':
 #    [f'person', f"person_{yesterday()}"]}], indirect=True)
@@ -692,9 +696,119 @@ ctr_param = {
         'inc_col': 'id',
         'ts_col': 'regdt'
     }
+# @pytest.mark.parametrize('xjdbc', [ctr_param], indirect=True)
+# def test_ct_rotquery(xcp_setup, xjdbc, xs3sink, xtable, xprofile, xtopic, xkfssh):
+#     """로테이션되는 테이블을 쿼리로 가져오기.
+
+#     동기:
+#     - MSSQL 에서 로테이션되는 테이블을 CT 방식으로 가져오는 경우
+#     - 현재 테이블과 전 테이블을 가져오는 방식은 각각의 토픽이 되기에 문제
+#       - 전 테이블의 모든 메시지를 다시 가져옴
+#     - 쿼리 방식은 쿼리가 바뀌어도 하나의 토픽에 저장가능
+
+#     테스트 구현:
+#     - 이번 테이블과 전 테이블을 가져오는 쿼리 작성
+#       - JDBC 커넥터가 이 쿼리에 가져온 ID 중복 체크용 WHERE 절을 추가하게 됨
+#       - MSSQL 의 Dynamic SQL 을 이용하면 편리하나, 이경우 커넥터가 붙이는 WHERE 절과 맞지 않음
+#     - 이 쿼리는 로테이션 간격마다 Cron Job 등으로 대상 테이블 변경
+#     - 기본적으로 모든 메시지는 person 테이블에 추가되고,
+#       - 로테이션된 테이블에 일부 가져오지 못한 짜투리 메시지 남을 가능성
+#     - 로그 생성기는 별도 프로세스로 지속
+#     - 또 다른 프로세스에서 샘플 로그 테이블 1분 간격으로 로테이션
+#         예) 현재 11 일 0시 0분 1초인 경우
+#         person (현재), person_102359 (전날 23시 59분까지 로테이션)
+#     - 커넥터를 바꾸는 동안 잠시 두 개의 커넥터가 공존하게 되고 이때 메시지 중복이 생길 수 있다.
+#       - At Least Once
+
+#     결과:
+#         - 기존 커넥터 제거 후 커넥터의 이름을 바꾸지 않고 다시 등록할 때는 이따금씩 메시지 손실 발생
+#         - 같은 이름의 커넥터가 있는 상태에서 또 등록하는 것은 에러 발생
+#         - 기존 커넥터를 먼저 제거하고 다른 이름으로 커넥터를 등록하면, 전체 메시지를 새로 받음
+
+#     """
+#     # 시작시 이전 테이블을 초기 에러 방지를 위해 만들어 주기
+#     reset_table('mssql', table=f'person_{ctr_prev}')
+
+#     # insert 프로세스 시작
+#     pi = Process(target=ctr_insert_proc)
+#     pi.start()
+
+#     # rotation 프로세스 시작
+#     pr = Process(target=ctr_rotate_proc)
+#     pr.start()
+
+#     # register 프로세스 시작
+#     pq = Process(target=ctr_register_proc, args=(xcp_setup, ctr_param, ctr_hash))
+#     pq.start()
+
+#     pi.join()
+#     pr.join()
+#     pq.join()
+
+#     time.sleep(7)
+
+#     # 토픽 메시지는 적어도 DB 행 수보다 크거나 같아야 한다 (At Least Once)
+#     count = count_topic_message('mssql', 'mssql-person')
+#     linfo(f"Orignal Messages: {CTR_INSERTS * CTR_BATCH}, Topic Messages: {count}")
+
+#     # 빠진 ID 가 없는지 확인
+#     cmd = "kafka-console-consumer.sh --bootstrap-server localhost:9092 --topic mssql-person --from-beginning --timeout-ms 3000"
+#     ssh = get_kafka_ssh('mssql')
+#     ret = ssh_exec(ssh, cmd)
+#     pids = set()
+#     for line in ret.split('\n'):
+#         try:
+#             data = json.loads(line)
+#         except json.decoder.JSONDecodeError:
+#             print(line)
+#             continue
+#         pid = data['pid']
+#         pids.add(pid)
+#     missed = set(range(CTR_INSERTS)) - pids
+#     linfo(f"Missing message pids: {missed}")
+
+
+# ctr_query2 = """
+# DECLARE @_today DATETIME = GETDATE()
+
+# ---- 하루 간격 로테이션
+# -- DECLARE @_prev DATETIME = DATEADD(day, -1, CAST(GETDATE() AS date))
+# -- DECLARE @prev NCHAR(8) = FORMAT(DATEADD(day, -1, @_today), 'yyyyMMdd')
+# ---- 일분 간격 로테이션
+# DECLARE @prev NCHAR(6) = FORMAT(DATEADD(minute, -1, @_today), 'ddHHmm')
+
+# DECLARE @tblName NCHAR(30) = N'person'
+# DECLARE @ptblName NCHAR(30) = N'person_' + @prev
+
+# DECLARE @query NVARCHAR(4000)
+
+# SET @query = '
+# SELECT * FROM (
+#     SELECT * FROM ' + @ptblName + '
+#     UNION ALL
+#     SELECT * FROM ' + @tblName + '
+# ) AS T
+# WHERE _JSCOND
+# EXEC sp_executesql @query
+# """
+
+ctr_query = """
+SELECT * FROM (
+    SELECT * FROM person_{{ AddMinFmt -1 ddHHmm }}
+    -- 로테이션이 10초 지연되는 경우
+    -- SELECT * FROM person_{{ AddMinFmtOff -1 ddHHmm -10 }}
+    UNION ALL
+    SELECT * FROM person
+) AS T
+"""
+
+ctr_param = {
+        'query': ctr_query,
+        'query_topic': 'mssql-person',
+    }
 @pytest.mark.parametrize('xjdbc', [ctr_param], indirect=True)
 def test_ct_rotquery(xcp_setup, xjdbc, xs3sink, xtable, xprofile, xtopic, xkfssh):
-    """로테이션되는 테이블을 쿼리로 가져오기.
+    """로테이션되는 테이블을 Dynamic SQL 쿼리로 가져오기.
 
     동기:
     - MSSQL 에서 로테이션되는 테이블을 CT 방식으로 가져오는 경우
@@ -703,26 +817,18 @@ def test_ct_rotquery(xcp_setup, xjdbc, xs3sink, xtable, xprofile, xtopic, xkfssh
     - 쿼리 방식은 쿼리가 바뀌어도 하나의 토픽에 저장가능
 
     테스트 구현:
-    - 이번 테이블과 전 테이블을 가져오는 쿼리 작성
-      - JDBC 커넥터가 이 쿼리에 가져온 ID 중복 체크용 WHERE 절을 추가하게 됨
-      - MSSQL 의 Dynamic SQL 을 이용하면 편리하나, 이경우 커넥터가 붙이는 WHERE 절과 맞지 않음
-    - 이 쿼리는 로테이션 간격마다 Cron Job 등으로 대상 테이블 변경
-    - 기본적으로 모든 메시지는 person 테이블에 추가되고,
-      - 로테이션된 테이블에 일부 가져오지 못한 짜투리 메시지 남을 가능성
+    - MSSQL 의 Dynamic SQL 을 이용해 이번 테이블과 전 테이블을 가져오는 쿼리 작성
+    - 원래는 JDBC 커넥터에서 쿼리 끝에 자체적인 WHERE 조건을 붙여주기에 Dynamic SQL 을 사용할 수 없음
+    - 수정된 JDBC 커넥터 (github.com/haje01/kafka-connect-jdbc) 를 이용
+      - 추가되는 WHERE 의 조건을 구해두고
+      - 유저 쿼리에 _JSCOND 플레이스 홀더를 기술하면 나중에 대체
     - 로그 생성기는 별도 프로세스로 지속
     - 또 다른 프로세스에서 샘플 로그 테이블 1분 간격으로 로테이션
         예) 현재 11 일 0시 0분 1초인 경우
         person (현재), person_102359 (전날 23시 59분까지 로테이션)
-    - 커넥터를 바꾸는 동안 잠시 두 개의 커넥터가 공존하게 되고 이때 메시지 중복이 생길 수 있다.
-      - At Least Once
-
-    결과:
-        - 기존 커넥터 제거 후 커넥터의 이름을 바꾸지 않고 다시 등록할 때는 이따금씩 메시지 손실 발생
-        - 같은 이름의 커넥터가 있는 상태에서 또 등록하는 것은 에러 발생
-        - 기존 커넥터를 먼저 제거하고 다른 이름으로 커넥터를 등록하면, 전체 메시지를 새로 받음
 
     """
-    # 시작시 이전 테이블이 초기 에러 방지를 위해 만들어 주기
+    # 시작시 이전 테이블을 초기 에러 방지를 위해 만들어 주기
     reset_table('mssql', table=f'person_{ctr_prev}')
 
     # insert 프로세스 시작
@@ -733,19 +839,15 @@ def test_ct_rotquery(xcp_setup, xjdbc, xs3sink, xtable, xprofile, xtopic, xkfssh
     pr = Process(target=ctr_rotate_proc)
     pr.start()
 
-    # register 프로세스 시작
-    pq = Process(target=ctr_register_proc, args=(xcp_setup, ctr_param, ctr_hash))
-    pq.start()
-
     pi.join()
     pr.join()
-    pq.join()
 
     time.sleep(7)
 
-    # 토픽 메시지는 적어도 DB 행 수보다 크거나 같아야 한다 (At Least Once)
+    # 토픽 메시지 수와 DB 행 수는 같아야 한다
     count = count_topic_message('mssql', 'mssql-person')
-    linfo(f"Orignal Messages: {CTR_INSERTS * CTR_BATCH}, Topic Messages: {count}")
+    assert CTR_INSERTS * CTR_BATCH == count
+    # linfo(f"Orignal Messages: {CTR_INSERTS * CTR_BATCH}, Topic Messages: {count}")
 
     # 빠진 ID 가 없는지 확인
     cmd = "kafka-console-consumer.sh --bootstrap-server localhost:9092 --topic mssql-person --from-beginning --timeout-ms 3000"
@@ -761,4 +863,6 @@ def test_ct_rotquery(xcp_setup, xjdbc, xs3sink, xtable, xprofile, xtopic, xkfssh
         pid = data['pid']
         pids.add(pid)
     missed = set(range(CTR_INSERTS)) - pids
-    linfo(f"Missing message pids: {missed}")
+    linfo(f"Check missing messages: {missed}")
+    assert len(missed) == 0
+

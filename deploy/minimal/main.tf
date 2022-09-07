@@ -9,6 +9,7 @@ module "kafka" {
   producer_sg_id = module.producer.sg_id
   consumer_sg_id = module.consumer.sg_id
   kafka_url = var.kafka_url
+  timezone = var.timezone
   tags = var.tags
 }
 
