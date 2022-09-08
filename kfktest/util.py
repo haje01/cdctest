@@ -498,13 +498,12 @@ def register_jdbc(kfk_ssh, profile, db_addr, db_port, db_user, db_passwd,
     else:
         db_url = f"jdbc:mysql://{db_addr}:{db_port}/{db_name}"
 
-    if com_hash is None:
-        conn_name = f'jdbc-{profile}'
-    else:
-        conn_name = f'jdbc-{profile}-{com_hash}'
+    # 반복된 테스트에 문제가 없으려면 커넥터 이름이 매번 달라야 한다.
+    assert com_hash is not None
+    conn_name = f'jdbc-{profile}-{com_hash}'
     tables = params.get('tables', '')
     inc_col = params.get('inc_col', 'id')
-    ts_col = params.get('ts_col', 'regdt')
+    ts_col = params.get('ts_col')
     query = params.get('query')
     tasks = params.get('tasks', 1)
     linfo(f"[ ] register_jdbc {conn_name} {inc_col} {ts_col} {tables} {tasks}")

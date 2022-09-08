@@ -141,6 +141,7 @@ echo "export PATH=$PATH:~/$kafka_dir/bin" >> ~/.kenv
 cat ~/.kenv >> ~/.bashrc
 
 sudo cp -p /usr/share/zoneinfo/Asia/Seoul /etc/localtime
+export TZ="Asia/Seoul"
 
 cat <<EOF > ~/.tmux.conf
 set -g mouse on

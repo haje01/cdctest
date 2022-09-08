@@ -233,6 +233,11 @@ ${local.install_mysql_dbzm_connector}
 ${local.install_mssql_dbzm_connector}
 # MSSQL JDBC Driver 는 confluentinc-kafka-connect-jdbc 에 이미 포함
 
+connect.log.pattern=[%d] %p %X{connector.context}%m (%c:%L)%n
+# Connector 로그 뒤의 로그 출처 제거
+sed -i "s/connect.log.pattern=\\[%d\\] %p %X{connector.context}%m (%c:%L)%n/connect.log.pattern=[%d] %p %X{connector.context}%m%n" ../config/connect-distributed.properties
+
+
 # 서비스 등록
 # 참고: https://www.digitalocean.com/community/tutorials/how-to-install-apache-kafka-on-ubuntu-20-04#step-6-mdash-hardening-the-kafka-server
 #

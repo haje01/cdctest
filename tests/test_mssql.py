@@ -643,13 +643,6 @@ def ctr_rotate_proc():
 
     linfo(f"[v] ctr_rotate_proc")
 
-ctr_query = '''
-    SELECT * FROM (
-        SELECT * FROM person
-        UNION ALL
-        SELECT * FROM person_{0}
-    ) AS T
-'''
 
 def ctr_register_proc(setup, param, chash):
     """분당 한 번 쿼리 변경후 등록."""
@@ -689,13 +682,6 @@ def ctr_register_proc(setup, param, chash):
 ctr_now = datetime.now()
 ctr_prev = (ctr_now - timedelta(minutes=1)).strftime('%d%H%M')
 ctr_hash = _hash()
-ctr_param = {
-        'query': ctr_query.format(ctr_prev),
-        'query_topic': 'mssql-person',
-        'chash': ctr_hash,
-        'inc_col': 'id',
-        'ts_col': 'regdt'
-    }
 # @pytest.mark.parametrize('xjdbc', [ctr_param], indirect=True)
 # def test_ct_rotquery(xcp_setup, xjdbc, xs3sink, xtable, xprofile, xtopic, xkfssh):
 #     """로테이션되는 테이블을 쿼리로 가져오기.
@@ -794,21 +780,23 @@ ctr_param = {
 
 ctr_query = """
 SELECT * FROM (
-    SELECT * FROM person_{{ AddMinFmt -1 ddHHmm }}
-    -- 로테이션이 10초 지연되는 경우
-    -- SELECT * FROM person_{{ AddMinFmtOff -1 ddHHmm -10 }}
+    -- 1분 단위 테이블 로테이션
+    SELECT * FROM person_{{ MinAddFmt -1 ddHHmm }}
     UNION ALL
     SELECT * FROM person
 ) AS T
 """
-
 ctr_param = {
         'query': ctr_query,
         'query_topic': 'mssql-person',
+        'inc_col': 'pid',  # 로테이션이 되어도 유니크한 컬럼으로
+        'chash': _hash()
     }
 @pytest.mark.parametrize('xjdbc', [ctr_param], indirect=True)
-def test_ct_rotquery(xcp_setup, xjdbc, xs3sink, xtable, xprofile, xtopic, xkfssh):
+def test_ct_rtbl_inc(xcp_setup, xjdbc, xtable, xprofile, xtopic, xkfssh):
     """로테이션되는 테이블을 Dynamic SQL 쿼리로 가져오기.
+
+    Incremental 컬럼만 이용하는 경우 경우
 
     동기:
     - MSSQL 에서 로테이션되는 테이블을 CT 방식으로 가져오는 경우
@@ -817,11 +805,9 @@ def test_ct_rotquery(xcp_setup, xjdbc, xs3sink, xtable, xprofile, xtopic, xkfssh
     - 쿼리 방식은 쿼리가 바뀌어도 하나의 토픽에 저장가능
 
     테스트 구현:
-    - MSSQL 의 Dynamic SQL 을 이용해 이번 테이블과 전 테이블을 가져오는 쿼리 작성
-    - 원래는 JDBC 커넥터에서 쿼리 끝에 자체적인 WHERE 조건을 붙여주기에 Dynamic SQL 을 사용할 수 없음
-    - 수정된 JDBC 커넥터 (github.com/haje01/kafka-connect-jdbc) 를 이용
-      - 추가되는 WHERE 의 조건을 구해두고
-      - 유저 쿼리에 _JSCOND 플레이스 홀더를 기술하면 나중에 대체
+    - 원래는 MSSQL 의 Dynamic SQL 을 이용해 이번 테이블과 전 테이블을 가져오는 쿼리를 작성하려 했으나
+    - JDBC 커넥터에서 쿼리 끝에 자체적인 WHERE 조건을 붙여주기에 Dynamic SQL 을 사용할 수 없음
+    - 쿼리에 매크로를 지원하는 수정된 JDBC 커넥터 (github.com/haje01/kafka-connect-jdbc) 를 이용
     - 로그 생성기는 별도 프로세스로 지속
     - 또 다른 프로세스에서 샘플 로그 테이블 1분 간격으로 로테이션
         예) 현재 11 일 0시 0분 1초인 경우
@@ -844,10 +830,78 @@ def test_ct_rotquery(xcp_setup, xjdbc, xs3sink, xtable, xprofile, xtopic, xkfssh
 
     time.sleep(7)
 
-    # 토픽 메시지 수와 DB 행 수는 같아야 한다
+    # 토픽 메시지 수는 DB 행 수는 크거나 같아야 한다
     count = count_topic_message('mssql', 'mssql-person')
-    assert CTR_INSERTS * CTR_BATCH == count
-    # linfo(f"Orignal Messages: {CTR_INSERTS * CTR_BATCH}, Topic Messages: {count}")
+    assert CTR_INSERTS * CTR_BATCH >= count
+    linfo(f"Orignal Messages: {CTR_INSERTS * CTR_BATCH}, Topic Messages: {count}")
+
+    # 빠진 ID 가 없는지 확인
+    cmd = "kafka-console-consumer.sh --bootstrap-server localhost:9092 --topic mssql-person --from-beginning --timeout-ms 3000"
+    ssh = get_kafka_ssh('mssql')
+    ret = ssh_exec(ssh, cmd)
+    pids = set()
+    for line in ret.split('\n'):
+        try:
+            data = json.loads(line)
+        except json.decoder.JSONDecodeError:
+            print(line)
+            continue
+        pid = data['pid']
+        pids.add(pid)
+    missed = set(range(CTR_INSERTS)) - pids
+    linfo(f"Check missing messages: {missed}")
+    assert len(missed) == 0
+
+
+ctr2_param = {
+        'query': ctr_query,
+        'query_topic': 'mssql-person',
+        'inc_col': 'id',
+        'ts_col': 'regdt',
+        'chash': _hash()
+    }
+@pytest.mark.parametrize('xjdbc', [ctr2_param], indirect=True)
+def test_ct_rtbl_incts(xcp_setup, xjdbc, xs3sink, xtable, xprofile, xtopic, xkfssh):
+    """로테이션되는 테이블을 Dynamic SQL 쿼리로 가져오기.
+
+    Incremental + Timestamp 컬럼 이용하는 경우
+
+    동기:
+    - MSSQL 에서 로테이션되는 테이블을 CT 방식으로 가져오는 경우
+    - 현재 테이블과 전 테이블을 가져오는 방식은 각각의 토픽이 되기에 문제
+      - 전 테이블의 모든 메시지를 다시 가져옴
+    - 쿼리 방식은 쿼리가 바뀌어도 하나의 토픽에 저장가능
+
+    테스트 구현:
+    - 원래는 MSSQL 의 Dynamic SQL 을 이용해 이번 테이블과 전 테이블을 가져오는 쿼리를 작성하려 했으나
+    - JDBC 커넥터에서 쿼리 끝에 자체적인 WHERE 조건을 붙여주기에 Dynamic SQL 을 사용할 수 없음
+    - 쿼리에 매크로를 지원하는 수정된 JDBC 커넥터 (github.com/haje01/kafka-connect-jdbc) 를 이용
+    - 로그 생성기는 별도 프로세스로 지속
+    - 또 다른 프로세스에서 샘플 로그 테이블 1분 간격으로 로테이션
+        예) 현재 11 일 0시 0분 1초인 경우
+        person (현재), person_102359 (전날 23시 59분까지 로테이션)
+
+    """
+    # 시작시 이전 테이블을 초기 에러 방지를 위해 만들어 주기
+    reset_table('mssql', table=f'person_{ctr_prev}')
+
+    # insert 프로세스 시작
+    pi = Process(target=ctr_insert_proc)
+    pi.start()
+
+    # rotation 프로세스 시작
+    pr = Process(target=ctr_rotate_proc)
+    pr.start()
+
+    pi.join()
+    pr.join()
+
+    time.sleep(7)
+
+    # 토픽 메시지 수는 DB 행 수는 크거나 같아야 한다
+    count = count_topic_message('mssql', 'mssql-person')
+    assert CTR_INSERTS * CTR_BATCH >= count
+    linfo(f"Orignal Messages: {CTR_INSERTS * CTR_BATCH}, Topic Messages: {count}")
 
     # 빠진 ID 가 없는지 확인
     cmd = "kafka-console-consumer.sh --bootstrap-server localhost:9092 --topic mssql-person --from-beginning --timeout-ms 3000"
