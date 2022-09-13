@@ -196,10 +196,12 @@ wget -nv ${var.kafka_url}
 tar xzf $kafka_file
 rm $kafka_file
 
-# 설정
+## 설정
 cd $kafka_dir
 sed -i "s/#listeners=PLAINTEXT:\\/\\/:9092/listeners=INTERNAL:\\/\\/0.0.0.0:9092,EXTERNAL:\\/\\/0.0.0.0:19092/" config/server.properties
 sed -i "s/#advertised.listeners=PLAINTEXT:\\/\\/your.host.name:9092/advertised.listeners=INTERNAL:\\/\\/${aws_instance.kafka.private_ip}:9092,EXTERNAL:\\/\\/${aws_eip.kafka.public_ip}:19092/" config/server.properties
+# Connector 로그 뒤의 로그 출처 제거
+sed -i "s/connect.log.pattern=\\[%d\\] %p %X{connector.context}%m (%c:%L)%n/connect.log.pattern=[%d] %p %X{connector.context}%m%n/" config/connect-log4j.properties
 echo "listener.security.protocol.map=INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT" >> config/server.properties
 echo "inter.broker.listener.name=INTERNAL" >> config/server.properties
 echo "auto.create.topics.enable=false" >> config/server.properties
@@ -232,11 +234,6 @@ ${local.install_mysql_jdbc_driver}
 ${local.install_mysql_dbzm_connector}
 ${local.install_mssql_dbzm_connector}
 # MSSQL JDBC Driver 는 confluentinc-kafka-connect-jdbc 에 이미 포함
-
-connect.log.pattern=[%d] %p %X{connector.context}%m (%c:%L)%n
-# Connector 로그 뒤의 로그 출처 제거
-sed -i "s/connect.log.pattern=\\[%d\\] %p %X{connector.context}%m (%c:%L)%n/connect.log.pattern=[%d] %p %X{connector.context}%m%n" ../config/connect-distributed.properties
-
 
 # 서비스 등록
 # 참고: https://www.digitalocean.com/community/tutorials/how-to-install-apache-kafka-on-ubuntu-20-04#step-6-mdash-hardening-the-kafka-server

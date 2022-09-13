@@ -778,10 +778,14 @@ ctr_hash = _hash()
 # EXEC sp_executesql @query
 # """
 
-ctr_query = """
+# 테스트 시작 후 분이 바뀔 때까지의 시간을 구해 매크로의 지연 시간으로 사용
+ctr_now = datetime.now()
+ctr_next = ctr_now + timedelta(seconds=60)
+ctr_delay = (datetime(ctr_next.year, ctr_next.month, ctr_next.day, ctr_next.hour, ctr_next.minute) - ctr_now).seconds + 5
+ctr_query = f"""
 SELECT * FROM (
     -- 1분 단위 테이블 로테이션
-    SELECT * FROM person_{{ MinAddFmt -1 ddHHmm }}
+    SELECT * FROM person_{{{{ MinAddFmtDelay -1 ddHHmm {ctr_delay} }}}}
     UNION ALL
     SELECT * FROM person
 ) AS T
@@ -832,7 +836,7 @@ def test_ct_rtbl_inc(xcp_setup, xjdbc, xtable, xprofile, xtopic, xkfssh):
 
     # 토픽 메시지 수는 DB 행 수는 크거나 같아야 한다
     count = count_topic_message('mssql', 'mssql-person')
-    assert CTR_INSERTS * CTR_BATCH >= count
+    assert CTR_INSERTS * CTR_BATCH <= count
     linfo(f"Orignal Messages: {CTR_INSERTS * CTR_BATCH}, Topic Messages: {count}")
 
     # 빠진 ID 가 없는지 확인
@@ -900,7 +904,7 @@ def test_ct_rtbl_incts(xcp_setup, xjdbc, xs3sink, xtable, xprofile, xtopic, xkfs
 
     # 토픽 메시지 수는 DB 행 수는 크거나 같아야 한다
     count = count_topic_message('mssql', 'mssql-person')
-    assert CTR_INSERTS * CTR_BATCH >= count
+    assert CTR_INSERTS * CTR_BATCH <= count
     linfo(f"Orignal Messages: {CTR_INSERTS * CTR_BATCH}, Topic Messages: {count}")
 
     # 빠진 ID 가 없는지 확인
