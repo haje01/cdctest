@@ -548,49 +548,49 @@ def test_ct_query(xcp_setup, xjdbc, xtable, xprofile, xkfssh):
     cnt = count_topic_message(xprofile, f'{xprofile}-person', timeout=10)
     assert num_msg == cnt
 
-# 대상 날짜는 Snakemake batch_fake 에서 만든 테이블의 그것과 일치해야 한다!
-ctm_dates = pd.date_range(start='20220801', end='20220831')
-# 대상 테이블명
-ctm_tables = [dt.strftime('person_%Y%m%d') for dt in ctm_dates]
-# 대상 토픽명
-ctm_topics = [f'mssql-{t}' for t in ctm_tables]
-@pytest.mark.parametrize('xjdbc', [{'inc_col': 'id', 'tasks': 1}],indirect=True)
-# 테이블명에 해당하는 토픽 리셋
-@pytest.mark.parametrize('xtopic', [{'topics': ctm_topics}], indirect=True)
-@pytest.mark.parametrize('xtable', [{'skip': True}], indirect=True)
-def test_ct_multitable(xcp_setup, xjdbc, xtable, xprofile, xtopic, xkfssh):
-    """여러 테이블을 대상으로 할 때 퍼포먼스 테스트.
+# # 대상 날짜는 Snakemake batch_fake 에서 만든 테이블의 그것과 일치해야 한다!
+# ctm_dates = pd.date_range(start='20220801', end='20220831')
+# # 대상 테이블명
+# ctm_tables = [dt.strftime('person_%Y%m%d') for dt in ctm_dates]
+# # 대상 토픽명
+# ctm_topics = [f'mssql-{t}' for t in ctm_tables]
+# @pytest.mark.parametrize('xjdbc', [{'inc_col': 'id', 'tasks': 1}],indirect=True)
+# # 테이블명에 해당하는 토픽 리셋
+# @pytest.mark.parametrize('xtopic', [{'topics': ctm_topics}], indirect=True)
+# @pytest.mark.parametrize('xtable', [{'skip': True}], indirect=True)
+# def test_ct_multitable(xcp_setup, xjdbc, xtable, xprofile, xtopic, xkfssh):
+#     """여러 테이블을 대상으로 할 때 퍼포먼스 테스트.
 
-    다음과 같은 목적:
-    - 주기적으로 로테이션되는 테이블은 타겟 설정이 곤란
-    - 이 경우 whitelist 없이 DB 를 타겟으로 해두면 생성되는 모든 테이블이 타겟
-    - 이렇게 하면 잦은 설정 변경이나 query 없이 로테이션에 대응되나,
-      많은 테이블이 대상이 되면 퍼포먼스 확인 필요
+#     다음과 같은 목적:
+#     - 주기적으로 로테이션되는 테이블은 타겟 설정이 곤란
+#     - 이 경우 whitelist 없이 DB 를 타겟으로 해두면 생성되는 모든 테이블이 타겟
+#     - 이렇게 하면 잦은 설정 변경이나 query 없이 로테이션에 대응되나,
+#       많은 테이블이 대상이 되면 퍼포먼스 확인 필요
 
-    퍼포먼스 확인:
-    - 필요한 개수가 되도록 일별 대상 테이블을 snakemake 의 batch_fake 로 만들어 둠
-    - 테스트 실행 초기 모든 테이블에 대해 커넥터가 가져올 때 부하가 많이 걸릴 것
-    - 초기 데이터 가져오기가 끝난 후 DB 장비의 CPU 부하를 모니터링
-    - 키를 눌러 추가 데이터 가져오기 확인
+#     퍼포먼스 확인:
+#     - 필요한 개수가 되도록 일별 대상 테이블을 snakemake 의 batch_fake 로 만들어 둠
+#     - 테스트 실행 초기 모든 테이블에 대해 커넥터가 가져올 때 부하가 많이 걸릴 것
+#     - 초기 데이터 가져오기가 끝난 후 DB 장비의 CPU 부하를 모니터링
+#     - 키를 눌러 추가 데이터 가져오기 확인
 
-    실행 조건:
-    - 가짜 데이터 테이블들을 snakemake 의 batch_fake 로 미리 만둘어 두어야 함.
+#     실행 조건:
+#     - 가짜 데이터 테이블들을 snakemake 의 batch_fake 로 미리 만둘어 두어야 함.
 
-    """
+#     """
 
-    # 시작하자 마자 Connect 동작 -> DB 장비의 상태를 확인
+#     # 시작하자 마자 Connect 동작 -> DB 장비의 상태를 확인
 
-    input("\n=== Press Enter key to check topic messages ===\n")
+#     input("\n=== Press Enter key to check topic messages ===\n")
 
-    # 모든 토픽의 메시지 수 확인
-    total = count_topic_message(xprofile, ','.join(ctm_topics))
-    assert 100000 * len(ctm_topics) == total
+#     # 모든 토픽의 메시지 수 확인
+#     total = count_topic_message(xprofile, ','.join(ctm_topics))
+#     assert 100000 * len(ctm_topics) == total
 
-    input("\n=== Press enter key to insert new data ===\n")
+#     input("\n=== Press enter key to insert new data ===\n")
 
-    conn, cursor = db_concur('mssql')
-    # 최근 날짜에 새 데이터 인서트하며 DB 상태 확인
-    insert_fake(conn, cursor, 1, 10000, 1, 'mssql', table=ctm_tables[-1])
+#     conn, cursor = db_concur('mssql')
+#     # 최근 날짜에 새 데이터 인서트하며 DB 상태 확인
+#     insert_fake(conn, cursor, 1, 10000, 1, 'mssql', table=ctm_tables[-1])
 
 
 CTR_ROTATION = 1  # 로테이션 수
@@ -838,9 +838,4 @@ def test_ct_rtbl_incts(xcp_setup, xjdbc, xs3sink, xtable, xprofile, xtopic, xkfs
     # S3 Sink 커넥터가 올린 내용 확인
     s3cnt = s3_count_sinkmsg(KFKTEST_S3_BUCKET, KFKTEST_S3_DIR + "/")
     linfo(f"Orignal Messages: {CTR_INSERTS * CTR_BATCH}, S3 Messages: {s3cnt}")
-    assert CTR_INSERTS * CTR_BATCH <= s3cnt
-
-
-def test_s3():
-    s3cnt = s3_count_sinkmsg(KFKTEST_S3_BUCKET, KFKTEST_S3_DIR + "/")
     assert CTR_INSERTS * CTR_BATCH <= s3cnt
