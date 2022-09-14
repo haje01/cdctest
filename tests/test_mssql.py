@@ -595,7 +595,7 @@ def test_ct_query(xcp_setup, xjdbc, xtable, xprofile, xkfssh):
 
 CTR_ROTATION = 1  # 로테이션 수
 CTR_INSERTS = 65      # 로테이션 수 이상 메시지 인서트
-CTR_BATCH = 1
+CTR_BATCH = 100
 
 def ctr_insert_proc():
     """130 초 동안 초당 1 번 insert."""
@@ -743,9 +743,9 @@ def test_ct_rtbl_inc(xcp_setup, xjdbc, xtable, xprofile, xtopic, xkfssh):
 
     time.sleep(7)
 
-    # 토픽 메시지 수는 DB 행 수는 크거나 같아야 한다
+    # 토픽 메시지 수와 DB 행 수는 같아야 한다
     count = count_topic_message('mssql', 'mssql-person')
-    assert CTR_INSERTS * CTR_BATCH <= count
+    assert CTR_INSERTS * CTR_BATCH == count
     linfo(f"Orignal Messages: {CTR_INSERTS * CTR_BATCH}, Topic Messages: {count}")
 
     # 빠진 ID 가 없는지 확인
@@ -774,6 +774,7 @@ ctr2_param = {
         'chash': _hash()
     }
 @pytest.mark.parametrize('xjdbc', [ctr2_param], indirect=True)
+@pytest.mark.parametrize('xs3sink', [{'flush_size': CTR_BATCH * 5}], indirect=True)
 def test_ct_rtbl_incts(xcp_setup, xjdbc, xs3sink, xtable, xprofile, xtopic, xkfssh):
     """로테이션되는 테이블을 Dynamic SQL 쿼리로 가져오기.
 
@@ -811,9 +812,9 @@ def test_ct_rtbl_incts(xcp_setup, xjdbc, xs3sink, xtable, xprofile, xtopic, xkfs
 
     time.sleep(7)
 
-    # 토픽 메시지 수는 DB 행 수는 크거나 같아야 한다
+    # 토픽 메시지 수와 DB 행 수는 같아야 한다
     count = count_topic_message('mssql', 'mssql-person')
-    # assert CTR_INSERTS * CTR_BATCH <= count
+    # assert CTR_INSERTS * CTR_BATCH == count
     linfo(f"Orignal Messages: {CTR_INSERTS * CTR_BATCH}, Topic Messages: {count}")
 
     # 빠진 ID 가 없는지 확인
@@ -838,4 +839,10 @@ def test_ct_rtbl_incts(xcp_setup, xjdbc, xs3sink, xtable, xprofile, xtopic, xkfs
     # S3 Sink 커넥터가 올린 내용 확인
     s3cnt = s3_count_sinkmsg(KFKTEST_S3_BUCKET, KFKTEST_S3_DIR + "/")
     linfo(f"Orignal Messages: {CTR_INSERTS * CTR_BATCH}, S3 Messages: {s3cnt}")
+    assert CTR_INSERTS * CTR_BATCH <= s3cnt
+
+
+
+def test_s3():
+    s3cnt = s3_count_sinkmsg(KFKTEST_S3_BUCKET, KFKTEST_S3_DIR + "/")
     assert CTR_INSERTS * CTR_BATCH <= s3cnt

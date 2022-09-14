@@ -588,7 +588,10 @@ def register_s3sink(kfk_ssh, profile, topics, param):
     s3_bucket = param.get('s3_bucket', KFKTEST_S3_BUCKET)
     s3_dir = param.get('s3_dir', KFKTEST_S3_DIR)
     s3_region = param.get('s3_region', 'ap-northeast-2')
+    # 배치당 메시지 수에 비례해 키울 필요
     flush_size = param.get('flush_size', 5)
+    # 테스트 종료전 확인 가능하게 설정 필요
+    rot_interval = param.get('rot_interval', 5000)
     conn_name = f's3sink-{profile}-{chash}'
     linfo(f"[ ] register_s3sink {conn_name}")
     assert profile in ('mysql', 'mssql')
@@ -605,8 +608,7 @@ def register_s3sink(kfk_ssh, profile, topics, param):
         "key.converter.schemas.enable": False,
         "value.converter.schemas.enable": False,
         "flush.size": flush_size,
-        # 테스트 종료전 확인 가능하게
-        "rotate.schedule.interval.ms": 5000,
+        "rotate.schedule.interval.ms": rot_interval,
         "s3.bucket.name": s3_bucket,
         "s3.region": s3_region,
         "topics.dir": s3_dir,
