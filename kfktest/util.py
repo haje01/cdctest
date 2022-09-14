@@ -3,6 +3,7 @@
 공용 유틸리티
 
 """
+import io
 from cgitb import enable
 import random
 import os
@@ -15,6 +16,7 @@ import time
 import binascii
 import subprocess
 from multiprocessing import Process, Queue
+import gzip
 
 import pymssql
 from mysql.connector import connect
@@ -470,6 +472,7 @@ def register_jdbc(kfk_ssh, profile, db_addr, db_port, db_user, db_passwd,
 
     설정에 관한 참조:
         https://www.confluent.io/blog/kafka-connect-deep-dive-jdbc-source-connector/
+        https://docs.confluent.io/4.0.1/connect/references/allconfigs.html
 
     Args:
         kfk_ssh: 카프카 노드로의 Paramiko SSH 객체
@@ -518,7 +521,7 @@ def register_jdbc(kfk_ssh, profile, db_addr, db_port, db_user, db_passwd,
         'auto.create': False,
         'auto.evolve': False,
         'poll.interval.ms': 5000,
-        'table.poll.interval.ms': 60000,
+        'offset.flush.interval.ms': 60000,
         'delete.enabled': True,
         'transaction.isolation.mode': isolation,
         'mode': mode,
@@ -585,6 +588,7 @@ def register_s3sink(kfk_ssh, profile, topics, param):
     s3_bucket = param.get('s3_bucket', KFKTEST_S3_BUCKET)
     s3_dir = param.get('s3_dir', KFKTEST_S3_DIR)
     s3_region = param.get('s3_region', 'ap-northeast-2')
+    flush_size = param.get('flush_size', 5)
     conn_name = f's3sink-{profile}-{chash}'
     linfo(f"[ ] register_s3sink {conn_name}")
     assert profile in ('mysql', 'mssql')
@@ -596,7 +600,13 @@ def register_s3sink(kfk_ssh, profile, topics, param):
         "connector.class": "io.confluent.connect.s3.S3SinkConnector",
         "format.class": "io.confluent.connect.s3.format.json.JsonFormat",
         "storage.class": "io.confluent.connect.s3.storage.S3Storage",
-        "flush.size": 1000,
+        "key.converter": "org.apache.kafka.connect.storage.StringConverter",
+        "value.converter": "org.apache.kafka.connect.json.JsonConverter",
+        "key.converter.schemas.enable": False,
+        "value.converter.schemas.enable": False,
+        "flush.size": flush_size,
+        # 테스트 종료전 확인 가능하게
+        "rotate.schedule.interval.ms": 5000,
         "s3.bucket.name": s3_bucket,
         "s3.region": s3_region,
         "topics.dir": s3_dir,
@@ -1328,8 +1338,19 @@ def _xjdbc(profile, setup, kfssh, chash, params):
         raise RuntimeError(ret['message'])
 
 
+@pytest.fixture()
+def xrms3dir(request):
+    """s3sink 된 s3 디렉토리 제거."""
+    s3_bucket = KFKTEST_S3_BUCKET
+    s3_dir = KFKTEST_S3_DIR + "/"
+    linfo(f"[ ] remove s3 dir")
+    s3_region = 'ap-northeast-2'
+    s3_rmdir(s3_bucket, s3_dir)
+    linfo(f"[v] remove s3 dir")
+
+
 @pytest.fixture(params=[{}])
-def xs3sink(xprofile, xkfssh, xhash, request):
+def xs3sink(xprofile, xkfssh, xhash, xrms3dir, request):
     """S3 Sink Connector 등록."""
     topics = f'{xprofile}-person'
     register_s3sink(xkfssh, xprofile, topics, request.param)
@@ -1549,3 +1570,145 @@ def batch_fake_data(profile, start, end):
         '''
         cursor.execute(sql)
         conn.commit()
+
+
+def valid_location(bucket, path, for_dir=False):
+    """S3상의 객체 위치가 유효한지 검증.
+
+    Args:
+        bucket (str): S3 버킷명
+        path (str): 객체 경로명
+        for_dir (bool): 디렉토리를 위한 검증 여부. 기본값 False(파일)
+
+    Returns:
+        bool: 유효하면 True, 아니면 False
+    """
+    bucket = bucket.lower()
+    path = path.lower()
+    if bucket.startswith('s3:'):
+        return False
+    if path.startswith('/'):
+        return False
+    if path.startswith('s3:'):
+        return False
+
+    if for_dir and not path.endswith('/'):
+        return False
+
+    return True
+
+
+def s3_rmdir(bucket, adir, with_markfile=False, dry_run=False):
+    """S3 경로의 디렉토리 이하를 재귀적으로 지운다.
+
+    Note:
+        1000개 이상 객체 제거에는 Paginator를 사용해야 함.
+
+    Args:
+        bucket (str): S3 버킷. 's3://'는 필요없음.
+        adir (str): 버킷 아래 디렉토리 경로. '/'로 시작하지 않고, 종료는 '/'로 끝나야 함.
+        with_markfile (bool): AWS EMR에서 생성하는 ~_$folder$ 파일도 함께 제거 여부.
+            기본값: False
+        dry_run (bool): 지우지는 않고 대상만 출력. 기본값 False
+    """
+    assert valid_location(bucket, adir, True)
+    linfo("Remove directory: s3://{}/{}".format(bucket, adir))
+
+    client = boto3.client('s3')
+    paginator = client.get_paginator('list_objects_v2')
+    pages = paginator.paginate(Bucket=bucket, Prefix=adir)
+
+    def delete(to_delete):
+        if not dry_run:
+            client.delete_objects(Bucket=bucket, Delete=to_delete)
+        else:
+            for td in to_delete['Objects']:
+                linfo("  {}".format(td['Key']))
+
+    to_delete = dict(Objects=[])
+    total = 0
+    if dry_run:
+        linfo("Directories to be deleted:")
+
+    for item in pages.search('Contents'):
+        if item is None:
+            continue
+        to_delete['Objects'].append(dict(Key=item['Key']))
+
+        # S3 리미트에 도달하면 Flush
+        if len(to_delete['Objects']) >= 1000:
+            delete(to_delete)
+            total += len(to_delete['Objects'])
+            to_delete = dict(Objects=[])
+
+    # 남은 것을 제거
+    if len(to_delete['Objects']):
+        delete(to_delete)
+        total += len(to_delete['Objects'])
+        to_delete = dict(Objects=[])
+
+    if with_markfile:
+        elm = adir.split('/')
+        mark_file = elm[-2] + '_$folder$'
+        mark_dir = '/'.join(elm[:-2])
+        mark_path = '{}/{}'.format(mark_dir, mark_file)
+        linfo("  Delete mark file: {}".format(mark_path))
+        to_delete = dict(Objects=[dict(Key=mark_path)])
+        delete(to_delete)
+        total += 1
+
+    if not dry_run:
+        linfo("{} objects has been deleted.".format(total))
+
+
+def s3_listfile(bucket, adir):
+    """S3 디렉토리에 있는 파일들을 리스팅.
+
+    Args:
+        bucket (str): S3 버킷. 's3://'는 필요없음.
+        adir (str): 버킷 아래 디렉토리 경로. '/'로 시작하지 않고, 종료는 '/'로 끝나야 함.
+
+    Returns:
+        list: 파일 리스트
+    """
+    assert valid_location(bucket, adir, True)
+    client = boto3.client('s3')
+    paginator = client.get_paginator('list_objects_v2')
+    pages = paginator.paginate(Bucket=bucket, Prefix=adir)
+
+    objects = []
+    for item in pages.search('Contents'):
+        if item is None:
+            continue
+        objects.append(item['Key'])
+
+    return objects
+
+
+def s3_count_sinkmsg(bucket, adir):
+    """S3 Sink 된 메시지 카운팅.
+
+    - S3 경로에 S3 Sink 커넥터가 올린 메시지 수를 센다
+    - 메시지는 .gz + json 형태 가정
+
+    """
+    linfo(f"[ ] s3_count_sinkmsg s3://{bucket}/{adir}")
+    assert valid_location(bucket, adir, True)
+    s3 = boto3.client('s3')
+    mcnt = 0
+    for key in s3_listfile(bucket, adir):
+        if not key.endswith('.gz'):
+            continue
+        data = s3.get_object(Bucket=KFKTEST_S3_BUCKET, Key=key)
+        body = data['Body'].read()
+        cfile = io.BytesIO(body)
+        dfile = gzip.GzipFile(fileobj=cfile)
+        text = dfile.read().decode('utf8')
+        for line in text.split('\n'):
+            if line == '':
+                continue
+            # json 체크
+            json.loads(line)
+            mcnt += 1
+    linfo(f"[v] s3_count_sinkmsg s3://{bucket}/{adir}")
+    return mcnt
