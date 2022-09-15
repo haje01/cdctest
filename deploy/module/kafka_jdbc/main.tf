@@ -296,14 +296,3 @@ data "template_file" "svc_connect" {
     timezone = var.timezone
   }
 }
-
-# Kafka JDBC Connector 등록
-# data "template_file" "regconn" {
-#   template = file("${path.module}/regconn.tpl")
-#   vars = {
-#     host = aws_instance.mysql.private_ip,
-#     user = var.db_user,
-#     passwd = random_string.db_passwd.result,
-#     port = var.db_port
-#   }
-# }

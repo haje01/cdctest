@@ -9,10 +9,10 @@ module "kafka" {
   producer_sg_id = module.producer.sg_id
   consumer_sg_id = module.consumer.sg_id
   kafka_url = var.kafka_url
+  kafka_s3_sink = var.kafka_s3_sink
   timezone = var.timezone
   tags = var.tags
 }
-
 
 module "producer" {
   source = "../module/kfktest"

@@ -13,11 +13,11 @@ from kfktest.util import (count_topic_message, get_kafka_ssh,
     restart_kafka_and_connect, stop_kafka_and_connect, count_table_row,
     local_select_proc, local_insert_proc, linfo, NUM_INS_PROCS, NUM_SEL_PROCS,
     remote_insert_proc, remote_select_proc, DB_ROWS, load_setup, insert_fake,
-    db_concur, _hash, ssh_exec, s3_count_sinkmsg, KFKTEST_S3_BUCKET,
+    db_concur, ssh_exec, s3_count_sinkmsg, KFKTEST_S3_BUCKET,
     KFKTEST_S3_DIR, rot_table_proc, rot_insert_proc,
     # 픽스쳐들
     xsetup, xcp_setup, xjdbc, xtable, xkafka, xzookeeper, xkvmstart,
-    xconn, xkfssh, xdbzm, xrmcons, xcdc, xhash, xtopic, xrms3dir, xs3sink
+    xconn, xkfssh, xdbzm, xrmcons, xcdc, xhash, xtopic, xs3rmdir, xs3sink
     )
 
 
@@ -63,6 +63,7 @@ def test_ct_broker_stop(xsetup, xjdbc, xprofile, xkfssh, xhash):
         기동해도 메시지 수가 일치해야 한다.
     - 그러나, 커넥터가 메시지 생성 ~ 오프셋 커밋 사이에 죽으면, 재기동시
         커밋하지 않은 오프셋부터 다시 처리하게 되어 메시지 중복이 발생할 수 있다.
+        => Log Compaction 사용으로 해결?
     - Graceful 한 정지시 메시지 생성을 정지하고 처리된 오프셋까지만 커밋하면 해결
         가능할 듯 한데..
     - Debezium 도 Exactly Once Semantics 가 아닌 At Least Once 를 지원
@@ -618,4 +619,4 @@ def test_ct_rtbl_incts(xcp_setup, xjdbc, xs3sink, xtable, xprofile, xtopic, xkfs
     # S3 Sink 커넥터가 올린 내용 확인
     s3cnt = s3_count_sinkmsg(KFKTEST_S3_BUCKET, KFKTEST_S3_DIR + "/")
     linfo(f"Orignal Messages: {CTR_INSERTS * CTR_BATCH}, S3 Messages: {s3cnt}")
-    assert CTR_INSERTS * CTR_BATCH <= s3cnt
+    assert CTR_INSERTS * CTR_BATCH == s3cnt

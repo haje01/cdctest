@@ -594,7 +594,7 @@ def register_s3sink(kfk_ssh, profile, topics, param):
     rot_interval = param.get('rot_interval', 5000)
     conn_name = f's3sink-{profile}-{chash}'
     linfo(f"[ ] register_s3sink {conn_name}")
-    assert profile in ('mysql', 'mssql')
+    assert profile in ('mysql', 'mssql', 'nodb')
 
     data = {
         "name": conn_name,
@@ -626,7 +626,7 @@ def register_s3sink(kfk_ssh, profile, topics, param):
     if status['tasks'][0]['state'] == 'FAILED':
         raise RuntimeError(status['tasks'][0]['trace'])
     linfo(f"[v] register_s3sink {conn_name}")
-    return data
+    return conn_name
 
 
 @retry(RuntimeError, tries=6, delay=5)
@@ -1363,7 +1363,7 @@ def _xjdbc(profile, setup, kfssh, chash, params):
 
 
 @pytest.fixture()
-def xrms3dir(request):
+def xs3rmdir(request):
     """s3sink 된 s3 디렉토리 제거."""
     s3_bucket = KFKTEST_S3_BUCKET
     s3_dir = KFKTEST_S3_DIR + "/"
@@ -1374,10 +1374,10 @@ def xrms3dir(request):
 
 
 @pytest.fixture(params=[{}])
-def xs3sink(xprofile, xkfssh, xhash, xrms3dir, request):
+def xs3sink(xprofile, xrmcons, xkfssh, xhash, xs3rmdir, request):
     """S3 Sink Connector 등록."""
     topics = f'{xprofile}-person'
-    register_s3sink(xkfssh, xprofile, topics, request.param)
+    yield register_s3sink(xkfssh, xprofile, topics, request.param)
 
 
 @pytest.fixture

@@ -10,6 +10,8 @@ variable "producer_sg_id" {}
 variable "consumer_sg_id" {}
 
 variable "kafka_url" {}
+variable "kafka_s3_sink" {}
+variable "timezone" {}
 
 variable "tags" {
     type = map(string)

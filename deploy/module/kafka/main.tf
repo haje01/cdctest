@@ -1,3 +1,16 @@
+locals {
+  install_kafka_s3_sink = <<EOT
+# Kafka S3 Sink Connector 설치
+mkdir -p connectors
+mv /tmp/${basename(var.kafka_s3_sink)} connectors/
+cd connectors/
+unzip ${basename(var.kafka_s3_sink)}
+rm ${basename(var.kafka_s3_sink)}
+sed -i "s/#plugin.path=/plugin.path=\\/home\\/ubuntu\\/$kafka_dir\\/connectors/" ../config/connect-distributed.properties
+cd ..
+EOT
+}
+
 # Kafka 보안 그룹
 resource "aws_security_group" "kafka" {
   name = "${var.name}-kafka"
@@ -103,6 +116,11 @@ resource "null_resource" "kafka_public_ip" {
     agent = false
   }
 
+  provisioner "file" {
+    source = var.kafka_s3_sink
+    destination = "/tmp/${basename(var.kafka_s3_sink)}"
+  }
+
   provisioner "remote-exec" {
     inline = [<<EOT
 cloud-init status --wait
@@ -114,6 +132,7 @@ sudo sed -i 's/#$nrconf{restart} = '"'"'i'"'"';/$nrconf{restart} = '"'"'a'"'"';/
 sudo sed -i 's/#MaxSessions 10/MaxSessions 200/g' /etc/ssh/sshd_config
 sudo service sshd restart
 sudo apt install -y unzip jq kafkacat
+
 # Kafka 설치
 sudo apt install -y openjdk-8-jdk
 echo 'export JAVA_HOME=/usr/lib/jvm/java-8-openjdk-amd64' >> ~/.kenv
@@ -153,6 +172,9 @@ bind-key -T copy-mode-vi V send -X select-line
 bind-key -T copy-mode-vi y send -X copy-pipe-and-cancel 'xclip -in -selection clipboard'
 EOF
 
+# 플러그인 설치
+${local.install_kafka_s3_sink}
+
 # 서비스 등록
 # 참고: https://www.digitalocean.com/community/tutorials/how-to-install-apache-kafka-on-ubuntu-20-04#step-6-mdash-hardening-the-kafka-server
 #
@@ -162,12 +184,17 @@ EOF
 cat <<EOF | sudo tee /etc/systemd/system/kafka.service
 ${data.template_file.svc_kafka.rendered}
 EOF
+cat <<EOF | sudo tee /etc/systemd/system/kafka-connect.service
+${data.template_file.svc_connect.rendered}
+EOF
 sudo systemctl enable zookeeper
 sudo systemctl enable kafka
+sudo systemctl enable kafka-connect
 
 # 실행
 sudo systemctl start zookeeper
 sudo systemctl start kafka
+sudo systemctl start kafka-connect
 
 sleep 10
 EOT
@@ -194,3 +221,12 @@ data "template_file" "svc_kafka" {
   }
 }
 
+# Kafka Connect 서비스 등록
+data "template_file" "svc_connect" {
+  template = file("${path.module}/../svc_connect.tpl")
+  vars = {
+    user = "ubuntu",
+    kafka_dir = trimsuffix(basename(var.kafka_url), ".tgz")
+    timezone = var.timezone
+  }
+}

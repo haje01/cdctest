@@ -15,7 +15,7 @@ from kfktest.util import (SSH, count_topic_message, ssh_exec, stop_kafka_broker,
     KFKTEST_S3_BUCKET, KFKTEST_S3_DIR, s3_count_sinkmsg,
     # 픽스쳐들
     xsetup, xjdbc, xcp_setup, xtable, xkafka, xzookeeper, xkvmstart,
-    xconn, xkfssh, xdbzm, xrmcons, xhash, xcdc, xtopic, xs3sink, xrms3dir
+    xconn, xkfssh, xdbzm, xrmcons, xhash, xcdc, xtopic, xs3sink, xs3rmdir
     )
 
 

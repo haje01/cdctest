@@ -13,6 +13,8 @@ variable "kafka_instance_type" {
 variable "work_cidr" {}
 variable "key_pair_name" {}
 variable "kafka_url" {}
+
+variable "kafka_s3_sink" {}
 variable "timezone" {}
 variable "tags" {
     type = map(string)
