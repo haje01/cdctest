@@ -12,34 +12,20 @@ parser.add_argument('--db-name', type=str, default='test', help="이용할 데�
 parser.add_argument('-t', '--table', type=str, default='person', help="이용할 테이블 이름.")
 
 
-def drop_all_tables(profile):
-    linfo(f"[ ] drop_all_tables {profile}")
-    conn, cursor = db_concur(profile)
-    if profile == 'mysql':
-        raise NotImplementedError()
-    else:
-        sql = '''
-            EXEC sp_MSforeachtable @command1 = "DROP TABLE ?"
-        '''
-    if profile == 'mysql':
-        mysql_exec_many(cursor, sql)
-    else:
-        cursor.execute(sql)
-
-    conn.commit()
-    linfo(f"[v] drop_all_tables {profile}")
-
-
-def reset_table(profile, table, fix_regdt=None):
+def reset_table(profile, table, fix_regdt=None, concur=None):
     regdt_def = 'CURRENT_TIMESTAMP' if fix_regdt is None else f"'{fix_regdt}'"
     linfo(f"[ ] reset_table for {profile} {table}")
-    conn, cursor = db_concur(profile)
+    if concur is None:
+        conn, cursor = db_concur(profile)
+    else:
+        conn, cursor = concur
 
     if profile == 'mysql':
         head = f'''
     DROP TABLE IF EXISTS {table};
     CREATE TABLE {table} (
         id  INT NOT NULL AUTO_INCREMENT,
+        regdt DATETIME DEFAULT CURRENT_TIMESTAMP,
         pid INT DEFAULT -1 NOT NULL,
         sid INT DEFAULT -1 NOT NULL,
         '''

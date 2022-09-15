@@ -64,7 +64,9 @@ mkdir -p connectors
 mv /tmp/${basename(var.kafka_jdbc_connector)} connectors/
 cd connectors/
 unzip ${basename(var.kafka_jdbc_connector)}
-chmod 775 ${basename(var.kafka_jdbc_connector)}
+kjcon_dir=$(basename ${basename(var.kafka_jdbc_connector)} .zip)
+chmod 775 $kjcon_dir
+mkdir -p $kjcon_dir/lib
 rm ${basename(var.kafka_jdbc_connector)}
 sed -i "s/#plugin.path=/plugin.path=\\/home\\/ubuntu\\/$kafka_dir\\/connectors/" ../config/connect-distributed.properties
 cd ..

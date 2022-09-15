@@ -1,15 +1,11 @@
 import time
-from multiprocessing import Process, Queue
+from multiprocessing import Process
 import json
 from datetime import datetime, timedelta
-import io
-import gzip
 
 import pymssql
 import pytest
 from kafka import KafkaConsumer
-import pandas as pd
-import boto3
 
 from kfktest.table import reset_table
 from kfktest.util import (count_topic_message, get_kafka_ssh,
@@ -17,11 +13,11 @@ from kfktest.util import (count_topic_message, get_kafka_ssh,
     restart_kafka_and_connect, stop_kafka_and_connect, count_table_row,
     local_select_proc, local_insert_proc, linfo, NUM_INS_PROCS, NUM_SEL_PROCS,
     remote_insert_proc, remote_select_proc, DB_ROWS, load_setup, insert_fake,
-    db_concur, _xjdbc, _hash, ssh_exec, xs3sink, put_connector, unregister_kconn,
-    s3_count_sinkmsg, KFKTEST_S3_BUCKET, KFKTEST_S3_DIR,
+    db_concur, _hash, ssh_exec, s3_count_sinkmsg, KFKTEST_S3_BUCKET,
+    KFKTEST_S3_DIR, rot_table_proc, rot_insert_proc,
     # 픽스쳐들
     xsetup, xcp_setup, xjdbc, xtable, xkafka, xzookeeper, xkvmstart,
-    xconn, xkfssh, xdbzm, xrmcons, xcdc, xhash, xtopic, xrms3dir
+    xconn, xkfssh, xdbzm, xrmcons, xcdc, xhash, xtopic, xrms3dir, xs3sink
     )
 
 
@@ -331,14 +327,15 @@ def test_ct_modify(xcp_setup, xjdbc, xtable, xprofile, xkfssh):
     broker_port = 19092
 
     def consume():
-        consumer = KafkaConsumer(topic,
-                        group_id=f'my-group-mssql',
-                        bootstrap_servers=[f'{broker_addr}:{broker_port}'],
-                        auto_offset_reset='earliest',
-                        value_deserializer=lambda x: json.loads(x.decode('utf8')),
-                        enable_auto_commit=False,
-                        consumer_timeout_ms=1000 * 10
-                        )
+        consumer = KafkaConsumer(
+            topic,
+            group_id=f'my-group-mssql',
+            bootstrap_servers=[f'{broker_addr}:{broker_port}'],
+            auto_offset_reset='earliest',
+            value_deserializer=lambda x: json.loads(x.decode('utf8')),
+            enable_auto_commit=False,
+            consumer_timeout_ms=1000 * 10
+            )
         return consumer
 
     cnt = 0
@@ -476,218 +473,10 @@ def test_ct_modify2(xcp_setup, xjdbc, xtable, xprofile, xkfssh):
     assert cnt == 11
 
 
-def yesterday():
-    return (datetime.today() - timedelta(days=1)).strftime('%Y%m%d')
-
-#
-# 어제 날짜 테이블이 있으면 그것과 당일을 UNION
-# 아니면, 당일만 SELECT 하는 쿼리
-# 그러나, 아래와 같은 이유로 이런 방식은 쓸 수 없다.. ㅠㅠ
-#   - 커넥터에서 WHERE 조건을 추가한다
-#   - MSSQL 에서 Dynamic SQL 을 Subquery 처럼 쓸 수 없다.
-#
-ctq_query = """
-DECLARE @_today DATETIME = GETDATE()
-
----- 하루 간격 로테이션
--- DECLARE @_prev DATETIME = DATEADD(day, -1, CAST(GETDATE() AS date))
--- DECLARE @prev NCHAR(8) = FORMAT(DATEADD(day, -1, @_today), 'yyyyMMdd')
----- 일분 간격 로테이션
-DECLARE @prev NCHAR(6) = FORMAT(DATEADD(minute, -1, @_today), 'ddHHmm')
-
-DECLARE @tblName NCHAR(30) = N'person'
-DECLARE @ptblName NCHAR(30) = N'person_' + @prev
-
-DECLARE @query NVARCHAR(4000)
-
-SET @query = '
-IF EXISTS ( SELECT * FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = ''' + @ytblName + ''' )
-BEGIN
-    SELECT * FROM (
-        SELECT * FROM ' + @ytblName + ' WHERE _JSCOND
-        UNION ALL
-        SELECT * FROM ' + @tblName + ' WHERE _JSCOND
-    ) AS T
-    -- WHERE "id" > ? ORDER BY "id" ASC (io.confluent.connect.jdbc.source.TableQuerier:179)
-END
-ELSE
-	SELECT * FROM ' + @tblName + ' WHERE _JSCOND'
-
-SELECT *
-EXEC sp_executesql @query
-"""
-
-# ctq_query = """
-# SELECT * FROM person
-# """
-
-# @pytest.mark.parametrize('xtable', [{'tables':
-#    [f'person', f"person_{yesterday()}"]}], indirect=True)
-@pytest.mark.parametrize('xjdbc', [{
-        'inc_col': 'id',
-        'query': ctq_query,
-        'query_topic': 'mssql-person'  # 대상 토픽 이름 명시
-        }], indirect=True)
-def test_ct_query(xcp_setup, xjdbc, xtable, xprofile, xkfssh):
-    """CT 방식에서 테이블이 아닌 쿼리로 가져오기."""
-    num_msg = 5
-
-    # Insert 프로세스들 시작
-    ins_pros = []
-    # 당일 데이터
-    p = Process(target=local_insert_proc, args=(xprofile, 1, 1, num_msg, False,
-            f'person'))
-    ins_pros.append(p)
-    p.start()
-
-    for p in ins_pros:
-        p.join()
-    linfo("All insert processes are done.")
-
-    # 카프카 토픽 확인 (timeout 되기전에 다 받아야 함)
-    cnt = count_topic_message(xprofile, f'{xprofile}-person', timeout=10)
-    assert num_msg == cnt
-
-# # 대상 날짜는 Snakemake batch_fake 에서 만든 테이블의 그것과 일치해야 한다!
-# ctm_dates = pd.date_range(start='20220801', end='20220831')
-# # 대상 테이블명
-# ctm_tables = [dt.strftime('person_%Y%m%d') for dt in ctm_dates]
-# # 대상 토픽명
-# ctm_topics = [f'mssql-{t}' for t in ctm_tables]
-# @pytest.mark.parametrize('xjdbc', [{'inc_col': 'id', 'tasks': 1}],indirect=True)
-# # 테이블명에 해당하는 토픽 리셋
-# @pytest.mark.parametrize('xtopic', [{'topics': ctm_topics}], indirect=True)
-# @pytest.mark.parametrize('xtable', [{'skip': True}], indirect=True)
-# def test_ct_multitable(xcp_setup, xjdbc, xtable, xprofile, xtopic, xkfssh):
-#     """여러 테이블을 대상으로 할 때 퍼포먼스 테스트.
-
-#     다음과 같은 목적:
-#     - 주기적으로 로테이션되는 테이블은 타겟 설정이 곤란
-#     - 이 경우 whitelist 없이 DB 를 타겟으로 해두면 생성되는 모든 테이블이 타겟
-#     - 이렇게 하면 잦은 설정 변경이나 query 없이 로테이션에 대응되나,
-#       많은 테이블이 대상이 되면 퍼포먼스 확인 필요
-
-#     퍼포먼스 확인:
-#     - 필요한 개수가 되도록 일별 대상 테이블을 snakemake 의 batch_fake 로 만들어 둠
-#     - 테스트 실행 초기 모든 테이블에 대해 커넥터가 가져올 때 부하가 많이 걸릴 것
-#     - 초기 데이터 가져오기가 끝난 후 DB 장비의 CPU 부하를 모니터링
-#     - 키를 눌러 추가 데이터 가져오기 확인
-
-#     실행 조건:
-#     - 가짜 데이터 테이블들을 snakemake 의 batch_fake 로 미리 만둘어 두어야 함.
-
-#     """
-
-#     # 시작하자 마자 Connect 동작 -> DB 장비의 상태를 확인
-
-#     input("\n=== Press Enter key to check topic messages ===\n")
-
-#     # 모든 토픽의 메시지 수 확인
-#     total = count_topic_message(xprofile, ','.join(ctm_topics))
-#     assert 100000 * len(ctm_topics) == total
-
-#     input("\n=== Press enter key to insert new data ===\n")
-
-#     conn, cursor = db_concur('mssql')
-#     # 최근 날짜에 새 데이터 인서트하며 DB 상태 확인
-#     insert_fake(conn, cursor, 1, 10000, 1, 'mssql', table=ctm_tables[-1])
-
-
 CTR_ROTATION = 1  # 로테이션 수
-CTR_INSERTS = 65      # 로테이션 수 이상 메시지 인서트
+CTR_INSERTS = 65  # 로테이션 수 이상 메시지 인서트
 CTR_BATCH = 100
 
-def ctr_insert_proc():
-    """130 초 동안 초당 1 번 insert."""
-    linfo(f"[ ] ctr_insert_proc")
-    conn, cursor = db_concur('mssql')
-
-    for i in range(CTR_INSERTS):
-        # pid 를 메시지 ID 로 대용
-        insert_fake(conn, cursor, 1, CTR_BATCH, i, 'mssql', table='person')
-        time.sleep(1)
-
-    linfo(f"[v] ctr_insert_proc")
-
-
-
-def ctr_rotate_proc():
-    """분당 한 번 테이블 로테이션."""
-    linfo(f"[ ] ctr_rotate_proc")
-    conn, cursor = db_concur('mssql')
-    cnt = 0
-    prev = None
-    while True:
-        now = datetime.now()
-        thisdt = now.strftime('%d%H%M')
-        # 분이 바뀌었으면 로테이션
-        if prev is not None and thisdt != prev:
-            linfo(f"== rotate person to person_{prev} ==")
-            sql = f"""
-                exec sp_rename 'person', person_{prev};
-                CREATE TABLE person (
-                    id int IDENTITY(1,1) PRIMARY KEY,
-                    regdt DATETIME2 DEFAULT CURRENT_TIMESTAMP NOT NULL,
-                    pid INT NOT NULL,
-                    sid INT NOT NULL,
-                    name VARCHAR(40),
-                    address VARCHAR(200),
-                    ip VARCHAR(20),
-                    birth DATE,
-                    company VARCHAR(40),
-                    phone VARCHAR(40)
-                );
-            """
-            cursor.execute(sql)
-            conn.commit()
-            cnt += 1
-            # 최대 로테이션 수 체크
-            if cnt >= CTR_ROTATION:
-                break
-        prev = thisdt
-        time.sleep(1)
-
-    linfo(f"[v] ctr_rotate_proc")
-
-
-def ctr_register_proc(setup, param, chash):
-    """분당 한 번 쿼리 변경 후 등록."""
-    linfo(f"[ ] ctr_register_proc {chash}")
-    ssh = get_kafka_ssh('mssql')
-    prevdt = None
-    cnt = 0
-    while True:
-        now = datetime.now()
-        thisdt = now.strftime('%d%H%M')
-        # 분이 바뀌었으면 쿼리 재등록
-        if prevdt is not None and thisdt != prevdt:
-            # rotation 이 먼저 되어야 하기에 조금 늦게
-            time.sleep(3)
-            linfo(f"[ ] == register new query with person_{prevdt} ==")
-
-            cname = f'jdbc-mssql-{chash}'
-            for i in range(1):
-                # 기존 커넥터 제거
-                unregister_kconn(ssh, cname)
-
-                # 새 커넥터 등록
-                linfo(f"[ ] register new connector")
-                param['query'] = ctr_query.format(prevdt)
-                _xjdbc('mssql', setup, ssh, chash, param)
-                linfo(f"[v] register new connector")
-                linfo(f"[v] == register new query with person_{prevdt} ==")
-
-            cnt += 1
-            # 최대 로테이션 수 체크
-            if cnt >= CTR_ROTATION:
-                break
-        prevdt = thisdt
-        time.sleep(1)
-    linfo(f"[v] ctr_register_proc {chash}")
-
-ctr_now = datetime.now()
-ctr_prev = (ctr_now - timedelta(minutes=1)).strftime('%d%H%M')
-ctr_hash = _hash()
 # 테스트 시작 후 분이 바뀔 때까지의 시간을 구해 매크로의 지연 시간으로 사용
 ctr_query = """
 SELECT * FROM (
@@ -699,13 +488,11 @@ SELECT * FROM (
 -----
 SELECT * FROM person
 """
-ctr_param = {
+@pytest.mark.parametrize('xjdbc', [{
         'query': ctr_query,
         'query_topic': 'mssql-person',
         'inc_col': 'pid',  # 로테이션이 되어도 유니크한 컬럼으로
-        'chash': _hash()
-    }
-@pytest.mark.parametrize('xjdbc', [ctr_param], indirect=True)
+    }], indirect=True)
 def test_ct_rtbl_inc(xcp_setup, xjdbc, xtable, xprofile, xtopic, xkfssh):
     """로테이션되는 테이블을 Dynamic SQL 쿼리로 가져오기.
 
@@ -727,15 +514,12 @@ def test_ct_rtbl_inc(xcp_setup, xjdbc, xtable, xprofile, xtopic, xkfssh):
         person (현재), person_102359 (전날 23시 59분까지 로테이션)
 
     """
-    # 시작시 이전 테이블을 초기 에러 방지를 위해 만들어 주기
-    reset_table('mssql', table=f'person_{ctr_prev}')
-
     # insert 프로세스 시작
-    pi = Process(target=ctr_insert_proc)
+    pi = Process(target=rot_insert_proc, args=('mssql', CTR_INSERTS, CTR_BATCH))
     pi.start()
 
     # rotation 프로세스 시작
-    pr = Process(target=ctr_rotate_proc)
+    pr = Process(target=rot_table_proc, args=('mssql', CTR_ROTATION))
     pr.start()
 
     pi.join()
@@ -766,14 +550,12 @@ def test_ct_rtbl_inc(xcp_setup, xjdbc, xtable, xprofile, xtopic, xkfssh):
     assert len(missed) == 0
 
 
-ctr2_param = {
+@pytest.mark.parametrize('xjdbc', [{
         'query': ctr_query,
         'query_topic': 'mssql-person',
         'inc_col': 'id',
         'ts_col': 'regdt',
-        'chash': _hash()
-    }
-@pytest.mark.parametrize('xjdbc', [ctr2_param], indirect=True)
+    }], indirect=True)
 @pytest.mark.parametrize('xs3sink', [{'flush_size': CTR_BATCH * 5}], indirect=True)
 def test_ct_rtbl_incts(xcp_setup, xjdbc, xs3sink, xtable, xprofile, xtopic, xkfssh):
     """로테이션되는 테이블을 Dynamic SQL 쿼리로 가져오기.
@@ -796,15 +578,12 @@ def test_ct_rtbl_incts(xcp_setup, xjdbc, xs3sink, xtable, xprofile, xtopic, xkfs
         person (현재), person_102359 (전날 23시 59분까지 로테이션)
 
     """
-    # 시작시 이전 테이블을 초기 에러 방지를 위해 만들어 주기
-    reset_table('mssql', table=f'person_{ctr_prev}')
-
     # insert 프로세스 시작
-    pi = Process(target=ctr_insert_proc)
+    pi = Process(target=rot_insert_proc, args=('mssql', CTR_INSERTS, CTR_BATCH))
     pi.start()
 
     # rotation 프로세스 시작
-    pr = Process(target=ctr_rotate_proc)
+    pr = Process(target=rot_table_proc, args=(xprofile, CTR_ROTATION))
     pr.start()
 
     pi.join()
@@ -839,10 +618,4 @@ def test_ct_rtbl_incts(xcp_setup, xjdbc, xs3sink, xtable, xprofile, xtopic, xkfs
     # S3 Sink 커넥터가 올린 내용 확인
     s3cnt = s3_count_sinkmsg(KFKTEST_S3_BUCKET, KFKTEST_S3_DIR + "/")
     linfo(f"Orignal Messages: {CTR_INSERTS * CTR_BATCH}, S3 Messages: {s3cnt}")
-    assert CTR_INSERTS * CTR_BATCH <= s3cnt
-
-
-
-def test_s3():
-    s3cnt = s3_count_sinkmsg(KFKTEST_S3_BUCKET, KFKTEST_S3_DIR + "/")
     assert CTR_INSERTS * CTR_BATCH <= s3cnt

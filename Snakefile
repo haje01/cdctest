@@ -1,7 +1,7 @@
 from glob import glob
 
-from kfktest.util import insert_fake_tmp, batch_fake_data
-from kfktest.table import reset_table, drop_all_tables
+from kfktest.util import insert_fake_tmp, batch_fake_data, drop_all_tables
+from kfktest.table import reset_table
 
 
 rule setup:

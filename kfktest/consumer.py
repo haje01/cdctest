@@ -55,12 +55,12 @@ def consume(profile,
         assert ',' not in topic
 
     consumer = KafkaConsumer(topic,
-                    group_id=f'my-group-{profile}',
-                    bootstrap_servers=[f'{broker_addr}:{broker_port}'],
-                    auto_offset_reset='earliest' if from_begin else 'latest',
-                    enable_auto_commit=auto_commit,
-                    consumer_timeout_ms=timeout * 1000,
-                    )
+        group_id=f'my-group-{profile}',
+        bootstrap_servers=[f'{broker_addr}:{broker_port}'],
+        auto_offset_reset='earliest' if from_begin else 'latest',
+        enable_auto_commit=auto_commit,
+        consumer_timeout_ms=timeout * 1000,
+    )
 
     linfo("Connected")
     cnt = 0

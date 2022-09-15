@@ -1049,6 +1049,29 @@ def mysql_exec_many(cursor, stmt):
         linfo(res)
 
 
+def drop_all_tables(profile):
+    linfo(f"[ ] drop_all_tables {profile}")
+    conn, cursor = db_concur(profile)
+    if profile == 'mysql':
+        sql = '''
+            SELECT concat('DROP TABLE IF EXISTS `', table_name, '`;')
+            FROM information_schema.tables
+            WHERE table_schema = 'test';
+        '''
+        cursor.execute(sql)
+        results = cursor.fetchall()
+        sql = '\n'.join([r[0] for r in results])
+        cursor.execute(sql)
+    else:
+        sql = '''
+            EXEC sp_MSforeachtable @command1 = "DROP TABLE ?"
+        '''
+        cursor.execute(sql)
+
+    conn.commit()
+    linfo(f"[v] drop_all_tables {profile}")
+
+
 def local_produce_proc(profile, pid, msg_cnt):
     """로컬 프로듀서 프로세스 함수."""
     from kfktest.producer import produce
@@ -1163,7 +1186,6 @@ def xtable(xprofile, xkafka, request):
     """테스트용 테이블 초기화."""
     if request.param['skip']:
         yield
-    from kfktest.table import drop_all_tables
 
     linfo("xtable")
     # 기존 테이블 삭제
@@ -1308,7 +1330,7 @@ def xrmcons(xkfssh, xconn):
 def xhash():
     """공용 해쉬."""
     linfo("xhash")
-    _hash()
+    return _hash()
 
 
 def _hash():
@@ -1714,3 +1736,51 @@ def s3_count_sinkmsg(bucket, adir):
             mcnt += 1
     linfo(f"[v] s3_count_sinkmsg s3://{bucket}/{adir}")
     return mcnt
+
+
+def rot_insert_proc(profile, num_insert, batch_row):
+    """로테이션 테스트용 인서트."""
+    linfo(f"[ ] rot_insert_proc {profile}")
+    conn, cursor = db_concur(profile)
+
+    for i in range(num_insert):
+        # pid 를 메시지 ID 로 대용
+        insert_fake(conn, cursor, 1, batch_row, i, profile, table='person')
+        time.sleep(1)
+
+    linfo(f"[v] rot_insert_proc {profile}")
+
+
+def rot_table_proc(profile, max_rot):
+    """분당 한 번 테이블 로테이션."""
+    from kfktest.table import reset_table
+
+    linfo(f"[ ] rot_table_proc {profile}")
+    conn, cursor = db_concur('mssql')
+    cnt = 0
+    prev = None
+    while True:
+        now = datetime.now()
+        thisdt = now.strftime('%d%H%M')
+        if prev == thisdt:
+            continue
+
+        # 분이 바뀌었으면 로테이션 테이블로 이름 변경
+        linfo(f"== rotate person to person_{prev} ==")
+        if profile == 'mssql':
+            sql = f"""EXEC sp_rename 'person', person_{prev}"""
+        else:
+            sql = f"""RENAME TABLE 'person' TO person_{prev}"""
+        cursor.execute(sql)
+        # 새 테이블 생성
+        reset_table(profile, 'person', (conn, cursor))
+
+        cnt += 1
+        # 최대 로테이션 수 체크
+        if cnt >= max_rot:
+            break
+
+        prev = thisdt
+        time.sleep(1)
+
+    linfo(f"[v] rot_table_proc {profile}")

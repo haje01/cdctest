@@ -1,19 +1,21 @@
-import os
 import time
+import json
 from multiprocessing import Process
 
 import pytest
 from mysql.connector import connect
 
+from kfktest.table import reset_table
 from kfktest.util import (SSH, count_topic_message, ssh_exec, stop_kafka_broker,
     start_kafka_broker, kill_proc_by_port, vm_start, vm_stop, vm_hibernate,
     get_kafka_ssh, stop_kafka_and_connect, restart_kafka_and_connect, linfo,
     count_table_row, DB_PRE_ROWS, NUM_SEL_PROCS,  NUM_INS_PROCS,
     local_insert_proc, local_select_proc, remote_insert_proc,
-    remote_select_proc, DB_ROWS,
+    remote_select_proc, DB_ROWS, rot_insert_proc, rot_table_proc,
+    KFKTEST_S3_BUCKET, KFKTEST_S3_DIR, s3_count_sinkmsg,
     # 픽스쳐들
-    xsetup, xjdbc, xcp_setup, xtable, xtopic_ct, xkafka, xzookeeper, xkvmstart,
-    xconn, xkfssh, xdbzm, xrmcons, xtopic_cdc, xhash, xcdc
+    xsetup, xjdbc, xcp_setup, xtable, xkafka, xzookeeper, xkvmstart,
+    xconn, xkfssh, xdbzm, xrmcons, xhash, xcdc, xtopic, xs3sink, xrms3dir
     )
 
 
@@ -375,3 +377,85 @@ def test_cdc_remote_basic(xcp_setup, xdbzm, xprofile, xkfssh, xcdc):
     for p in sel_pros:
         p.join()
     linfo("All select processes are done.")
+
+
+CTR_ROTATION = 1  # 로테이션 수
+CTR_INSERTS = 65  # 로테이션 수 이상 메시지 인서트
+CTR_BATCH = 100
+
+@pytest.mark.parametrize('xjdbc', [{
+        'query': """
+            SELECT * FROM (
+                -- 1분 단위 테이블 로테이션
+                SELECT * FROM person_{{ MinAddFmt -1 ddHHmm }}
+                UNION ALL
+                SELECT * FROM person
+            ) AS T
+            -----
+            SELECT * FROM person
+        """,
+        'query_topic': 'mysql-person',
+        'inc_col': 'id',
+        'ts_col': 'regdt',
+    }], indirect=True)
+@pytest.mark.parametrize('xs3sink', [{'flush_size': CTR_BATCH * 5}], indirect=True)
+def test_ct_rtbl_incts(xcp_setup, xjdbc, xs3sink, xtable, xprofile, xtopic, xkfssh):
+    """로테이션되는 테이블을 Dynamic SQL 쿼리로 가져오기.
+
+    Incremental + Timestamp 컬럼 이용하는 경우
+
+    동기:
+    - DB 에서 로테이션되는 테이블을 CT 방식으로 가져오는 경우
+    - 현재 테이블과 전 테이블을 가져오는 방식은 각각의 토픽이 되기에 문제
+      - 전 테이블의 모든 메시지를 다시 가져옴
+    - 쿼리 방식은 쿼리가 바뀌어도 하나의 토픽에 저장가능
+
+    테스트 구현:
+    - 쿼리에 매크로를 지원하는 수정된 JDBC 커넥터 (github.com/haje01/kafka-connect-jdbc) 를 이용
+    - 로그 생성기는 별도 프로세스로 지속
+    - 또 다른 프로세스에서 샘플 로그 테이블 1분 간격으로 로테이션
+        예) 현재 11 일 0시 0분 1초인 경우
+        person (현재), person_102359 (전날 23시 59분까지 로테이션)
+
+    """
+    # insert 프로세스 시작
+    pi = Process(target=rot_insert_proc, args=(xprofile, CTR_INSERTS, CTR_BATCH))
+    pi.start()
+
+    # rotation 프로세스 시작
+    pr = Process(target=rot_table_proc, args=(xprofile, CTR_ROTATION))
+    pr.start()
+
+    pi.join()
+    pr.join()
+
+    time.sleep(7)
+
+    # 토픽 메시지 수와 DB 행 수는 같아야 한다
+    count = count_topic_message(xprofile, f'{xprofile}-person')
+    # assert CTR_INSERTS * CTR_BATCH == count
+    linfo(f"Orignal Messages: {CTR_INSERTS * CTR_BATCH}, Topic Messages: {count}")
+
+    # 빠진 ID 가 없는지 확인
+    cmd = f"kafka-console-consumer.sh --bootstrap-server localhost:9092 --topic {xprofile}-person --from-beginning --timeout-ms 3000"
+    ssh = get_kafka_ssh(xprofile)
+    ret = ssh_exec(ssh, cmd)
+    pids = set()
+    for line in ret.split('\n'):
+        try:
+            data = json.loads(line)
+        except json.decoder.JSONDecodeError:
+            print(line)
+            continue
+        pid = data['pid']
+        pids.add(pid)
+    missed = sorted(set(range(CTR_INSERTS)) - pids)
+    linfo(f"Check missing messages: {missed}")
+    assert len(missed) == 0
+
+    # rotate.schedule.interval.ms 가 지나도록 대기
+    time.sleep(10)
+    # S3 Sink 커넥터가 올린 내용 확인
+    s3cnt = s3_count_sinkmsg(KFKTEST_S3_BUCKET, KFKTEST_S3_DIR + "/")
+    linfo(f"Orignal Messages: {CTR_INSERTS * CTR_BATCH}, S3 Messages: {s3cnt}")
+    assert CTR_INSERTS * CTR_BATCH <= s3cnt
