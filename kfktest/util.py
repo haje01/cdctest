@@ -172,12 +172,12 @@ def ssh_exec(ssh, cmd, kafka_env=True, stderr_type="stderr", ignore_err=False):
     """
     env = "source ~/.kenv && " if kafka_env else ""
     cmd = f'{env}{cmd}'
-    linfo(f"[ ] ssh_exec {cmd}")
+    # linfo(f"[ ] ssh_exec {cmd}")
     _, stdout, stderr = ssh.exec_command(cmd)
     es = stdout.channel.recv_exit_status()
     out = stdout.read().decode('utf8')
     err = stderr.read().decode('utf8')
-    linfo("f[v] ssh_exec {cmd}")
+    # linfo("f[v] ssh_exec {cmd}")
     if stderr_type == "stdout":
         out = err
         err = ''
@@ -401,7 +401,7 @@ def count_topic_message(profile, topic):
     linfo("[ ] count_topic_message")
     setup = load_setup(profile)
     kfk_ip = setup['kafka_public_ip']['value']
-    cmd = f'''kafkacat -b localhost:9092 -t {topic} -e -q | wc -l'''
+    cmd = f'''kafkacat -b localhost:9092 -t {topic} -C -e -q | wc -l'''
     kfk_ssh = SSH(kfk_ip)
     ret = ssh_exec(kfk_ssh, cmd)
     cnt = int(ret.strip())

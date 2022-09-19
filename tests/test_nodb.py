@@ -31,26 +31,20 @@ def test_local_basic(xprofile, xsetup, xtopic, xkfssh):
     # Producer 프로세스 시작
     pro_pros = []
     for pid in range(1, NUM_PRO_PROCS + 1):
-        p = Process(target=local_produce_proc, args=(xprofile, pid, 1))
+        p = Process(target=local_produce_proc, args=(xprofile, pid, PROC_NUM_MSG))
         p.start()
         pro_pros.append(p)
 
-    # Consumer 프로세스 시작
-    q = Queue()
-    con = Process(target=local_consume_proc, args=(xprofile, 1, q))
-    con.start()
-
     for p in pro_pros:
         p.join()
-    linfo("Producers done")
 
-    time.sleep(10)
-    con_cnt = count_topic_message(xprofile, xtopic)
-
+    # 메시지 수집 대기
+    time.sleep(3)
+    cnt = count_topic_message(xprofile, xtopic)
     tot_msg = PROC_NUM_MSG * NUM_PRO_PROCS
     vel = tot_msg / (time.time() - st)
     linfo (f"Produce and consume total {tot_msg} messages. {int(vel)} rows per seconds.")
-    assert tot_msg == con_cnt
+    assert tot_msg == cnt
 
 
 def test_local_basic_brk(xprofile, xsetup, xtopic, xkfssh):
@@ -96,11 +90,11 @@ def test_remote_basic(xprofile, xsetup, xcp_setup, xtopic, xkfssh):
         p.start()
         pro_pros.append(p)
 
-    # 카프카 토픽 확인 (timeout 되기전에 다 받아야 함)
-    cnt = count_topic_message(xprofile, xtopic)
     for p in pro_pros:
         p.join()
 
+    time.sleep(3)
+    cnt = count_topic_message(xprofile, xtopic)
     tot_msg = PROC_NUM_MSG * NUM_PRO_PROCS
     vel = tot_msg / (time.time() - st)
     linfo (f"Produce and consume total {tot_msg} messages. {int(vel)} rows per seconds.")
