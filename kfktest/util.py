@@ -642,9 +642,13 @@ def register_s3sink(kfk_ssh, profile, topics, param):
         "s3.bucket.name": s3_bucket,
         "s3.region": s3_region,
         "topics.dir": s3_dir,
+        "partitioner.class": "io.confluent.connect.storage.partitioner.TimeBasedPartitioner",
+        "path.format": "'year'=YYYY/'month'=MM/'day'=dd/'hour'=HH/'minute'=mm",
+        "partition.duration.ms": 60000,
+        "timestamp.extractor": "Wallclock",
         "s3.compression.type": "gzip",
         "locale": "ko_KR",
-        "timezone": "Asia/Seoul"
+        "timezone": "Asia/Seoul",
     }
 
     config = json.dumps(data)
@@ -654,6 +658,7 @@ def register_s3sink(kfk_ssh, profile, topics, param):
     time.sleep(5)
     status = get_connector_status(kfk_ssh, conn_name)
     if status['tasks'][0]['state'] == 'FAILED':
+        import pdb; pdb.set_trace()
         raise RuntimeError(status['tasks'][0]['trace'])
     linfo(f"[v] register_s3sink {conn_name}")
     return conn_name
@@ -1716,6 +1721,7 @@ def s3_count_sinkmsg(bucket, adir):
     s3 = boto3.client('s3')
     mcnt = 0
     for key in s3_listfile(bucket, adir):
+        print(key)
         if not key.endswith('.gz'):
             continue
         data = s3.get_object(Bucket=KFKTEST_S3_BUCKET, Key=key)

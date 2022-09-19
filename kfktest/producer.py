@@ -65,7 +65,7 @@ def produce(profile,
     - 대상 토픽은 미리 존재하거나 브로커 설정에서 auto.create.topics.enable=true 여야 한다.
     - linger_ms 가 있으면 전송 속도가 빨라진다.
     - 기본 구현은 브로커가 죽어도 전송시 예외 발생 않기에 SafeKafkaProducer 이용
-    - 이따금씩 flush 를 명시적으로 불러주면 속도 많이 느려지지 않고 예외 확인 가능
+    - 이따금씩 flush 를 명시적으로 불러주면 속도 많이 느려지지 않고 (~5%) 예외 확인 가능
         - 브로커 다운시에는 retry 탓인지 느려짐
         - retry 를 해도 메시지 손실이 발생할 수 있으나, 안하는 것보다는 작은 손실
 

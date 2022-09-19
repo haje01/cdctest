@@ -31,7 +31,7 @@ def test_local_basic(xkafka, xprofile, xsetup, xtopic, xkfssh):
     # Producer 프로세스 시작
     pro_pros = []
     for pid in range(1, NUM_PRO_PROCS + 1):
-        p = Process(target=local_produce_proc, args=(xprofile, pid, PROC_NUM_MSG))
+        p = Process(target=local_produce_proc, args=(xprofile, pid, PROC_NUM_MSG, 1))
         p.start()
         pro_pros.append(p)
 
@@ -117,7 +117,7 @@ def test_log_comp(xprofile, xcp_setup, xtopic):
 
     - 로그 컴팩션은 카프카의 효율을 위한 것이지, 중복 메시지 제거를 위한 것이 아님
       https://stackoverflow.com/questions/61552299/is-kafka-log-compaction-also-a-de-duplication-mechanism
-    - 같은 키의 메시지가 하나의 여러 세그먼트에 존재하면 중복 메시지 발생 가능
+    - 같은 키의 메시지가 여러 세그먼트에 존재하면 중복 메시지 발생 가능
 
     """
     setup = load_setup(xprofile)
@@ -142,6 +142,8 @@ def test_log_comp(xprofile, xcp_setup, xtopic):
 
     prod.send(xtopic, b'300', b'Patric')
     prod.flush()
+
+    decoder = lambda x: x.decode('utf-8')
 
     # 로그 컴팩션 완료를 기다린 후 결과 확인
     time.sleep(13)
@@ -232,9 +234,8 @@ def test_s3sink_rereg(xprofile, xcp_setup, xtopic, xkfssh, xs3sink):
     linfo(f"Orignal Messages: {tot_msg}, S3 Messages: {s3cnt}")
     assert tot_msg == s3cnt
 
-decoder = lambda x: x.decode('utf-8')
 
-
+# S3SBK_NUM_MSG = 1000
 S3SBK_NUM_MSG = 4000
 @pytest.mark.parametrize('xs3sink', [{'flush_size': S3SBK_NUM_MSG // 3}], indirect=True)
 def test_s3sink_brk(xkafka, xprofile, xcp_setup, xtopic, xkfssh, xs3sink):
@@ -266,16 +267,8 @@ def test_s3sink_brk(xkafka, xprofile, xcp_setup, xtopic, xkfssh, xs3sink):
         p.join()
 
     # 이 경우는 rotate.schedule.interval.ms 가 지난 후 더 기다려야함
-    time.sleep(10)
+    time.sleep(20)
 
-    tot_msg = NUM_PRO_PROCS * S3SBK_NUM_MSG
-    # S3 Sink 커넥터가 올린 내용 확인
-    s3cnt = s3_count_sinkmsg(KFKTEST_S3_BUCKET, KFKTEST_S3_DIR + "/")
-    linfo(f"Orignal Messages: {tot_msg}, S3 Messages: {s3cnt}")
-    assert tot_msg == s3cnt
-
-
-def test_s3():
     tot_msg = NUM_PRO_PROCS * S3SBK_NUM_MSG
     # S3 Sink 커넥터가 올린 내용 확인
     s3cnt = s3_count_sinkmsg(KFKTEST_S3_BUCKET, KFKTEST_S3_DIR + "/")
