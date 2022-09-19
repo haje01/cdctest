@@ -15,7 +15,7 @@ parser = argparse.ArgumentParser(description="프로파일에 맞는 토픽에 �
 )
 parser.add_argument('profile', type=str, help="프로파일 이름.")
 parser.add_argument('-m', '--messages', type=int, default=10000, help="생성할 메시지 수.")
-parser.add_argument('--acks', type=int, default=0, help="전송 완료에 필요한 승인 수.")
+parser.add_argument('--acks', type=int, default=1, help="전송 완료에 필요한 승인 수.")
 parser.add_argument('-c', '--compress', type=str,
     choices=['none', 'gzip', 'snappy', 'lz4'], default='none', help="데이터 압축 방식.")
 parser.add_argument('-p', '--pid', type=int, default=0, help="셀렉트 프로세스 ID.")

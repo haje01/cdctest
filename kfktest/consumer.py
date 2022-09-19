@@ -47,8 +47,7 @@ def consume(profile,
     broker_addr = setup[ip_key]['value']
     broker_port = 19092 if dev else 9092
     if count_only:
-        ssh = SSH(broker_addr)
-        total = count_topic_message(profile, topic, True, timeout)
+        total = count_topic_message(profile, topic)
         linfo(f"[v] consume {topic} with {total} messages.")
         return
     else:

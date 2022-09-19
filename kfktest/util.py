@@ -172,10 +172,12 @@ def ssh_exec(ssh, cmd, kafka_env=True, stderr_type="stderr", ignore_err=False):
     """
     env = "source ~/.kenv && " if kafka_env else ""
     cmd = f'{env}{cmd}'
+    linfo(f"[ ] ssh_exec {cmd}")
     _, stdout, stderr = ssh.exec_command(cmd)
     es = stdout.channel.recv_exit_status()
     out = stdout.read().decode('utf8')
     err = stderr.read().decode('utf8')
+    linfo("f[v] ssh_exec {cmd}")
     if stderr_type == "stdout":
         out = err
         err = ''
@@ -238,7 +240,7 @@ def list_topics(kfk_ssh, skip_internal=True):
 
 
 def create_topic(kfk_ssh, topic, partitions=TOPIC_PARTITIONS,
-                 replications=TOPIC_REPLICATIONS):
+                 replications=TOPIC_REPLICATIONS, config=None):
     """토픽 생성.
 
     Args:
@@ -247,14 +249,18 @@ def create_topic(kfk_ssh, topic, partitions=TOPIC_PARTITIONS,
 
     """
     linfo(f"[ ] create_topic '{topic}'")
-    ret = ssh_exec(kfk_ssh, f'kafka-topics.sh --create --topic {topic} --bootstrap-server localhost:9092 --partitions {partitions} --replication-factor {replications}')
+    cmd = f'kafka-topics.sh --create --topic {topic} --bootstrap-server localhost:9092 --partitions {partitions} --replication-factor {replications}'
+    if config is not None:
+        for ck, cv in config.items():
+            cmd += f' --config {ck}={cv}'
+    ret = ssh_exec(kfk_ssh, cmd)
     linfo(f"[v] create_topic '{topic}'")
     return ret
 
 
 
 def claim_topic(kfk_ssh, topic, partitions=TOPIC_PARTITIONS,
-                replications=TOPIC_REPLICATIONS):
+                replications=TOPIC_REPLICATIONS, config=None):
     """토픽이 없는 경우만 생성.
 
     Args:
@@ -265,7 +271,8 @@ def claim_topic(kfk_ssh, topic, partitions=TOPIC_PARTITIONS,
     linfo(f"[ ] claim_topic: {topic} at kafka")
     topics = list_topics(kfk_ssh)
     if topic not in topics:
-        create_topic(kfk_ssh, topic, partitions=partitions, replications=replications)
+        create_topic(kfk_ssh, topic, partitions=partitions,
+            replications=replications, config=config)
     linfo(f"[v] claim_topic: {topic} at kafka")
 
 
@@ -382,75 +389,98 @@ def delete_all_topics(kfk_ssh, profile):
 
 
 def reset_topic(ssh, topic, partitions=TOPIC_PARTITIONS,
-        replications=TOPIC_REPLICATIONS):
+        replications=TOPIC_REPLICATIONS, config=None):
     """특정 토픽 초기화."""
     linfo(f"[ ] reset_topic '{topic}'")
     delete_topic(ssh, topic, True)
-    create_topic(ssh, topic, partitions, replications)
+    create_topic(ssh, topic, partitions, replications, config)
     linfo(f"[v] reset_topic '{topic}'")
 
 
-def count_topic_message(profile, topic, from_begin=True, timeout=10):
-    """토픽의 메시지 수를 카운팅.
-
-    Args:
-        profile : 프로파일
-        topic (str): 토픽명. (하나 이상이면 ',' 로 구분)
-        from_begin (bool): 토픽의 첫 메시지부터. 기본값 True
-        timeout (int): 컨슘 타임아웃 초. 기본값 10초
-            너무 작은 값이면 카운팅이 끝나기 전에 종료될 수 있다.
-
-    """
-    linfo(f"[ ] count_topic_message - topic: {topic}, timeout: {timeout}")
-    assert type(topic) is str
+def count_topic_message(profile, topic):
+    linfo("[ ] count_topic_message")
     setup = load_setup(profile)
     kfk_ip = setup['kafka_public_ip']['value']
-    topics = topic.split(',')
-    procs = []
-    qs = []
-    for topic in topics:
-        q = Queue()
-        p = Process(target=_count_topic_message,
-                    args=(kfk_ip, topic, q, from_begin, timeout))
-        procs.append(p)
-        qs.append(q)
-        p.start()
-
-    total = 0
-    for i, p in enumerate(procs):
-        cnt = qs[i].get()
-        total += cnt
-        p.join()
-
-    linfo(f"[v] count_topic_message - topic: {topic}, timeout: {timeout}")
-    return total
-
-
-def _count_topic_message(kfk_ip, topic, q, from_begin=True, timeout=10):
-    time.sleep(random.random() * 10)
-    linfo(f"[ ] _count_topic_message - topic: {topic}")
-    cmd = f'''kafka-console-consumer.sh --bootstrap-server localhost:9092 --topic {topic} --timeout-ms {timeout * 1000}'''
+    cmd = f'''kafkacat -b localhost:9092 -t {topic} -e -q | wc -l'''
     kfk_ssh = SSH(kfk_ip)
-
-    # 타임아웃까지 기다림
-    ssh_exec(kfk_ssh, cmd)
-    if from_begin:
-        cmd = f"""kafka-run-class.sh kafka.tools.GetOffsetShell --bootstrap-server=localhost:9092 --topic {topic} | awk -F ':' '{{sum += $3}} END {{print sum}}'"""
-        ret = ssh_exec(kfk_ssh, cmd)
-        linfo(f"topic {topic} {ret.strip()}")
-        cnt = int(ret.strip())
-        q.put(cnt)
-    else:
-        cmd += ' | tail -n 10 | grep Processed'
-        ret = ssh_exec(kfk_ssh, cmd, stderr_type="stdout")
-        msg = ret.strip().split('\n')[-1]
-        match = re.search(r'Processed a total of (\d+) messages', msg)
-        if match is not None:
-            cnt = int(match.groups()[0])
-        else:
-            raise Exception(f"Not matching result: {msg}")
-    linfo(f"[v] _count_topic_message - topic: {topic}")
+    ret = ssh_exec(kfk_ssh, cmd)
+    cnt = int(ret.strip())
+    linfo(f"[v] count_topic_message {cnt}")
     return cnt
+
+
+# def count_topic_message(profile, topic, from_begin=True, timeout=10):
+#     """토픽의 메시지 수를 카운팅.
+
+#     Args:
+#         profile : 프로파일
+#         topic (str): 토픽명. (하나 이상이면 ',' 로 구분)
+#         from_begin (bool): 토픽의 첫 메시지부터. 기본값 True
+#         timeout (int): 컨슘 타임아웃 초. 기본값 10초
+#             너무 작은 값이면 카운팅이 끝나기 전에 종료될 수 있다.
+
+#     """
+#     linfo(f"[ ] count_topic_message - topic: {topic}, timeout: {timeout}")
+#     assert type(topic) is str
+#     setup = load_setup(profile)
+#     kfk_ip = setup['kafka_public_ip']['value']
+#     topics = topic.split(',')
+#     procs = []
+#     qs = []
+#     for topic in topics:
+#         q = Queue()
+#         p = Process(target=_count_topic_message,
+#                     args=(kfk_ip, topic, q, from_begin, timeout))
+#         procs.append(p)
+#         qs.append(q)
+#         p.start()
+
+#     total = 0
+#     for i, p in enumerate(procs):
+#         linfo(f"[ ] consume proc {i} {p} get queue result")
+#         cnt = qs[i].get()
+#         linfo(f"[v] consume proc {i} {p} get queue result {cnt}")
+#         total += cnt
+#         p.join()
+
+#     linfo(f"[v] count_topic_message - topic: {topic}, timeout: {timeout} {total}")
+#     return total
+
+
+# def _count_topic_message(kfk_ip, topic, q, from_begin=True, timeout=10):
+#     time.sleep(random.random() * 10)
+#     linfo(f"[ ] _count_topic_message - topic: {topic}")
+#     # cmd = f'''kafka-console-consumer.sh --bootstrap-server localhost:9092 --topic {topic} --timeout-ms {timeout * 1000}'''
+#     cmd = f'''kcat -b localhost:9092 --topic {topic} -m {timeout} -q | wc -l'''
+#     kfk_ssh = SSH(kfk_ip)
+
+#     assert from_begin == True
+#     # 타임아웃까지 기다림
+#     ret = ssh_exec(kfk_ssh, cmd)
+#     cnt = int(ret.strip())
+#     linfo("1")
+    # if from_begin:
+    #     linfo("2-1")
+    #     # cmd = f"""kafka-run-class.sh kafka.tools.GetOffsetShell --bootstrap-server=localhost:9092 --topic {topic} | awk -F ':' '{{sum += $3}} END {{print sum}}'"""
+    #     cmd = f'''kcat -'''
+    #     ret = ssh_exec(kfk_ssh, cmd)
+    #     linfo("2-2")
+    #     linfo(f"topic {topic} {ret.strip()}")
+    #     cnt = int(ret.strip())
+    #     q.put(cnt)
+    # else:
+    #     linfo("3-1")
+    #     cmd += ' | tail -n 10 | grep Processed'
+    #     ret = ssh_exec(kfk_ssh, cmd, stderr_type="stdout")
+    #     linfo("3-1")
+    #     msg = ret.strip().split('\n')[-1]
+    #     match = re.search(r'Processed a total of (\d+) messages', msg)
+    #     if match is not None:
+    #         cnt = int(match.groups()[0])
+    #     else:
+    #         raise Exception(f"Not matching result: {msg}")
+    # linfo(f"[v] _count_topic_message - topic: {topic} {cnt}")
+    # return cnt
 
 
 # def count_msg_from_topic(ssh, topics):
@@ -930,10 +960,11 @@ def claim_kafka(kfk_ssh):
 
 
 @pytest.fixture(params=[{
-        'topics': [],  # 명시적으로 리셋할 토픽들
+        'topics': [],      # 명시적으로 리셋할 토픽들
         'partitions': TOPIC_PARTITIONS,
         'replications': TOPIC_REPLICATIONS,
-        'cdc': False    # CDC 여부
+        'cdc': False,      # CDC 여부,
+        'topic_cfg': None  # 토픽 생성 설정
     }])
 def xtopic(xkfssh, xprofile, request):
     """카프카 토픽 초기화."""
@@ -951,47 +982,10 @@ def xtopic(xkfssh, xprofile, request):
     partitions = request.param.get('partitions', TOPIC_PARTITIONS)
     replications = request.param.get('replications', TOPIC_REPLICATIONS)
     delete_all_topics(xkfssh, xprofile)
+    topic_cfg = request.param.get('topic_cfg', None)
     for _topic in topics:
-        create_topic(xkfssh, _topic, partitions, replications)
-    yield
-
-
-# @pytest.fixture(params=[{
-#         'topics': [],  # 리셋할 토픽들
-#         'partitions': 12,
-#         'replications': 1
-#     }])
-# def xtopic_ct(xkfssh, xprofile, xkafka, request):
-#     """CT 테스트용 카프카 토픽 초기화."""
-#     linfo("xtopic_ct")
-#     topic = f"{xprofile}-person"
-#     topics = request.param['topics'] + [topic]
-#     partitions = request.param['partitions']
-#     replications = request.param['replications']
-#     delete_all_topics(xkfssh)
-#     for _topic in topics:
-#         create_topic(xkfssh, topic, partitions, replications)
-#     yield
-
-
-# @pytest.fixture(params=[{
-#         'topics': [],  # 리셋할 토픽들
-#         'partitions': 12,
-#         'replications': 1
-#     }])
-# def xtopic_cdc(xkfssh, xprofile, xkafka, request):
-#     """CDC 테스트용 카프카 토픽 초기화."""
-#     linfo("xtopic_cdc")
-#     reset_topic(xkfssh, f"db1")
-#     scm = 'dbo' if xprofile == 'mssql' else 'test'
-#     topic = f"db1.{scm}.person"
-#     topics = request.param['topics'] + [topic]
-#     partitions = request.param['partitions']
-#     replications = request.param['replications']
-#     delete_all_topics(xkfssh)
-#     for _topic in topics:
-#         create_topic(xkfssh, topic, partitions, replications)
-#     yield
+        create_topic(xkfssh, _topic, partitions, replications, topic_cfg)
+    yield topic
 
 
 def setup_path(profile):
@@ -1072,12 +1066,12 @@ def drop_all_tables(profile):
     linfo(f"[v] drop_all_tables {profile}")
 
 
-def local_produce_proc(profile, pid, msg_cnt):
+def local_produce_proc(profile, pid, msg_cnt, acks=1):
     """로컬 프로듀서 프로세스 함수."""
     from kfktest.producer import produce
 
     linfo(f"[ ] produce process {pid}")
-    produce(profile, messages=msg_cnt, dev=True)
+    produce(profile, messages=msg_cnt, acks=acks, dev=True)
     linfo(f"[v] produce process {pid}")
 
 
@@ -1088,8 +1082,9 @@ def local_consume_proc(profile, pid, q, topic=None, timeout=10):
     linfo(f"[ ] consume process {pid}")
     cnt = consume(profile, dev=True, count_only=True, from_begin=True,
                   timeout=timeout, topic=topic)
+    linfo(f"local consumer put cnt {cnt} to queue")
     q.put(cnt)
-    linfo(f"[v] consume process {pid}")
+    linfo(f"[v] consume process {pid} {cnt}")
 
 
 def remote_produce_proc(profile, setup, pid, msg_cnt):
