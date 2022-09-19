@@ -25,7 +25,7 @@ def xprofile():
     return 'nodb'
 
 
-def test_local_basic(xprofile, xsetup, xtopic, xkfssh):
+def test_local_basic(xkafka, xprofile, xsetup, xtopic, xkfssh):
     """로컬 프로듀서 및 컨슈머로 기본 동작 테스트."""
     st = time.time()
     # Producer 프로세스 시작
@@ -47,8 +47,12 @@ def test_local_basic(xprofile, xsetup, xtopic, xkfssh):
     assert tot_msg == cnt
 
 
-def test_local_basic_brk(xprofile, xsetup, xtopic, xkfssh):
-    """브로커가 죽을 때 로컬 프로듀서 및 컨슈머로 동작 테스트."""
+def test_local_basic_brk(xkafka, xprofile, xsetup, xtopic, xkfssh):
+    """브로커가 죽을 때 로컬 프로듀서 및 컨슈머로 동작 테스트.
+
+    - 브로커가 죽으면 메시지 손실이 발생할 수 있음 (아닌 경우도 있음)
+
+    """
     st = time.time()
     # Producer 프로세스 시작
     pro_pros = []
@@ -57,30 +61,26 @@ def test_local_basic_brk(xprofile, xsetup, xtopic, xkfssh):
         p.start()
         pro_pros.append(p)
 
-    # Consumer 프로세스 시작
-    q = Queue()
-    con = Process(target=local_consume_proc, args=(xprofile, 1, q))
-    con.start()
-
     # 잠시 후 카프카 브로커 강제 종료
-    time.sleep(1)
+    time.sleep(2)
     kill_proc_by_port(xkfssh, 9092)
     # 잠시 후 카프카 브로커 start
-    time.sleep(1)
+    time.sleep(2)
     start_kafka_broker(xkfssh)
 
     for p in pro_pros:
         p.join()
-    con_cnt = q.get()
-    con.join()
 
+    # 메시지 수집 대기
+    time.sleep(5)
+    cnt = count_topic_message(xprofile, xtopic)
     tot_msg = PROC_NUM_MSG * NUM_PRO_PROCS
     vel = tot_msg / (time.time() - st)
-    linfo (f"Produce and consume total {tot_msg} messages. {int(vel)} rows per seconds.")
-    assert tot_msg == con_cnt
+    linfo (f"Produce and consume total {tot_msg} messages. topic has {cnt} messages.")
+    assert tot_msg >= cnt
 
 
-def test_remote_basic(xprofile, xsetup, xcp_setup, xtopic, xkfssh):
+def test_remote_basic(xkafka, xprofile, xsetup, xcp_setup, xtopic, xkfssh):
     """원격 프로듀서 및 컨슈머로 기본 동작 테스트."""
     st = time.time()
     # Producer 프로세스 시작
