@@ -51,6 +51,16 @@ resource "aws_security_group" "kafka" {
     ]
   }
 
+  ingress {
+    from_port = 9092
+    to_port = 9092
+    description = "From ksqlDB to Kafka"
+    protocol = "tcp"
+    security_groups = [
+      "${var.ksqldb_sg_id}"
+    ]
+  }
+
   egress {
     protocol  = "-1"
     from_port = 0

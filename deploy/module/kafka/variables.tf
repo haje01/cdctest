@@ -8,6 +8,7 @@ variable "key_pair_name" {}
 variable "private_key" {}
 variable "producer_sg_id" {}
 variable "consumer_sg_id" {}
+variable "ksqldb_sg_id" {}
 
 variable "kafka_url" {}
 variable "kafka_s3_sink" {}

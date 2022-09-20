@@ -3,6 +3,7 @@ variable region {
 }
 variable "name" {}
 variable "ubuntu_ami" {}
+variable "ksqldb_instance_type" {}
 variable "procon_instance_type" {
   default = "t3.medium"
 }
