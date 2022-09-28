@@ -25,6 +25,7 @@ module "producer" {
   work_cidr = var.work_cidr
   key_pair_name = var.key_pair_name
   kafka_url = var.kafka_url
+  filebeat_url = var.filebeat_url
   tags = var.tags
 }
 
@@ -38,6 +39,7 @@ module "consumer" {
   work_cidr = var.work_cidr
   key_pair_name = var.key_pair_name
   kafka_url = var.kafka_url
+  filebeat_url = ""
   tags = var.tags
 }
 

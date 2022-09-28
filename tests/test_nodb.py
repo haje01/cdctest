@@ -386,26 +386,22 @@ def test_ksql_dedup(xkafka, xprofile, xcp_setup, xksql, xdel_ksql_dedup_strtbl):
     }
 
     # 윈도우별 메시지 카운팅 테이블 생성
+    # id 와 name 을 복합키로 생각
     sql = '''
     CREATE TABLE nodb_person_agg
         WITH (kafka_topic='nodb_person_agg', partitions=1, format='json')
         AS
         SELECT id AS KEY1,
             name AS KEY2,
-            address AS KEY3,
-            ip AS KEY4,
-            birth AS KEY5,
-            company AS KEY6,
-            phone AS KEY7,
             AS_VALUE(id) AS id,
             AS_VALUE(name) AS name,
-            AS_VALUE(address) AS address,
-            AS_VALUE(birth) AS birth,
-            AS_VALUE(company) AS company,
-            AS_VALUE(phone) AS phone,
+            LATEST_BY_OFFSET(address) AS address,
+            LATEST_BY_OFFSET(birth) AS birth,
+            LATEST_BY_OFFSET(company) AS company,
+            LATEST_BY_OFFSET(phone) AS phone,
             COUNT(*) AS count
         FROM nodb_person_str WINDOW TUMBLING (SIZE 1 MINUTES)
-        GROUP BY id, name, address, ip, birth, company, phone;
+        GROUP BY id, name;
 
     -- 메시지 카운팅 스트림
     CREATE STREAM nodb_person_agg_str (

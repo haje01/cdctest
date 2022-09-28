@@ -8,3 +8,5 @@ __pycache__/
 !.gitignore
 temp/
 setup.json
+test.log
+test.log.*

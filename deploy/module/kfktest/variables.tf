@@ -8,6 +8,7 @@ variable "private_key" {}
 variable "work_cidr" {}
 variable "key_pair_name" {}
 variable "kafka_url" {}
+variable "filebeat_url" {}
 
 variable "tags" {
     type = map(string)

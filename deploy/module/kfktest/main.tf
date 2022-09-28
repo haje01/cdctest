@@ -30,8 +30,8 @@ resource "aws_security_group" "kfktest" {
 }
 
 locals {
-  install_kafka = <<EOT
 # Kafka 설치
+  install_kafka = <<EOT
 sudo apt install -y openjdk-8-jdk
 echo 'export JAVA_HOME=/usr/lib/jvm/java-8-openjdk-amd64' >> ~/.kenv
 echo 'export PATH=$PATH:$JAVA_HOME/bin' >> ~/.kenv
@@ -42,6 +42,13 @@ tar xzf $kafka_file
 rm $kafka_file
 echo "export PATH=$PATH:~/$kafka_dir/bin" >> ~/.kenv
 cat ~/.kenv >> ~/.bashrc
+EOT
+# Filebeat 설치
+  install_filebeat = <<EOT
+curl -L -O ${var.filebeat_url}
+filebeat_file=${basename(var.filebeat_url)}
+sudo dpkg -i $filebeat_file
+rm $filebeat_file
 EOT
 }
 
@@ -76,6 +83,8 @@ cd
 
 # Kafka 설치
 ${var.kafka_url != "" ? local.install_kafka : ""}
+# Filebeat 설치
+${var.filebeat_url != "" ? local.install_filebeat : ""}
 EOT
     ]
   }
