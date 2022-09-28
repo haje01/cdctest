@@ -47,7 +47,7 @@ def test_ct_local_basic(xjdbc, xkfssh, xsetup, xprofile):
         p.start()
 
     # 카프카 토픽 확인 (timeout 되기전에 다 받아야 함)
-    cnt = count_topic_message(xprofile, f'{xprofile}-person', timeout=10)
+    cnt = count_topic_message(xprofile, f'{xprofile}_person', timeout=10)
     assert DB_ROWS + DB_PRE_ROWS == cnt
 
     for p in ins_pros:
@@ -97,7 +97,7 @@ def test_ct_broker_stop(xsetup, xjdbc, xkfssh, xprofile, xhash):
     restart_kafka_and_connect(xprofile, xkfssh, xhash, False)
 
     # 카프카 토픽 확인 (timeout 되기 전에 다 받아야 함)
-    cnt = count_topic_message(xprofile, f'{xprofile}-person', timeout=10)
+    cnt = count_topic_message(xprofile, f'{xprofile}_person', timeout=10)
     # 정지 시점에 따라 중복 발생 가능
     assert DB_ROWS + DB_PRE_ROWS <= cnt
 
@@ -141,7 +141,7 @@ def test_ct_broker_kill(xsetup, xjdbc, xkfssh, xprofile):
     start_kafka_broker(xkfssh)
 
     # 카프카 토픽 확인 (timeout 되기 전에 다 받아야 함)
-    cnt = count_topic_message(xprofile, f'{xprofile}-person', timeout=10)
+    cnt = count_topic_message(xprofile, f'{xprofile}_person', timeout=10)
     # 브로커만 강제 Kill 된 경우, 커넥터가 offset 을 flush 하지 못해 다시 시도
     # -> 중복 메시지 발생 가능!
     assert DB_ROWS + DB_PRE_ROWS <= cnt
@@ -185,7 +185,7 @@ def test_ct_broker_vmstop(xsetup, xjdbc, xkfssh, xprofile):
     # Reboot 후 ssh 객체 재생성 필요!
     kfssh = get_kafka_ssh(xprofile)
     # 카프카 토픽 확인 (timeout 되기 전에 다 받아야 함)
-    cnt = count_topic_message(xprofile, f'{xprofile}-person', timeout=10)
+    cnt = count_topic_message(xprofile, f'{xprofile}_person', timeout=10)
     assert DB_ROWS + DB_PRE_ROWS == cnt
 
     for p in ins_pros:
@@ -229,7 +229,7 @@ def test_ct_broker_vmstop(xsetup, xjdbc, xkfssh, xprofile):
 #     # reboot 후 ssh 객체 재생성 필요!
 #     kfssh = get_kafka_ssh(xprofile)
 #     # 카프카 토픽 확인 (timeout 되기 전에 다 받아야 함)
-#     cnt = count_topic_message(xprofile, f'{xprofile}-person', timeout=10)
+#     cnt = count_topic_message(xprofile, f'{xprofile}_person', timeout=10)
 #     assert DB_ROWS + DB_PRE_ROWS == cnt
 
 #     for p in ins_pros:
@@ -296,7 +296,7 @@ def test_ct_remote_basic(xcp_setup, xprofile, xkfssh, xjdbc):
         p.start()
 
     # 카프카 토픽 확인 (timeout 되기전에 다 받아야 함)
-    cnt = count_topic_message(xprofile, f'{xprofile}-person', timeout=10)
+    cnt = count_topic_message(xprofile, f'{xprofile}_person', timeout=10)
     assert DB_ROWS + DB_PRE_ROWS == cnt
 
     for p in ins_pros:
@@ -394,7 +394,7 @@ CTR_BATCH = 100
             -----
             SELECT * FROM person
         """,
-        'query_topic': 'mysql-person',
+        'query_topic': 'mysql_person',
         'inc_col': 'id',
         'ts_col': 'regdt',
     }], indirect=True)
@@ -432,12 +432,12 @@ def test_ct_rtbl_incts(xcp_setup, xjdbc, xs3sink, xtable, xprofile, xtopic, xkfs
     time.sleep(7)
 
     # 토픽 메시지 수와 DB 행 수는 같아야 한다
-    count = count_topic_message(xprofile, f'{xprofile}-person')
+    count = count_topic_message(xprofile, f'{xprofile}_person')
     # assert CTR_INSERTS * CTR_BATCH == count
     linfo(f"Orignal Messages: {CTR_INSERTS * CTR_BATCH}, Topic Messages: {count}")
 
     # 빠진 ID 가 없는지 확인
-    cmd = f"kafka-console-consumer.sh --bootstrap-server localhost:9092 --topic {xprofile}-person --from-beginning --timeout-ms 3000"
+    cmd = f"kafka-console-consumer.sh --bootstrap-server localhost:9092 --topic {xprofile}_person --from-beginning --timeout-ms 3000"
     ssh = get_kafka_ssh(xprofile)
     ret = ssh_exec(ssh, cmd)
     pids = set()

@@ -297,6 +297,14 @@ def get_kafka_ssh(profile):
     return ssh
 
 
+def get_ksqldb_ssh(profile):
+    """프로파일에 맞는 ksqlDB SSH 얻기."""
+    setup = load_setup(profile)
+    ip = setup['ksqldb_public_ip']['value']
+    ssh = SSH(ip, 'ksqldb')
+    return ssh
+
+
 @pytest.fixture
 def xkfssh(xprofile, xkvmstart):
     linfo("xkfssh")
@@ -348,6 +356,30 @@ def delete_topic(kfk_ssh, topic, ignore_not_exist=False):
     linfo(f"[v] delete_topic '{topic}'")
     return ret
 
+
+@retry(RuntimeError, tries=10, delay=10)
+def delete_ksql_objects(ssh, strtbls):
+    """ksqlDB 에서 주어진 순서대로 스트림과 테이블을 삭제.
+
+    - 테스트별 의존성에 맞게 삭제
+
+    Args:
+        strtbls: [(객체_타입, 객체_이름), ...] 형태의 리스트
+            객체 타입:
+                0: 스트림
+                1: 테이블
+            예: [(1, 'my_table'), (0, 'my_stream'), ...]
+    """
+    linfo(f"[ ] delete_ksql_objects '{strtbls}'")
+    for atype, name in (strtbls):
+        assert atype in (0, 1)
+        if atype == 0:
+            _ksql_exec(ssh, f'DROP STREAM IF EXISTS {name}')
+        else:
+            _ksql_exec(ssh, f'DROP TABLE IF EXISTS {name}')
+    linfo(f"[v] delete_ksql_objects '{strtbls}'")
+
+
 @retry(RuntimeError, tries=7, delay=3)
 def delete_all_topics(kfk_ssh, profile):
     """대상 카프카의 모든 토픽 삭제.
@@ -360,7 +392,7 @@ def delete_all_topics(kfk_ssh, profile):
     """
     def get_topics():
         topics = list_topics(kfk_ssh)
-        return [topic for topic in topics if f'{profile}-person' in topic]
+        return [topic for topic in topics if f'{profile}_person' in topic.lower()]
 
     linfo(f"[ ] delete_all_topics")
     topics = get_topics()
@@ -533,7 +565,7 @@ def register_jdbc(kfk_ssh, profile, db_addr, db_port, db_user, db_passwd,
 
     # 반복된 테스트에 문제가 없으려면 커넥터 이름이 매번 달라야 한다.
     assert com_hash is not None
-    conn_name = f'jdbc-{profile}-{com_hash}'
+    conn_name = f'jdbc_{profile}_{com_hash}'
     tables = params.get('tables', '')
     inc_col = params.get('inc_col', 'id')
     ts_col = params.get('ts_col')
@@ -622,7 +654,7 @@ def register_s3sink(kfk_ssh, profile, topics, param):
     flush_size = param.get('flush_size', 5)
     # 테스트 종료전 확인 가능하게 설정 필요
     rot_interval = param.get('rot_interval', 5000)
-    conn_name = f's3sink-{profile}-{chash}'
+    conn_name = f's3sink_{profile}_{chash}'
     linfo(f"[ ] register_s3sink {conn_name}")
     assert profile in ('mysql', 'mssql', 'nodb')
 
@@ -658,7 +690,6 @@ def register_s3sink(kfk_ssh, profile, topics, param):
     time.sleep(5)
     status = get_connector_status(kfk_ssh, conn_name)
     if status['tasks'][0]['state'] == 'FAILED':
-        import pdb; pdb.set_trace()
         raise RuntimeError(status['tasks'][0]['trace'])
     linfo(f"[v] register_s3sink {conn_name}")
     return conn_name
@@ -686,7 +717,7 @@ def register_dbzm(kfk_ssh, profile, svr_name, db_addr, db_port, db_name,
         name_hash (str): 커넥터 이름에 붙을 해쉬
 
     """
-    conn_name = f'dbzm-{profile}-{name_hash}'
+    conn_name = f'dbzm_{profile}_{name_hash}'
     linfo(f"[ ] register_dbzm {conn_name} for {db_name}")
 
     # 공통 설정
@@ -805,7 +836,7 @@ def list_kconn(kfk_ssh):
 def pause_kconn(kfk_ssh, conn_name):
     """카프카 커넥터 정지."""
     linfo(f"[ ] pause_kconn {conn_name}")
-    cmd = f'''curl -X DELETE http://localhost:8083/connectors/{conn_name}/pause'''
+    cmd = f'''curl -s -X DELETE http://localhost:8083/connectors/{conn_name}/pause'''
     try:
         ssh_exec(kfk_ssh, cmd, ignore_err=True)
     except json.decoder.JSONDecodeError as e:
@@ -817,7 +848,7 @@ def pause_kconn(kfk_ssh, conn_name):
 def restart_kconn(kfk_ssh, conn_name):
     """카프카 커넥터 재개."""
     linfo(f"[ ] restart_kconn {conn_name}")
-    cmd = f'''curl -X DELETE http://localhost:8083/connectors/{conn_name}/restart'''
+    cmd = f'''curl -s -X DELETE http://localhost:8083/connectors/{conn_name}/restart'''
     try:
         ssh_exec(kfk_ssh, cmd, ignore_err=True)
     except json.decoder.JSONDecodeError as e:
@@ -837,7 +868,7 @@ def unregister_kconn(kfk_ssh, conn_name):
     linfo(f"[ ] unregister_kconn {conn_name}")
     # pause_kconn(kfk_ssh, conn_name)
     # time.sleep(5)
-    cmd = f'''curl -X DELETE http://localhost:8083/connectors/{conn_name}'''
+    cmd = f'''curl -s -X DELETE http://localhost:8083/connectors/{conn_name}'''
     try:
         ssh_exec(kfk_ssh, cmd, ignore_err=True)
     except json.decoder.JSONDecodeError as e:
@@ -980,7 +1011,7 @@ def xtopic(xkfssh, xprofile, request):
         scm = 'dbo' if xprofile == 'mssql' else 'test'
         topic = f"db1.{scm}.person"
     else:
-        topic = f"{xprofile}-person"
+        topic = f"{xprofile}_person"
     topics = request.param.get('topics', [])
     if len(topics) == 0:
         topics = [topic]
@@ -1071,12 +1102,14 @@ def drop_all_tables(profile):
     linfo(f"[v] drop_all_tables {profile}")
 
 
-def local_produce_proc(profile, pid, msg_cnt, acks=1):
+def local_produce_proc(profile, pid, msg_cnt, acks=1, duprate=0, lagrate=0,
+        withkey=False):
     """로컬 프로듀서 프로세스 함수."""
     from kfktest.producer import produce
 
     linfo(f"[ ] produce process {pid}")
-    produce(profile, messages=msg_cnt, acks=acks, dev=True)
+    produce(profile, messages=msg_cnt, acks=acks, dev=True, duprate=duprate,
+        lagrate=lagrate, withkey=withkey)
     linfo(f"[v] produce process {pid}")
 
 
@@ -1356,7 +1389,7 @@ def _xjdbc(profile, setup, kfssh, chash, params):
     db_user = setup['db_user']['value']
     db_passwd = setup['db_passwd']['value']['result']
     ret = register_jdbc(kfssh, profile, db_addr, DB_PORTS[profile],
-        db_user, db_passwd, "test", f"{profile}-", chash,
+        db_user, db_passwd, "test", f"{profile}_", chash,
         params=params)
     if 'error_code' in ret:
         raise RuntimeError(ret['message'])
@@ -1376,7 +1409,7 @@ def xs3rmdir(request):
 @pytest.fixture(params=[{}])
 def xs3sink(xprofile, xrmcons, xkfssh, xhash, xs3rmdir, request):
     """S3 Sink Connector 등록."""
-    topics = f'{xprofile}-person'
+    topics = f'{xprofile}_person'
     yield register_s3sink(xkfssh, xprofile, topics, request.param)
 
 
@@ -1785,3 +1818,137 @@ def rot_table_proc(profile, max_rot):
         time.sleep(1)
 
     linfo(f"[v] rot_table_proc {profile}")
+
+
+@retry(RuntimeError, tries=10, delay=30)
+def delete_all_ksql_streams(ksqlssh):
+    """ksqlDB 의 모든 스트림 제거."""
+    linfo("[ ] delete_all_ksql_streams")
+    streams = list_ksql_streams(ksqlssh)
+    for stream in streams:
+        if stream == 'KSQL_PROCESSING_LOG':
+            continue
+        _ksql_exec(ksqlssh, f'DROP STREAM {stream}')
+    linfo("[v] delete_all_ksql_streams")
+
+
+@retry(RuntimeError, tries=10, delay=30)
+def delete_all_ksql_tables(ksqlssh):
+    """ksqlDB 의 모든 테이블 제거."""
+    linfo("[ ] delete_all_ksql_tables")
+    tables = list_ksql_tables(ksqlssh)
+    for table in tables:
+        _ksql_exec(ksqlssh, f'DROP TABLE {table} DELETE TOPIC')
+    linfo("[v] delete_all_ksql_tables")
+
+
+def list_ksql_streams(ksqlssh, skip_system=True):
+    ret = _ksql_exec(ksqlssh, 'SHOW STREAMS')
+    streams = [st['name'] for st in ret[0]['streams']]
+    if skip_system:
+        _streams = []
+        for st in streams:
+            if st in ('KSQL_PROCESSING_LOG'):
+                continue
+            _streams.append(st)
+        streams = _streams
+    return streams
+
+
+def list_ksql_tables(ksqlssh):
+    ret = _ksql_exec(ksqlssh, 'SHOW TABLES')
+    return [st['name'] for st in ret[0]['tables']]
+
+
+@pytest.fixture
+def xksql(xprofile):
+    """ksqlDB 초기화."""
+    linfo("xksql")
+    setup = load_setup(xprofile)
+    addr = setup['ksqldb_public_ip']['value']
+    ssh = SSH(addr)
+    terminate_all_ksql_queries(ssh)
+    # 테이블과 스트림 제거는 테스트별 커스텀 픽스쳐에서
+    # delete_all_ksql_tables(ssh)
+    # delete_all_ksql_streams(ssh)
+
+
+@retry(RuntimeError, tries=10, delay=10)
+def terminate_all_ksql_queries(ssh):
+    linfo("[ ] terminate_all_ksql_queries")
+    _ksql_exec(ssh, "TERMINATE ALL")
+    linfo("[v] terminate_all_ksql_queries")
+
+
+def ksql_exec(profile, sql, mode='ksql', _props=None, timeout=None):
+    """ksqlDB 명령 실행
+
+    profile (str): 프로파일
+    sql (str): ksqlDB SQL 명령
+    mode (str): 호출 방식. ksql, query 중 하나. ksql, query 중 하나 (기본값 ksql)
+        ksql: SELECT 문 외
+        query: SELECT 문
+
+    """
+    setup = load_setup(profile)
+    addr = setup['ksqldb_public_ip']['value']
+    ssh = SSH(addr)
+    return _ksql_exec(ssh, sql, mode, _props, timeout=timeout)
+
+
+def _ksql_exec(ssh, sql, mode='ksql', _props=None, timeout=None):
+    """ksqlDB API 명령 수행.
+
+    Args:
+        ssh: ksqlDB 장비로의 SSH
+        sql (string): 실행할 ksqlDB SQL 명령
+        mode (string): 호출 방식. ksql, query 중 하나 (기본값 ksql)
+            ksql: SELECT 문 외
+            query: SELECT 문
+        timeout (int): ksqlDB 명령 타임아웃
+
+    Returns:
+        dict: 하나의 JSON 인 경우
+        list: JSON Lines 인 경우
+    """
+    assert mode in ('ksql', 'query')
+    sql = sql.strip().replace("'", r"'\''").replace('\n', '\\n')
+    if not sql.endswith(';'):
+        sql += ';'
+    if _props is None:
+        props = ''
+    else:
+        assert type(_props) is dict
+        props = f', "streamsProperties": {json.dumps(_props)}'
+
+    timeout = f"-m {timeout}" if timeout is not None else ''
+    cmd = f"""
+    curl -s {timeout} -X POST http://localhost:8088/{mode} \
+        -H 'content-type: application/vnd.ksql.v1+json; charset=utf-8' \
+        -d '{{
+            "ksql": "{sql}"
+            {props}
+          }}'
+    """
+    ignore_err = True if timeout is not None else False
+    ret = ssh_exec(ssh, cmd, kafka_env=False, ignore_err=ignore_err)
+    if 'error_code' in ret:
+        raise RuntimeError(ret)
+    try:
+        data = json.loads(ret)
+        return data
+    except Exception as e:
+        # JSON Lines 인 경우 시도
+        try:
+            lines = []
+            for line in ret.split('\n'):
+                if len(line) == 0:
+                    continue
+                data = json.loads(line)
+                lines.append(data)
+            return lines
+        except Exception as e2:
+            msg = str(e2)
+            import pdb; pdb.set_trace()
+            linfo(msg)
+            raise RuntimeError(msg)

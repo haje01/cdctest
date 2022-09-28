@@ -1,6 +1,7 @@
 import time
 import json
 import argparse
+from random import random
 
 from kafka import KafkaProducer
 from kafka.errors import (KafkaConnectionError, KafkaTimeoutError,
@@ -23,6 +24,12 @@ parser.add_argument('-c', '--compress', type=str,
 parser.add_argument('-p', '--pid', type=int, default=0, help="셀렉트 프로세스 ID.")
 parser.add_argument('-d', '--dev', action='store_true', default=False,
     help="개발 PC 에서 실행 여부.")
+parser.add_argument('--lagrate', type=float, default=0, help="지연 메시지 비율.")
+parser.add_argument('--lagdelay', type=int, default=60, help="지연 메시지 지연 시간(초).")
+parser.add_argument('--duprate', type=float, default=0, help="중복 메시지 비율.")
+parser.add_argument('--dupdelay', type=int, default=3, help="중복 메시지 지연 시간(초).")
+parser.add_argument('-t', '--topic', type=str, default=None, help="명시적 토픽명")
+parser.add_argument('-k', '--withkey', action='store_true', default=False, help="메시지 키 생성.")
 
 #
 # 브로커가 없을 때 조용히 전송 메시지를 손실하는 문제
@@ -53,12 +60,26 @@ class SafeKafkaProducer(KafkaProducer):
         self.pending_futures = []
 
 
+def send(prod, topic, pid, data, withkey):
+    if withkey:
+        key = f"{pid}-{data['id']}".encode()
+        prod.send(topic, value=data, key=key)
+    else:
+        prod.send(topic, value=data)
+
+
 def produce(profile,
         messages=parser.get_default('messages'),
         acks=parser.get_default('acks'),
         compress=parser.get_default('compress'),
         pid=parser.get_default('pid'),
-        dev=parser.get_default('dev')
+        dev=parser.get_default('dev'),
+        lagrate=parser.get_default('lagrate'),
+        lagdelay=parser.get_default('lagdelay'),
+        duprate=parser.get_default('duprate'),
+        dupdelay=parser.get_default('dupdelay'),
+        etopic=parser.get_default('topic'),
+        withkey=parser.get_default('withkey'),
         ):
     """Fake 레코드 전송.
 
@@ -70,7 +91,7 @@ def produce(profile,
         - retry 를 해도 메시지 손실이 발생할 수 있으나, 안하는 것보다는 작은 손실
 
     """
-    topic = f'{profile}-person'
+    topic = f'{profile}_person' if etopic is None else etopic
     linfo(f"[ ] producer {pid} produces {messages} messages to {topic} with acks {acks}.")
 
     setup = load_setup(profile)
@@ -79,28 +100,66 @@ def produce(profile,
     broker_port = 19092 if dev else 9092
     linfo(f"kafka broker at {broker_addr}:{broker_port}")
     compress = compress if compress != 'none' else None
-    producer = SafeKafkaProducer(
+    prod = SafeKafkaProducer(
         acks=acks,
         compression_type=compress,
         bootstrap_servers=[f'{broker_addr}:{broker_port}'],
         value_serializer=lambda x: json.dumps(x).encode('utf-8'),
-        # retry 값을 명시적으로 주어야 재시도
-        retries=20,
-        retry_backoff_ms=500,
-        # 배치 전송으로 속도 향상
-        linger_ms=100,
         )
 
     st = time.time()
+    dup_msgs = []
+    dup_times = []
+    lag_msgs = []
+    lag_times = []
     for i, data in enumerate(gen_fake_data(messages)):
         if (i + 1) % 500 == 0:
             linfo(f"gen {i + 1} th fake data")
-            producer.flush()
-        producer.send(topic, value=data)
+            prod.flush()
+
+        lagged = False
+        if duprate > 0 and random() <= duprate:
+            # 중복 메시지 발생
+            dup_msgs.append(data)
+            dup_times.append(time.time())
+        elif lagrate > 0 and random() <= lagrate:
+            # 지연 메시지 발생
+            lag_msgs.append(data)
+            lag_times.append(time.time())
+            lagged = True
+        if not lagged:
+            send(prod, topic, pid, data, withkey)
+
+        # 지연/중복 메시지 발행
+        now = time.time()
+        sents = []
+        for i, msg in enumerate(lag_msgs):
+            if now - lag_times[i] >= lagdelay:
+                send(prod, topic, pid, data, withkey)
+                sents.append(i)
+        for i in sents:
+            del lag_msgs[i]
+            del lag_times[i]
+
+        sents = []
+        for i, msg in enumerate(dup_msgs):
+            if now - dup_times[i] >= dupdelay:
+                send(prod, topic, pid, data, withkey)
+                sents.append(i)
+        for i in sents:
+            del dup_msgs[i]
+            del dup_times[i]
+
+        # 중복 / 지연이 설정된 경우는 메시지 천천히 발행 (순차적 시간 확인)
+        if duprate > 0 or lagrate > 0:
+            time.sleep(0.1)
+
     vel = messages / (time.time() - st)
     linfo(f"[v] producer {pid} produces {messages} messages to {topic}. {int(vel)} rows per seconds.")
 
 
 if __name__ == '__main__':
     args = parser.parse_args()
-    produce(args.profile, args.messages, args.acks, args.compress, args.pid, args.dev)
+    produce(args.profile, args.messages, args.acks, args.compress, args.pid,
+        args.dev, args.lagrate, args.lagdelay, args.duprate, args.dupdelay,
+        args.topic, args.withkey)

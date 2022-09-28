@@ -1,17 +1,18 @@
 import time
-import json
-from multiprocessing import Process, Queue
+from multiprocessing import Process
 
 import pytest
 from kafka import KafkaProducer, KafkaConsumer
 
-from kfktest.util import (local_produce_proc, local_consume_proc, local_exec,
+from kfktest.util import (get_ksqldb_ssh, local_produce_proc,
     linfo, remote_produce_proc, count_topic_message, s3_count_sinkmsg,
     KFKTEST_S3_BUCKET, KFKTEST_S3_DIR, unregister_kconn, register_s3sink,
     load_setup, _hash, kill_proc_by_port, start_kafka_broker, ssh_exec,
+    ksql_exec, list_ksql_tables, list_ksql_streams, delete_ksql_objects,
+    _ksql_exec,
     # 픽스쳐들
     xsetup, xtopic, xkfssh, xkvmstart, xcp_setup, xs3sink, xhash, xs3rmdir,
-    xrmcons, xconn, xkafka, xzookeeper
+    xrmcons, xconn, xkafka, xzookeeper, xksql
 )
 from kfktest.producer import produce
 from kfktest.consumer import consume
@@ -220,7 +221,7 @@ def test_s3sink_rereg(xprofile, xcp_setup, xtopic, xkfssh, xs3sink):
     cname = f"s3sink-nodb-{s3rr_hash}"
     unregister_kconn(xkfssh, cname)
     time.sleep(3)
-    register_s3sink(xkfssh, xprofile, 'nodb-person', s3rr_param)
+    register_s3sink(xkfssh, xprofile, 'nodb_person', s3rr_param)
 
     for p in procs:
         p.join()
@@ -274,3 +275,157 @@ def test_s3sink_brk(xkafka, xprofile, xcp_setup, xtopic, xkfssh, xs3sink):
     s3cnt = s3_count_sinkmsg(KFKTEST_S3_BUCKET, KFKTEST_S3_DIR + "/")
     linfo(f"Orignal Messages: {tot_msg}, S3 Messages: {s3cnt}")
     assert tot_msg == s3cnt
+
+
+##
+#  TODO: S3 Sink Field Partitioner 테스트
+#    db.timezone 설정 필요?
+#
+#
+
+@pytest.fixture
+def xdel_ksql_basic_strtbl(xprofile):
+    """의존성을 고려한 테이블 및 스트림 삭제."""
+    ssh = get_ksqldb_ssh(xprofile)
+    delete_ksql_objects(ssh, [
+        (1, 'nodb_person_tbl'), (0, 'nodb_person_str'),
+        ])
+
+
+def test_ksql_basic(xkafka, xprofile, xcp_setup, xtopic, xksql, xdel_ksql_basic_strtbl):
+    """ksqlDB 기본 동작 테스트."""
+    ksql_exec(xprofile, 'show streams')
+
+    # 토픽에 가짜 데이터 생성
+    procs = []
+    for pid in range(1, NUM_PRO_PROCS + 1):
+        p = Process(target=local_produce_proc, args=(xprofile, pid, 10, 1, 0, 0,
+                True))  # 메시지 키 이용
+        p.start()
+
+    for p in procs:
+        p.join()
+
+    # 토픽에서 스트림 생성
+    sql = '''
+    CREATE STREAM nodb_person_str (
+        pidid VARCHAR KEY,
+        id VARCHAR, name VARCHAR, address VARCHAR,
+        ip VARCHAR, birth VARCHAR, company VARCHAR, phone VARCHAR)
+        with (kafka_topic = 'nodb_person', partitions=12,
+            value_format='json');
+    '''
+    ksql_exec(xprofile, sql)
+
+    # 스트림 확인
+    sql = '''
+        SELECT * FROM NODB_PERSON_STR;
+    '''
+    ret = ksql_exec(xprofile, sql, 'query')
+    # 헤더 제외 후 크기 확인
+    time.sleep(3)
+    assert len(ret[1:]) == 4 * 10
+
+    # 스트림에서 테이블 생성
+    sql = '''
+    SHOW PROPERTIES;
+    CREATE TABLE nodb_person_tbl AS
+        SELECT pidid, COUNT(id) AS count
+        FROM nodb_person_str WINDOW TUMBLING (SIZE 1 MINUTES)
+        GROUP BY pidid;
+    '''
+    ret = ksql_exec(xprofile, sql)
+
+    time.sleep(3)
+    # 테이블 확인
+    # 주: ksql.streams.auto.offset.reset 이 earliest 여야 함.
+
+    sql = '''
+        SELECT * FROM NODB_PERSON_TBL;
+    '''
+    ret = ksql_exec(xprofile, sql, 'query')
+    time.sleep(3)
+    # 헤더 제외 후 크기 확인
+    total = 0
+    for row in ret[1:]:
+        cnt = row[-1]
+        total += cnt
+    assert total == 4 * 10
+
+
+@pytest.fixture
+def xdel_ksql_dedup_strtbl(xprofile, xtopic):
+    """의존성을 고려한 테이블 및 스트림 삭제."""
+    ssh = get_ksqldb_ssh(xprofile)
+    delete_ksql_objects(ssh, [
+        (0, 'nodb_person_dedup'), (0, 'nodb_person_agg_str'),
+        (1, 'nodb_person_agg'), (0, 'nodb_person_str')
+        ])
+
+
+def test_ksql_dedup(xkafka, xprofile, xcp_setup, xksql, xdel_ksql_dedup_strtbl):
+    """ksqlDB 로 중복 제거 테스트."""
+
+    # 토픽에 중복이 있는 가짜 데이터 생성
+    duprate=0.2
+    local_produce_proc(xprofile, 1, 100, 1, duprate)
+
+    ssh = get_ksqldb_ssh(xprofile)
+    # 토픽에서 스트림 생성
+    sql = '''
+    CREATE STREAM nodb_person_str (
+        id INT, name VARCHAR, address VARCHAR,
+        ip VARCHAR, birth VARCHAR, company VARCHAR, phone VARCHAR)
+        with (kafka_topic = 'nodb_person', partitions=12,
+            value_format='json');
+    '''
+    _ksql_exec(ssh, sql)
+    props = {
+        "ksql.streams.auto.offset.reset": "earliest",
+        "ksql.streams.cache.max.bytes.buffering": "0",
+    }
+
+    # 윈도우별 메시지 카운팅 테이블 생성
+    sql = '''
+    CREATE TABLE nodb_person_agg
+        WITH (kafka_topic='nodb_person_agg', partitions=1, format='json')
+        AS
+        SELECT id AS KEY1,
+            name AS KEY2,
+            address AS KEY3,
+            ip AS KEY4,
+            birth AS KEY5,
+            company AS KEY6,
+            phone AS KEY7,
+            AS_VALUE(id) AS id,
+            AS_VALUE(name) AS name,
+            AS_VALUE(address) AS address,
+            AS_VALUE(birth) AS birth,
+            AS_VALUE(company) AS company,
+            AS_VALUE(phone) AS phone,
+            COUNT(*) AS count
+        FROM nodb_person_str WINDOW TUMBLING (SIZE 1 MINUTES)
+        GROUP BY id, name, address, ip, birth, company, phone;
+
+    -- 메시지 카운팅 스트림
+    CREATE STREAM nodb_person_agg_str (
+            id INT, name VARCHAR, address VARCHAR, ip VARCHAR,
+            birth VARCHAR, company VARCHAR, phone VARCHAR, count int)
+        WITH (kafka_topic = 'nodb_person_agg', partitions=1, format='json');
+
+    -- 중복 제거된 스트림
+    CREATE STREAM nodb_person_dedup AS
+        SELECT
+            id, name, address, ip, birth, company, phone
+        FROM nodb_person_agg_str
+        WHERE count = 1
+        PARTITION  BY id
+    '''
+    _ksql_exec(ssh, sql, 'ksql', props)
+
+    # 중복 제거 확인
+    sql = '''
+        SELECT count(id) FROM nodb_person_dedup EMIT CHANGES
+    '''
+    ret = _ksql_exec(ssh, sql, 'query', timeout=7)
+    assert ret[1][0] == 100
