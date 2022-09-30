@@ -9,10 +9,10 @@ from kfktest.util import (get_ksqldb_ssh, local_produce_proc,
     KFKTEST_S3_BUCKET, KFKTEST_S3_DIR, unregister_kconn, register_s3sink,
     load_setup, _hash, kill_proc_by_port, start_kafka_broker, ssh_exec,
     ksql_exec, list_ksql_tables, list_ksql_streams, delete_ksql_objects,
-    _ksql_exec,
+    _ksql_exec, setup_filebeat, producer_logger_proc, SSH,
     # 픽스쳐들
     xsetup, xtopic, xkfssh, xkvmstart, xcp_setup, xs3sink, xhash, xs3rmdir,
-    xrmcons, xconn, xkafka, xzookeeper, xksql
+    xrmcons, xconn, xkafka, xzookeeper, xksql, xlog
 )
 from kfktest.producer import produce
 from kfktest.consumer import consume
@@ -425,3 +425,25 @@ def test_ksql_dedup(xkafka, xprofile, xcp_setup, xksql, xdel_ksql_dedup_strtbl):
     '''
     ret = _ksql_exec(ssh, sql, 'query', timeout=7)
     assert ret[1][0] == 100
+
+
+## TODO
+#
+# 기존 토픽의 파티션 수 바꾸는 테스트
+#
+
+def test_filebeat(xkafka, xprofile, xtopic, xcp_setup, xlog):
+    """프로듀서 Filebeat 테스트.
+
+    생성된 로그 파일의 메시지 수와 파일비트를 통해 Kafka 로 전송된 메시지 수가 같아야 함.
+
+    """
+    # 프로듀서에 파일비트 설정 후 재시작
+    setup_filebeat(xprofile)
+
+    # 프로듀서에서 logger 파일 생성
+    producer_logger_proc(xprofile, messages=10000, latency=0)
+
+    time.sleep(5)
+    cnt = count_topic_message(xprofile, xtopic)
+    assert 10000 == cnt

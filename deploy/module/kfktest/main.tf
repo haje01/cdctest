@@ -49,6 +49,7 @@ curl -L -O ${var.filebeat_url}
 filebeat_file=${basename(var.filebeat_url)}
 sudo dpkg -i $filebeat_file
 rm $filebeat_file
+sudo filebeat modules enable kafka
 EOT
 }
 

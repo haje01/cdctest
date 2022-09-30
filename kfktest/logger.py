@@ -13,7 +13,6 @@ parser = argparse.ArgumentParser(description="대상 파일에 가짜 로그 생
 parser.add_argument('dest_file', type=str)
 parser.add_argument('-m', '--messages', type=int, default=10000, help="생성할 메시지 수.")
 parser.add_argument('-l', '--latency', type=int, default=None, help="메시지당 지연 시간 (ms)")
-parser.add_argument('-f', '--file', type=str, help="저장할 파일 경로")
 
 #----------------------------------------------------------------------
 def create_rotating_log(path):

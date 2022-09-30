@@ -575,6 +575,8 @@ def register_jdbc(kfk_ssh, profile, db_addr, db_port, db_user, db_passwd,
     isolation = 'READ_UNCOMMITTED' if profile == 'mssql' else 'DEFAULT'
     mode = 'timestamp+incrementing' if ts_col is not None else 'incrementing'
 
+    # poll.interval.ms 가 작고, batch.max.rows 가 클수록 DB 에서 데이터를 빠르게 가져온다.
+    # https://stackoverflow.com/questions/59037507/with-kafka-jdbc-source-connector-getting-only-1000-records-sec-how-to-improve-t
     data = {
         'connector.class' : 'io.confluent.connect.jdbc.JdbcSourceConnector',
         'connection.url': db_url,
@@ -589,6 +591,7 @@ def register_jdbc(kfk_ssh, profile, db_addr, db_port, db_user, db_passwd,
         'mode': mode,
         'incrementing.column.name' : inc_col,
         'poll.interval.ms': poll_interval,
+        'batch.max.rows': 1000,
         'tasks.max' : tasks,
         "key.converter": "org.apache.kafka.connect.storage.StringConverter",
         'value.converter': 'org.apache.kafka.connect.json.JsonConverter',
@@ -974,7 +977,7 @@ def claim_zookeeper(kfk_ssh):
     ret = ssh_exec(kfk_ssh, 'fuser 2181/tcp', stderr_type='stdout')
     # 주키퍼가 떠있지 않으면 시작
     if ret == '':
-        start_zookeeper(xkfssh)
+        start_zookeeper(kfk_ssh)
     linfo("[v] claim_zookeeper")
 
 
@@ -1196,6 +1199,18 @@ def remote_insert_proc(profile, setup, pid, epoch=DB_EPOCH, batch=DB_BATCH,
     ret = ssh_exec(ssh, cmd, False)
     linfo(ret)
     linfo(f"[v] remote insert process {pid}")
+    return ret
+
+
+def producer_logger_proc(profile, messages=10000, latency=0):
+    """프로듀서에서 로그 파일 생성."""
+    linfo(f"[ ] producer_logger_proc")
+    setup = load_setup(profile)
+    pip = setup['producer_public_ip']['value']
+    ssh = SSH(pip, 'producer')
+    cmd = f"python3 -m kfktest.logger test.log -m {messages} -l {latency}"
+    ret = ssh_exec(ssh, cmd, False)
+    linfo(f"[v] producer_logger_proc")
     return ret
 
 
@@ -1952,3 +1967,44 @@ def _ksql_exec(ssh, sql, mode='ksql', _props=None, timeout=None):
             import pdb; pdb.set_trace()
             linfo(msg)
             raise RuntimeError(msg)
+
+
+def setup_filebeat(profile, topic=None):
+    """프로듀서 파일비트 설정."""
+    setup = load_setup(profile)
+    pip = setup['producer_public_ip']['value']
+    pssh = SSH(pip, 'producer')
+    kip = setup['kafka_private_ip']['value']
+    topic = f'{profile}_person' if topic is None else topic
+    yml = f'''
+filebeat.config.modules.path: \\${{path.config}}/modules.d/*.yml
+filebeat.inputs:
+  - type: filestream
+    id: my-filestream-id
+    paths:
+      - /home/ubuntu/test.log*
+
+output.kafka:
+  hosts: ["{kip}:9092"]
+  codec.format:
+    string: '%{{[message]}}'
+  topic: '{topic}'
+  partition.round_robin:
+    reachable_only: false
+  required_acks: 1
+  compression: gzip
+  max_message_bytes: 1000000
+    '''
+    ssh_exec(pssh, f'cat <<EOT | sudo tee /etc/filebeat/filebeat.yml\n{yml}\nEOT', kafka_env=False)
+    ssh_exec(pssh, "sudo sed -i 's/enabled: false/enabled: true/' /etc/filebeat/modules.d/kafka.yml")
+    ssh_exec(pssh, 'sudo service filebeat restart', kafka_env=False)
+    time.sleep(3)
+
+
+@pytest.fixture
+def xlog(xprofile):
+    """프로듀서에 logger 로 생성된 로그 제거."""
+    setup = load_setup(xprofile)
+    pro_ip = setup['producer_public_ip']['value']
+    ssh = SSH(pro_ip, 'producer')
+    ssh_exec(ssh, 'rm -f /home/ubuntu/test.log*')
