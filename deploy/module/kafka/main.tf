@@ -207,31 +207,31 @@ sudo systemctl start kafka
 sudo systemctl start kafka-connect
 
 # logrotate 설정
-cat <<EOF | sudo tee /etc/logrotate.d/kafka
-/var/log/kafka.log {
-  daily
-  copytruncate
-  create 644 root root
-  rotate 10
-  notifempty
-}
-
-/var/log/kafka-connect.log {
-  daily
-  copytruncate
-  create 644 root root
-  rotate 10
-  notifempty
-}
-
-/var/log/zookeeper.log {
-  daily
-  copytruncate
-  create 644 root root
-  rotate 10
-  notifempty
-}
-EOF
+# cat <<EOF | sudo tee /etc/logrotate.d/kafka
+# /var/log/kafka.log {
+#   daily
+#   copytruncate
+#   create 644 root root
+#   rotate 10
+#   notifempty
+# }
+#
+# /var/log/kafka-connect.log {
+#   daily
+#   copytruncate
+#   create 644 root root
+#   rotate 10
+#   notifempty
+# }
+#
+# /var/log/zookeeper.log {
+#   daily
+#   copytruncate
+#   create 644 root root
+#   rotate 10
+#   notifempty
+# }
+# EOF
 
 sleep 10
 EOT
@@ -243,7 +243,7 @@ EOT
 data "template_file" "svc_zookeeper" {
   template = file("${path.module}/../svc_zookeeper.tpl")
   vars = {
-    user = "root",
+    user = "ubuntu",
     kafka_dir = trimsuffix(basename(var.kafka_url), ".tgz")
   }
 }
@@ -252,7 +252,7 @@ data "template_file" "svc_zookeeper" {
 data "template_file" "svc_kafka" {
   template = file("${path.module}/../svc_kafka.tpl")
   vars = {
-    user = "root",
+    user = "ubuntu",
     kafka_dir = trimsuffix(basename(var.kafka_url), ".tgz")
     timezone = var.timezone
   }
@@ -262,7 +262,7 @@ data "template_file" "svc_kafka" {
 data "template_file" "svc_connect" {
   template = file("${path.module}/../svc_connect.tpl")
   vars = {
-    user = "root",
+    user = "ubuntu",
     kafka_dir = trimsuffix(basename(var.kafka_url), ".tgz")
     timezone = var.timezone
   }

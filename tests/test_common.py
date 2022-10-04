@@ -2,14 +2,14 @@ import pdb
 
 from requests import delete
 from kfktest.util import (
-    SSH, delete_all_topics, setup, list_topics, create_topic, delete_topic,
+    SSH, delete_all_topics, xcp_setup, list_topics, create_topic, delete_topic,
     describe_topic
 )
 
 
-def test_topic(setup):
-    consumer_ip = setup['consumer_public_ip']['value']
-    kafka_ip = setup['kafka_private_ip']['value']
+def test_topic(xcp_setup):
+    consumer_ip = xcp_setup['consumer_public_ip']['value']
+    kafka_ip = xcp_setup['kafka_private_ip']['value']
 
     ssh = SSH(consumer_ip)
     delete_all_topics(ssh, kafka_ip)

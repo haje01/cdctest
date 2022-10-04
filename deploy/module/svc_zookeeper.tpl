@@ -10,8 +10,8 @@ ExecStart=/home/ubuntu/${kafka_dir}/bin/zookeeper-server-start.sh /home/ubuntu/$
 ExecStop=/home/ubuntu/${kafka_dir}/bin/zookeeper-server-stop.sh
 Restart=on-abnormal
 # syslog 에서 alert 하는 경우를 우회하기 위해
-StandardOutput=append:/var/log/zookeeper.log
-StandardError=append:/var/log/zookeeper.log
+# StandardOutput=append:/var/log/zookeeper.log
+# StandardError=append:/var/log/zookeeper.log
 
 [Install]
 WantedBy=multi-user.target

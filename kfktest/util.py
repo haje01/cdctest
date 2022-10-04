@@ -47,7 +47,7 @@ DB_PRE_BATCH = 100  # DB 초기화시 Insert 에포크당 행수
 DB_PRE_ROWS = DB_PRE_EPOCH * DB_PRE_BATCH * NUM_INS_PROCS  #  DB 초기화시 Insert 된 행수
 
 DB_EPOCH = 10  # DB Insert 에포크 수
-DB_BATCH = 100  # DB Insert 에포크당 행수
+DB_BATCH = 1000  # DB Insert 에포크당 행수
 DB_ROWS = DB_EPOCH * DB_BATCH * NUM_INS_PROCS  # DB Insert 된 행수
 
 TOPIC_PARTITIONS = 12  # 토픽 기본 파티션 수
@@ -429,10 +429,12 @@ def reset_topic(ssh, topic, partitions=TOPIC_PARTITIONS,
     linfo(f"[v] reset_topic '{topic}'")
 
 
-def count_topic_message(profile, topic):
+def count_topic_message(profile, topic, timeout=None):
     linfo("[ ] count_topic_message")
     setup = load_setup(profile)
     kfk_ip = setup['kafka_public_ip']['value']
+    if timeout is not None:
+        time.sleep(timeout)
     cmd = f'''kafkacat -b localhost:9092 -t {topic} -C -e -q | wc -l'''
     kfk_ssh = SSH(kfk_ip)
     ret = ssh_exec(kfk_ssh, cmd)
@@ -528,8 +530,7 @@ def count_topic_message(profile, topic):
 
 @retry(RuntimeError, tries=6, delay=5)
 def register_jdbc(kfk_ssh, profile, db_addr, db_port, db_user, db_passwd,
-        db_name, topic_prefix, com_hash, poll_interval=5000,
-        params=None):
+        db_name, topic_prefix, com_hash, params=None):
     """카프카 JDBC Source 커넥터 등록.
 
     설정에 관한 참조:
@@ -546,7 +547,6 @@ def register_jdbc(kfk_ssh, profile, db_addr, db_port, db_user, db_passwd,
         db_passwd (str): DB 유저 암호
         topic_prefix (str): 테이블을 넣을 토픽의 접두사
         com_hash (str): 커넥터 이름에 붙을 해쉬
-        poll_interval (int): ms 단위 폴링 간격. 기본값 5000
         params (dict): 추가 인자들
             idx_col: Incremental 컬럼 (항상 필요)
             ts_col: Timestamp 컬럼 (선택)
@@ -555,6 +555,8 @@ def register_jdbc(kfk_ssh, profile, db_addr, db_port, db_user, db_passwd,
             tables: 대상 테이블들 이름. 하나 이상인 경우 ',' 로 구분. 기본값 person
                 빈 문자열이면 대상 DB 의 모든 테이블
             tasks: 커넥터가 사용하는 테스크 수. 기본값 1
+            poll_interval (int): ms 단위 폴링 간격. 기본값 5000
+            batch_rows (int): 폴링시 가져올 행수. 기본값 1000
 
     """
     assert profile in ('mysql', 'mssql')
@@ -571,10 +573,11 @@ def register_jdbc(kfk_ssh, profile, db_addr, db_port, db_user, db_passwd,
     ts_col = params.get('ts_col')
     query = params.get('query')
     tasks = params.get('tasks', 1)
+    poll_interval = params.get('poll_interval', 5000)
+    batch_rows = params.get('batch_rows', 1000)
     linfo(f"[ ] register_jdbc {conn_name} {inc_col} {ts_col} {tables} {tasks}")
     isolation = 'READ_UNCOMMITTED' if profile == 'mssql' else 'DEFAULT'
     mode = 'timestamp+incrementing' if ts_col is not None else 'incrementing'
-
     # poll.interval.ms 가 작고, batch.max.rows 가 클수록 DB 에서 데이터를 빠르게 가져온다.
     # https://stackoverflow.com/questions/59037507/with-kafka-jdbc-source-connector-getting-only-1000-records-sec-how-to-improve-t
     data = {
@@ -591,7 +594,7 @@ def register_jdbc(kfk_ssh, profile, db_addr, db_port, db_user, db_passwd,
         'mode': mode,
         'incrementing.column.name' : inc_col,
         'poll.interval.ms': poll_interval,
-        'batch.max.rows': 1000,
+        'batch.max.rows': batch_rows,
         'tasks.max' : tasks,
         "key.converter": "org.apache.kafka.connect.storage.StringConverter",
         'value.converter': 'org.apache.kafka.connect.json.JsonConverter',
@@ -625,6 +628,7 @@ def register_jdbc(kfk_ssh, profile, db_addr, db_port, db_user, db_passwd,
     time.sleep(5)
     status = get_connector_status(kfk_ssh, conn_name)
     if status['tasks'][0]['state'] == 'FAILED':
+        import pdb; pdb.set_trace()
         raise RuntimeError(status['tasks'][0]['trace'])
     linfo(f"[v] register_jdbc {conn_name} {inc_col} {ts_col} {tables} {tasks}")
     return data
@@ -1983,6 +1987,7 @@ filebeat.inputs:
     id: my-filestream-id
     paths:
       - /home/ubuntu/test.log*
+    encoding: utf-8
 
 output.kafka:
   hosts: ["{kip}:9092"]

@@ -46,10 +46,6 @@ def test_ct_local_basic(xjdbc, xkfssh, xsetup, xprofile):
         ins_pros.append(p)
         p.start()
 
-    # 카프카 토픽 확인 (timeout 되기전에 다 받아야 함)
-    cnt = count_topic_message(xprofile, f'{xprofile}_person', timeout=10)
-    assert DB_ROWS + DB_PRE_ROWS == cnt
-
     for p in ins_pros:
         p.join()
     linfo("All insert processes are done.")
@@ -57,6 +53,43 @@ def test_ct_local_basic(xjdbc, xkfssh, xsetup, xprofile):
     for p in sel_pros:
         p.join()
     linfo("All select processes are done.")
+
+    # 카프카 토픽 확인 (timeout 되기전에 다 받아야 함)
+    cnt = count_topic_message(xprofile, f'{xprofile}_person', timeout=10)
+    assert DB_ROWS == cnt
+
+
+@pytest.mark.parametrize('xjdbc', [{
+        'poll_interval': 5000,
+        'batch_rows': 1000,
+    }], indirect=True)
+def test_ct_speed(xjdbc, xsetup, xprofile, xkfssh):
+    """Change Tracking 으로 카프카에 가져오는 속도 측정.
+
+    - poll.interval.ms / batch.max.rows 를 바꿔가며 테스트
+    - poll.interval.ms 가 작고, batch.max.rows 가 클수록 DB 에서 데이터를 빠르게 가져온다.
+
+    """
+    # Insert 프로세스들 시작
+    ins_pros = []
+    for pid in range(1, NUM_INS_PROCS + 1):
+        # insert 프로세스
+        p = Process(target=local_insert_proc, args=(xprofile, pid))
+        ins_pros.append(p)
+        p.start()
+
+    for p in ins_pros:
+        p.join()
+    linfo("All insert processes are done.")
+
+    ## batch.max.rows 바꿔가며 가져오는 속도 측정
+    cnt = 0
+    st = time.time()
+    while cnt != DB_ROWS:
+        cnt = count_topic_message(xprofile, f'{xprofile}_person')
+        print(cnt)
+        time.sleep(1)
+    print(f"Sync in {time.time() - st:.1f} seconds")
 
 
 def test_ct_broker_stop(xsetup, xjdbc, xkfssh, xprofile, xhash):
