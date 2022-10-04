@@ -1,6 +1,6 @@
 #!/bin/bash
 
-session="kfktest"
+session="kfk-remote"
 tmux new-session -d -s $session
 
 PROFILE="$KFKTEST_PROFILE"
