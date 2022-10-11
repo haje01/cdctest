@@ -30,6 +30,7 @@ parser.add_argument('--duprate', type=float, default=0, help="중복 메시지 �
 parser.add_argument('--dupdelay', type=int, default=3, help="중복 메시지 지연 시간(초).")
 parser.add_argument('-t', '--topic', type=str, default=None, help="명시적 토픽명")
 parser.add_argument('-k', '--withkey', action='store_true', default=False, help="메시지 키 생성.")
+parser.add_argument('--dt', type=str, default=None, help="지정된 일시로 메시지 생성.")
 
 #
 # 브로커가 없을 때 조용히 전송 메시지를 손실하는 문제
@@ -80,6 +81,7 @@ def produce(profile,
         dupdelay=parser.get_default('dupdelay'),
         etopic=parser.get_default('topic'),
         withkey=parser.get_default('withkey'),
+        dt=parser.get_default('dt')
         ):
     """Fake 레코드 전송.
 
@@ -113,6 +115,9 @@ def produce(profile,
     lag_msgs = []
     lag_times = []
     for i, data in enumerate(gen_fake_data(messages)):
+        if dt is not None:
+            data['regdt'] = dt
+
         if (i + 1) % 500 == 0:
             linfo(f"gen {i + 1} th fake data")
             prod.flush()
@@ -162,4 +167,4 @@ if __name__ == '__main__':
     args = parser.parse_args()
     produce(args.profile, args.messages, args.acks, args.compress, args.pid,
         args.dev, args.lagrate, args.lagdelay, args.duprate, args.dupdelay,
-        args.topic, args.withkey)
+        args.topic, args.withkey, args.dt)

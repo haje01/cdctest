@@ -26,6 +26,7 @@ parser.add_argument('-d', '--dev', action='store_true', default=False,
 parser.add_argument('-n', '--no-result', action='store_true', default=False,
     help="출력 감추기.")
 parser.add_argument('--delay', type=int, default=0, help="여러 테이블에 인서트시 지연 시간 범위 (초).")
+parser.add_argument('--dt', type=str, default=None, help="지정된 일시로 테이블에 인서트.")
 
 
 def insert(db_type,
@@ -36,7 +37,9 @@ def insert(db_type,
         pid=parser.get_default('pid'),
         dev=parser.get_default('devs'),
         no_result=parser.get_default('no_result'),
-        delay=0
+        delay=0,
+        dt=None,
+        show=False
         ):
     """가짜 데이터 인서트.
 
@@ -51,6 +54,9 @@ def insert(db_type,
         pid (int): 멀티 프로세스 인서트시 구분용 ID
         dev (bool): 개발 PC 에서 실행 여부
         no_result (bool): 결과 감추기 여부. 기본값 True
+        delay (int): 지연 시간. 기본값 0
+        dt (str): 지정된 일시. 기본값 None
+        show (bool): fake 메시지 표시 여부. 기본값 False
 
     """
     # 프로세스간 commit 이 몰리지 않게
@@ -74,7 +80,7 @@ def insert(db_type,
     linfo("Connect done.")
 
     st = time.time()
-    insert_fake(conn, cursor, epoch, batch, pid, db_type, table=table)
+    insert_fake(conn, cursor, epoch, batch, pid, db_type, table=table, dt=dt, show=show)
     conn.close()
 
     elapsed = time.time() - st
@@ -96,7 +102,7 @@ if __name__ == '__main__':
             p = Process(target=insert, args=(args.db_type, args.db_name,
                                              table, args.epoch, args.batch,
                                              args.pid, args.dev, args.no_result,
-                                             args.delay))
+                                             args.delay, args.dt))
             procs.append(p)
             p.start()
         for p in procs:

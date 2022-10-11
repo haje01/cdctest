@@ -54,7 +54,10 @@ TOPIC_PARTITIONS = 12  # 토픽 기본 파티션 수
 TOPIC_REPLICATIONS = 1     # 토픽 기본 복제 수
 
 # Kafka 내장 토픽 이름
-INTERNAL_TOPICS = ['__consumer_offsets', 'connect-configs', 'connect-offsets', 'connect-status']
+INTERNAL_TOPICS = ['__consumer_offsets', 'connect-configs', 'connect-offsets',
+    'connect-status', '__transaction_state',
+    '_confluent-ksql-default__command_topic', 'default_ksql_processing_log',
+    ]
 DB_PORTS = {'mysql': 3306, 'mssql': 1433}
 HOME = os.path.abspath(
         os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
@@ -90,7 +93,7 @@ def gen_fake_data(count):
         yield data
 
 
-def insert_fake(conn, cursor, epoch, batch, pid, profile, table='person'):
+def insert_fake(conn, cursor, epoch, batch, pid, profile, table='person', dt=None, show=False):
     """Fake 데이터를 DB insert."""
     assert profile in ('mysql', 'mssql')
     linfo(f"[ ] insert_fake {epoch} {batch} {table}")
@@ -100,7 +103,10 @@ def insert_fake(conn, cursor, epoch, batch, pid, profile, table='person'):
     fake.add_provider(company)
     fake.add_provider(phone_number)
 
-    sql = f"INSERT INTO {table}(pid, sid, name, address, ip, birth, company, phone) VALUES(%s, %s, %s, %s, %s, %s, %s, %s)"
+    if dt is None:
+        sql = f"INSERT INTO {table}(pid, sid, name, address, ip, birth, company, phone) VALUES(%s, %s, %s, %s, %s, %s, %s, %s)"
+    else:
+        sql = f"INSERT INTO {table}(regdt, pid, sid, name, address, ip, birth, company, phone) VALUES(%s, %s, %s, %s, %s, %s, %s, %s, %s)"
     # if profile == 'mysql':
     #     sql = "INSERT INTO person(pid, sid, name, address, ip, birth, company, phone) VALUES(%s, %s, %s, %s, %s, %s, %s, %s)"
     # else:
@@ -114,7 +120,7 @@ def insert_fake(conn, cursor, epoch, batch, pid, profile, table='person'):
             linfo(f"Inserter {pid} epoch: {j+1}")
         rows = []
         for i in range(batch):
-            row = (
+            row = [
                 pid,
                 j * batch + i,
                 fake.name(),
@@ -123,8 +129,12 @@ def insert_fake(conn, cursor, epoch, batch, pid, profile, table='person'):
                 fake.date(),
                 fake.company(),
                 fake.phone_number()
-            )
+            ]
+            if dt is not None:
+                row.insert(0, dt)
             rows.append(row)
+            if show:
+                linfo(row)
         cursor.executemany(sql, rows)
         conn.commit()
     linfo(f"[v] insert_fake {epoch} {batch} {table}")
@@ -390,12 +400,8 @@ def delete_all_topics(kfk_ssh, profile):
         kfk_ssh : Kafka 노드의 Paramiko SSH 객체
 
     """
-    def get_topics():
-        topics = list_topics(kfk_ssh)
-        return [topic for topic in topics if f'{profile}_person' in topic.lower()]
-
+    topics = list_topics(kfk_ssh)
     linfo(f"[ ] delete_all_topics")
-    topics = get_topics()
     if len(topics) > 0:
         topics = ','.join(topics)
         try:
@@ -405,7 +411,7 @@ def delete_all_topics(kfk_ssh, profile):
             raise e
 
         # 남은 토픽 확인
-        topics = get_topics()
+        topics = list_topics(kfk_ssh)
         num_topic = sum(topics)
         if num_topic > 0:
             raise RuntimeError(f"Topics {topics} still remain.")
@@ -548,8 +554,8 @@ def register_jdbc(kfk_ssh, profile, db_addr, db_port, db_user, db_passwd,
         topic_prefix (str): 테이블을 넣을 토픽의 접두사
         com_hash (str): 커넥터 이름에 붙을 해쉬
         params (dict): 추가 인자들
-            idx_col: Incremental 컬럼 (항상 필요)
-            ts_col: Timestamp 컬럼 (선택)
+            inc_col: Incremental 컬럼. 기본값 None
+            ts_col: Timestamp 컬럼. 기본값 None
             query: 테이블이 아닌 Query Based Ingest 를 위한 쿼리 (tables 는 무시됨)
             query_topic : query 이용시 토픽 명
             tables: 대상 테이블들 이름. 하나 이상인 경우 ',' 로 구분. 기본값 person
@@ -557,6 +563,8 @@ def register_jdbc(kfk_ssh, profile, db_addr, db_port, db_user, db_passwd,
             tasks: 커넥터가 사용하는 테스크 수. 기본값 1
             poll_interval (int): ms 단위 폴링 간격. 기본값 5000
             batch_rows (int): 폴링시 가져올 행수. 기본값 1000
+            ts_incl (bool): 타임스탬프 모드에서 쿼리시 기존 값 포함 여부. 기본값 false
+            ts_delay (int): 타임 스탬프 기준 트랜잭션이 완성되기를 기다리는 ms 시간. 기본값 0
 
     """
     assert profile in ('mysql', 'mssql')
@@ -575,9 +583,18 @@ def register_jdbc(kfk_ssh, profile, db_addr, db_port, db_user, db_passwd,
     tasks = params.get('tasks', 1)
     poll_interval = params.get('poll_interval', 5000)
     batch_rows = params.get('batch_rows', 1000)
+    ts_incl = params.get('ts_incl', False)
+    ts_delay = params.get('ts_delay', 0)
+
     linfo(f"[ ] register_jdbc {conn_name} {inc_col} {ts_col} {tables} {tasks}")
     isolation = 'READ_UNCOMMITTED' if profile == 'mssql' else 'DEFAULT'
-    mode = 'timestamp+incrementing' if ts_col is not None else 'incrementing'
+    if inc_col is None:
+        assert ts_col is not None
+        mode = 'timestamp'
+    elif ts_col is None:
+        mode = 'incrementing'
+    else:
+        mode = 'timestamp+incrementing'
     # poll.interval.ms 가 작고, batch.max.rows 가 클수록 DB 에서 데이터를 빠르게 가져온다.
     # https://stackoverflow.com/questions/59037507/with-kafka-jdbc-source-connector-getting-only-1000-records-sec-how-to-improve-t
     data = {
@@ -592,10 +609,11 @@ def register_jdbc(kfk_ssh, profile, db_addr, db_port, db_user, db_passwd,
         'delete.enabled': True,
         'transaction.isolation.mode': isolation,
         'mode': mode,
-        'incrementing.column.name' : inc_col,
         'poll.interval.ms': poll_interval,
         'batch.max.rows': batch_rows,
-        'tasks.max' : tasks,
+        'tasks.max': tasks,
+        'timestamp.inclusive': ts_incl,
+        'timestamp.delay.interval.ms': ts_delay,
         "key.converter": "org.apache.kafka.connect.storage.StringConverter",
         'value.converter': 'org.apache.kafka.connect.json.JsonConverter',
         'value.converter.schemas.enable': False,
@@ -619,6 +637,8 @@ def register_jdbc(kfk_ssh, profile, db_addr, db_port, db_user, db_passwd,
         assert 'query_topic' in params
         data['topic.prefix'] = params['query_topic']
 
+    if inc_col is not None:
+       data['incrementing.column.name'] = inc_col
     if ts_col is not None:
         data['timestamp.column.name'] = ts_col
 
@@ -1930,8 +1950,9 @@ def _ksql_exec(ssh, sql, mode='ksql', _props=None, timeout=None):
         dict: 하나의 JSON 인 경우
         list: JSON Lines 인 경우
     """
+    linfo(f"_ksql_exec '{sql}'")
     assert mode in ('ksql', 'query')
-    sql = sql.strip().replace("'", r"'\''").replace('\n', '\\n')
+    sql = sql.strip().replace("'", r"'\''").replace('"', r'\"').replace('\n', '\\n')
     if not sql.endswith(';'):
         sql += ';'
     if _props is None:

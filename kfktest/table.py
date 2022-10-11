@@ -25,13 +25,15 @@ def reset_table(profile, table, fix_regdt=None, concur=None):
     DROP TABLE IF EXISTS {table};
     CREATE TABLE {table} (
         id  INT NOT NULL AUTO_INCREMENT,
-        regdt DATETIME DEFAULT CURRENT_TIMESTAMP,
+        regdt DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL,
         pid INT DEFAULT -1 NOT NULL,
         sid INT DEFAULT -1 NOT NULL,
         '''
         tail = ', PRIMARY KEY(id)'
     else:
-        # MSSQL
+        ## MSSQL
+        # DATETIME2 가 더 정밀해 중복 위험 때문에 권고 사항이긴 하나
+        # incremental+timestamp 형식으로 복합키로 사용할 때는 중복 위험 없을 듯
         head = f'''
     IF OBJECT_ID('{table}', 'U') IS NOT NULL
         DROP TABLE {table}

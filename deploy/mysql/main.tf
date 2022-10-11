@@ -109,6 +109,10 @@ resource "aws_instance" "mysql" {
 cloud-init status --wait
 sudo apt update
 sudo sed -i 's/#$nrconf{restart} = '"'"'i'"'"';/$nrconf{restart} = '"'"'a'"'"';/g' /etc/needrestart/needrestart.conf
+
+sudo cp -p /usr/share/zoneinfo/Asia/Seoul /etc/localtime
+export TZ="Asia/Seoul"
+
 sudo apt install -y mysql-server
 sleep 5
 sudo sed -i 's/bind-address.*/bind-address = 0.0.0.0/' /etc/mysql/mysql.conf.d/mysqld.cnf
@@ -119,6 +123,7 @@ sudo service mysql start
 sleep 5
 # DB 및 유저 초기화
 sudo mysql < /tmp/init.sql
+
 EOT
     ]
   }

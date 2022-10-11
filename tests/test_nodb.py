@@ -288,7 +288,7 @@ def xdel_ksql_basic_strtbl(xprofile):
     """의존성을 고려한 테이블 및 스트림 삭제."""
     ssh = get_ksqldb_ssh(xprofile)
     delete_ksql_objects(ssh, [
-        (1, 'nodb_person_tbl'), (0, 'nodb_person_str'),
+        (1, 'person_tbl'), (0, 'person_str'),
         ])
 
 
@@ -308,7 +308,7 @@ def test_ksql_basic(xkafka, xprofile, xcp_setup, xtopic, xksql, xdel_ksql_basic_
 
     # 토픽에서 스트림 생성
     sql = '''
-    CREATE STREAM nodb_person_str (
+    CREATE STREAM person_str (
         pidid VARCHAR KEY,
         id VARCHAR, name VARCHAR, address VARCHAR,
         ip VARCHAR, birth VARCHAR, company VARCHAR, phone VARCHAR)
@@ -329,9 +329,9 @@ def test_ksql_basic(xkafka, xprofile, xcp_setup, xtopic, xksql, xdel_ksql_basic_
     # 스트림에서 테이블 생성
     sql = '''
     SHOW PROPERTIES;
-    CREATE TABLE nodb_person_tbl AS
+    CREATE TABLE person_tbl AS
         SELECT pidid, COUNT(id) AS count
-        FROM nodb_person_str WINDOW TUMBLING (SIZE 1 MINUTES)
+        FROM person_str WINDOW TUMBLING (SIZE 1 MINUTES)
         GROUP BY pidid;
     '''
     ret = ksql_exec(xprofile, sql)
@@ -341,7 +341,7 @@ def test_ksql_basic(xkafka, xprofile, xcp_setup, xtopic, xksql, xdel_ksql_basic_
     # 주: ksql.streams.auto.offset.reset 이 earliest 여야 함.
 
     sql = '''
-        SELECT * FROM NODB_PERSON_TBL;
+        SELECT * FROM PERSON_TBL;
     '''
     ret = ksql_exec(xprofile, sql, 'query')
     time.sleep(3)
@@ -358,8 +358,8 @@ def xdel_ksql_dedup_strtbl(xprofile, xtopic):
     """의존성을 고려한 테이블 및 스트림 삭제."""
     ssh = get_ksqldb_ssh(xprofile)
     delete_ksql_objects(ssh, [
-        (0, 'nodb_person_dedup'), (0, 'nodb_person_agg_str'),
-        (1, 'nodb_person_agg'), (0, 'nodb_person_str')
+        (0, 'person_dedup'), (0, 'person_agg_str'),
+        (1, 'person_agg'), (0, 'person_str')
         ])
 
 
@@ -373,7 +373,7 @@ def test_ksql_dedup(xkafka, xprofile, xcp_setup, xksql, xdel_ksql_dedup_strtbl):
     ssh = get_ksqldb_ssh(xprofile)
     # 토픽에서 스트림 생성
     sql = '''
-    CREATE STREAM nodb_person_str (
+    CREATE STREAM person_str (
         id INT, name VARCHAR, address VARCHAR,
         ip VARCHAR, birth VARCHAR, company VARCHAR, phone VARCHAR)
         with (kafka_topic = 'nodb_person', partitions=12,
@@ -381,39 +381,45 @@ def test_ksql_dedup(xkafka, xprofile, xcp_setup, xksql, xdel_ksql_dedup_strtbl):
     '''
     _ksql_exec(ssh, sql)
     props = {
-        "ksql.streams.auto.offset.reset": "earliest",
+        # 버퍼링을 꺼야 바로 카운트에 반영됨
         "ksql.streams.cache.max.bytes.buffering": "0",
+        # 테이블 생성시도 오프셋 리셋해 주어야 처음부터 옴 (per query)
+        "ksql.streams.auto.offset.reset": "earliest",
     }
 
     # 윈도우별 메시지 카운팅 테이블 생성
     # id 와 name 을 복합키로 생각
     sql = '''
-    CREATE TABLE nodb_person_agg
-        WITH (kafka_topic='nodb_person_agg', partitions=1, format='json')
+    CREATE TABLE person_agg
+        WITH (kafka_topic='person_agg', partitions=1, format='json')
         AS
-        SELECT id AS KEY1,
+        SELECT
+            -- group by 의 기준 컬럼은 select 되어야함 (테이블의 키가 됨)
+            id AS KEY1,
             name AS KEY2,
+            -- 키를 값으로도 사용
             AS_VALUE(id) AS id,
             AS_VALUE(name) AS name,
+            -- 같은 키 중 오프셋 기준 가장 최신 것 선택
             LATEST_BY_OFFSET(address) AS address,
             LATEST_BY_OFFSET(birth) AS birth,
             LATEST_BY_OFFSET(company) AS company,
             LATEST_BY_OFFSET(phone) AS phone,
             COUNT(*) AS count
-        FROM nodb_person_str WINDOW TUMBLING (SIZE 1 MINUTES)
+        FROM person_str WINDOW TUMBLING (SIZE 1 MINUTES)
         GROUP BY id, name;
 
     -- 메시지 카운팅 스트림
-    CREATE STREAM nodb_person_agg_str (
+    CREATE STREAM person_agg_str (
             id INT, name VARCHAR, address VARCHAR, ip VARCHAR,
             birth VARCHAR, company VARCHAR, phone VARCHAR, count int)
-        WITH (kafka_topic = 'nodb_person_agg', partitions=1, format='json');
+        WITH (kafka_topic = 'person_agg', partitions=1, format='json');
 
     -- 중복 제거된 스트림
-    CREATE STREAM nodb_person_dedup AS
+    CREATE STREAM person_dedup AS
         SELECT
             id, name, address, ip, birth, company, phone
-        FROM nodb_person_agg_str
+        FROM person_agg_str
         WHERE count = 1
         PARTITION  BY id
     '''
@@ -421,9 +427,16 @@ def test_ksql_dedup(xkafka, xprofile, xcp_setup, xksql, xdel_ksql_dedup_strtbl):
 
     # 중복 제거 확인
     sql = '''
-        SELECT count(id) FROM nodb_person_dedup EMIT CHANGES
+        SELECT count(id) FROM person_dedup EMIT CHANGES LIMIT 1
     '''
-    ret = _ksql_exec(ssh, sql, 'query', timeout=7)
+    props = {
+        # ksql API 호출시 ksql-server.properties 의 속성은 모두 무시됨
+        # 스트림/테이블 생성시 필요한 속성은 모두 명시해야
+
+        # 처음부터 카운트 (per query)
+        "ksql.streams.auto.offset.reset": "earliest",
+    }
+    ret = _ksql_exec(ssh, sql, 'query', props)
     assert ret[1][0] == 100
 
 
@@ -447,3 +460,90 @@ def test_filebeat(xkafka, xprofile, xtopic, xcp_setup, xlog):
     time.sleep(5)
     cnt = count_topic_message(xprofile, xtopic)
     assert 10000 == cnt
+
+
+@pytest.fixture
+def xdel_ksql_flatjson(xprofile, xtopic):
+    """의존성을 고려한 테이블 및 스트림 삭제."""
+    ssh = get_ksqldb_ssh(xprofile)
+    delete_ksql_objects(ssh, [
+        (0, 'person_flat2'), (0, 'person_flat1'), (0, 'person_merge'), (0, 'person_raw'),
+        ])
+
+
+def test_ksql_flatjson(xkafka, xprofile, xtopic, xdel_ksql_flatjson):
+    """ksqlDB 를 사용해 Nested JSON 펼치기."""
+    setup = load_setup(xprofile)
+    broker = f"{setup['kafka_public_ip']['value']}:19092"
+
+    ssh = get_ksqldb_ssh(xprofile)
+
+    # nested json 파일 토픽에 보내기
+    prod = KafkaProducer(bootstrap_servers=broker)
+    with open('../refers/nested_json.txt') as f:
+        for line in f:
+            prod.send('nodb_person', line.encode())
+
+    # 그대로의 스트림 생성
+    sql = '''
+        CREATE STREAM person_raw (str VARCHAR) WITH (kafka_topic='nodb_person', partitions=12, value_format='kafka')
+    '''
+    props = {
+        # 처음부터 카운트 (per query)
+        "ksql.streams.auto.offset.reset": "earliest",
+    }
+    ret = _ksql_exec(ssh, sql, 'ksql', props)
+    assert ret[0]['commandStatus']['status'] == 'SUCCESS'
+
+    # 일시와 JSON 결한 스트림 생성
+    sql = '''
+        CREATE STREAM person_merge WITH (kafka_topic='person_raw', partitions=1, format='json') AS SELECT JSON_CONCAT('{"RegDate": "'+TRIM(SUBSTRING(str, 1, 24))+'"}', SUBSTRING(str, 25)) msg FROM PERSON_RAW;
+    '''
+    ret = _ksql_exec(ssh, sql, 'ksql', props)
+    assert ret[0]['commandStatus']['status'] == 'SUCCESS'
+
+    # Flat 스트림 구성
+    sql = '''
+        CREATE STREAM person_flat1 AS
+            SELECT
+                EXTRACTJSONFIELD(MSG, '$.RegDate') RegDate,
+                EXTRACTJSONFIELD(MSG, '$.Header.TranId') TranId,
+                JSON_RECORDS(EXTRACTJSONFIELD(MSG, '$.Header.Actor')) Actor,
+                JSON_RECORDS(EXTRACTJSONFIELD(MSG, '$.Body')) Body
+            FROM person_merge;
+
+        CREATE STREAM person_flat2 AS
+            SELECT
+                RegDate, TranId, Actor,
+                Body['Action'] Action,
+                JSON_RECORDS(EXTRACTJSONFIELD(Body['Infos'], '$[0]')) Infos
+            FROM person_flat1;
+
+    '''
+        # CREATE STREAM person_nest2 (
+        #     RegDate VARCHAR,
+        #     Header STRUCT<
+        #         TranId VARCHAR,
+        #         Actor STRUCT<
+        #             WorldId BIGINT,
+        #             UserId BIGINT,
+        #             CharId BIGINT,
+        #             CharName VARCHAR,
+        #             CharLevel INT,
+        #             CharClass VARCHAR
+        #         >
+        #     >,
+        #     Body STRUCT<
+        #         Action VARCHAR,
+        #         Infos VARCHAR
+        #     >
+        # ) WITH (
+        #     KAFKA_TOPIC = 'person_merge',
+        #     VALUE_FORMAT = 'JSON',
+        #     TIMESTAMP = 'RegDate',
+        #     TIMESTAMP_FORMAT = 'yyyy-MM-dd HH:mm:ss.SSS',
+        #     PARTITIONS = 1
+        # );
+
+    ret = _ksql_exec(ssh, sql, 'ksql', props)
+    assert ret[0]['commandStatus']['status'] == 'SUCCESS'

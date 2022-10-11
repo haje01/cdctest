@@ -1,6 +1,7 @@
 #!/bin/bash
 
 session="kfk-remote"
+tmux kill-session -t $session
 tmux new-session -d -s $session
 
 PROFILE="$KFKTEST_PROFILE"
@@ -25,8 +26,11 @@ tmux new-window -t $session:$window -n 'consumer'
 tmux send-keys -t $session:$window "ssh -o StrictHostKeyChecking=no ubuntu@$cons_ip -i $PKEY" C-m
 
 window=3
+tmux new-window -t $session:$window -n 'ksql-cli'
+tmux send-keys -t $session:$window "sudo ksql http://${ksql_ip}:8088" C-m
+
+window=4
 tmux new-window -t $session:$window -n 'ksqldb'
 tmux send-keys -t $session:$window "ssh -o StrictHostKeyChecking=no ubuntu@$ksql_ip -i $PKEY" C-m
-tmux send-keys -t $session:$window "sudo ksql http://$kafka_pip:8088" C-m
 
 tmux attach-session -t $session

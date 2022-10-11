@@ -1,11 +1,13 @@
 import time
 import json
+from datetime import datetime
 from multiprocessing import Process
 
 import pytest
 from mysql.connector import connect
 
 from kfktest.table import reset_table
+from kfktest.inserter import insert
 from kfktest.util import (SSH, count_topic_message, ssh_exec, stop_kafka_broker,
     start_kafka_broker, kill_proc_by_port, vm_start, vm_stop, vm_hibernate,
     get_kafka_ssh, stop_kafka_and_connect, restart_kafka_and_connect, linfo,
@@ -492,3 +494,25 @@ def test_ct_rtbl_incts(xcp_setup, xjdbc, xs3sink, xtable, xprofile, xtopic, xkfs
     s3cnt = s3_count_sinkmsg(KFKTEST_S3_BUCKET, KFKTEST_S3_DIR + "/")
     linfo(f"Orignal Messages: {CTR_INSERTS * CTR_BATCH}, S3 Messages: {s3cnt}")
     assert CTR_INSERTS * CTR_BATCH <= s3cnt
+
+
+@pytest.mark.parametrize('xjdbc', [{
+        'ts_col': 'regdt',
+        'ts_delay': 8000,  # 같은 타임스탬프의 메시지가 늦게 오는 최대 간격보다 충분히 커야
+        'inc_col': None,
+    }], indirect=True)
+def test_ct_tsdelay(xprofile, xcp_setup, xjdbc, xtable):
+    """JDBC 소스 커넥터에서 Timestamp 지연 기능 테스트.
+
+    Timestamp 기준 트랜잭션이 완성되기를 기다림. 같은 시간에 여러 메시지가 들어올 때
+    뒷 부분이 잘리는 문제 방지
+
+    """
+    dt = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    insert('mysql', epoch=1, batch=1, dev=True, dt=dt, show=True)
+    time.sleep(5)
+    insert('mysql', epoch=1, batch=1, dev=True, dt=dt, show=True)
+
+    # 카프카 토픽 확인
+    cnt = count_topic_message(xprofile, f'mysql_person', timeout=10)
+    assert 2 == cnt

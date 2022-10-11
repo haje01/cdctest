@@ -52,8 +52,8 @@ sudo sed -i 's/bootstrap.servers=localhost:9092/bootstrap.servers=${var.kafka_pr
 # 토픽 처음부터
 sudo echo 'ksql.streams.auto.offset.reset=earliest' >> /etc/ksqldb/ksql-server.properties
 # Timeout 에러 방지
-sudo echo 'ksql.streams.shutdown.timeout.ms=30000' >> /etc/ksqldb/ksql-server.properties
-sudo echo 'ksql.idle.connection.timeout.seconds=30000' >> /etc/ksqldb/ksql-server.properties
+echo 'ksql.streams.shutdown.timeout.ms=30000' | sudo tee -a /etc/ksqldb/ksql-server.properties
+echo 'ksql.idle.connection.timeout.seconds=30000' | sudo tee -a /etc/ksqldb/ksql-server.properties
 EOT
 }
 

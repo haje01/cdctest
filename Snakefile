@@ -15,6 +15,19 @@ rule setup:
         """
 
 
+rule tmux_remote:
+    """인프라 설치 후 TMUX 로 연결."""
+    input: 
+        "temp/{profile}/setup.json"
+    output: 
+        "temp/{profile}/tmux_remote"
+    shell:
+        """
+        KFKTEST_PROFILE={wildcards.profile} ./tmux-remote.sh
+        touch {output}
+        """
+
+
 rule destroy:
     """프로파일 인프라 제거."""
     output:
