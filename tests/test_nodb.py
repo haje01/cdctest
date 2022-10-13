@@ -471,8 +471,64 @@ def xdel_ksql_flatjson(xprofile, xtopic):
         ])
 
 
-def test_ksql_flatjson(xkafka, xprofile, xtopic, xdel_ksql_flatjson):
-    """ksqlDB 를 사용해 Nested JSON 펼치기."""
+@pytest.mark.parametrize('xs3sink', [{'topics': "PERSON_FLAT2"}], indirect=True)
+def test_ksql_flatjson(xkafka, xprofile, xtopic, xdel_ksql_flatjson, xs3sink):
+    """ksqlDB 를 사용해 Nested JSON 펼치기.
+
+    - 임의의 깊이까지 완전히 펼치는 것은 어렵기에, 정해진 깊이까지만 펼침
+        - 그 깊이의 노드까지는 필드까지 쿼리 가능
+        - 그 깊이 이상의 노드는 추가 파싱 필요
+    - 펼쳐진 메시지가 S3에 올라가는 것 확인
+
+    원본 로그 구조:
+        2022-10-05 09:20:35,688
+        {
+            "Header": {
+                "TranId": "00000000-0000-0000-0000-000000000000",
+                "Actor": {
+                    "WorldId": 10,
+                    "UserId": 28,
+                    "CharId": 1984075,
+                    "CharName": "hsm0000",
+                    "CharLevel": 103,
+                    "CharClass": "NoviceHunter"
+                }
+            },
+            "Body": {
+                "Action": "CharLogin",
+                "Infos": [{
+                    "Domain": "LoginOut",
+                    "LoginTime": "2022-10-05T00:20:35.3757353Z"
+                }]
+            }
+        }
+
+    펼쳐진 로그 구조:
+
+    {
+        "REGDATE": "2022-10-05 11:21:52,578",
+        "TRANID": "882a1bb7-c553-4e77-8f6b-69081b9ebc7b"
+        "ACTOR": {
+            "UserId": "177724",
+            "CharLevel": "100",
+            "CharClass": "WhiteWizard",
+            "CharName": "jhbnmjui",
+            "WorldId": "10",
+            "CharId": "2083227"
+        },
+        "ACTION": "ShopBuy",
+        "INFO0: {
+            "DeltaType": "Consume",
+            "MoneyType": "Gem",
+            "MoneyAmount": "957350",
+            "DeltaAmount": "2000",
+            "Domain": "Money"
+        },
+    }
+
+    3
+
+    """
     setup = load_setup(xprofile)
     broker = f"{setup['kafka_public_ip']['value']}:19092"
 
@@ -495,7 +551,7 @@ def test_ksql_flatjson(xkafka, xprofile, xtopic, xdel_ksql_flatjson):
     ret = _ksql_exec(ssh, sql, 'ksql', props)
     assert ret[0]['commandStatus']['status'] == 'SUCCESS'
 
-    # 일시와 JSON 결한 스트림 생성
+    # 일시와 JSON 결합 스트림 생성
     sql = '''
         CREATE STREAM person_merge WITH (kafka_topic='person_raw', partitions=1, format='json') AS SELECT JSON_CONCAT('{"RegDate": "'+TRIM(SUBSTRING(str, 1, 24))+'"}', SUBSTRING(str, 25)) msg FROM PERSON_RAW;
     '''
@@ -504,6 +560,7 @@ def test_ksql_flatjson(xkafka, xprofile, xtopic, xdel_ksql_flatjson):
 
     # Flat 스트림 구성
     sql = '''
+        -- 1 단계 플랫: TranId, Actor, Body 레벨 플랫화
         CREATE STREAM person_flat1 AS
             SELECT
                 EXTRACTJSONFIELD(MSG, '$.RegDate') RegDate,
@@ -512,38 +569,21 @@ def test_ksql_flatjson(xkafka, xprofile, xtopic, xdel_ksql_flatjson):
                 JSON_RECORDS(EXTRACTJSONFIELD(MSG, '$.Body')) Body
             FROM person_merge;
 
+        -- 2 단계 플랫:Body 아래 Action / Infos 레벨 플랫화
         CREATE STREAM person_flat2 AS
             SELECT
                 RegDate, TranId, Actor,
                 Body['Action'] Action,
-                JSON_RECORDS(EXTRACTJSONFIELD(Body['Infos'], '$[0]')) Infos
+                JSON_RECORDS(EXTRACTJSONFIELD(Body['Infos'], '$[0]')) Info0
             FROM person_flat1;
-
     '''
-        # CREATE STREAM person_nest2 (
-        #     RegDate VARCHAR,
-        #     Header STRUCT<
-        #         TranId VARCHAR,
-        #         Actor STRUCT<
-        #             WorldId BIGINT,
-        #             UserId BIGINT,
-        #             CharId BIGINT,
-        #             CharName VARCHAR,
-        #             CharLevel INT,
-        #             CharClass VARCHAR
-        #         >
-        #     >,
-        #     Body STRUCT<
-        #         Action VARCHAR,
-        #         Infos VARCHAR
-        #     >
-        # ) WITH (
-        #     KAFKA_TOPIC = 'person_merge',
-        #     VALUE_FORMAT = 'JSON',
-        #     TIMESTAMP = 'RegDate',
-        #     TIMESTAMP_FORMAT = 'yyyy-MM-dd HH:mm:ss.SSS',
-        #     PARTITIONS = 1
-        # );
 
     ret = _ksql_exec(ssh, sql, 'ksql', props)
     assert ret[0]['commandStatus']['status'] == 'SUCCESS'
+
+    sql = '''
+        SELECT Info0['Domain'] FROM person_flat2 LIMIT 1;
+    '''
+    ret = _ksql_exec(ssh, sql, 'query')
+    assert len(ret[1][0]) > 0
+

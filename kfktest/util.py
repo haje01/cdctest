@@ -1445,10 +1445,11 @@ def xs3rmdir(request):
     linfo(f"[v] remove s3 dir")
 
 
-@pytest.fixture(params=[{}])
+@pytest.fixture(params=[{'topics': None}])
 def xs3sink(xprofile, xrmcons, xkfssh, xhash, xs3rmdir, request):
     """S3 Sink Connector 등록."""
-    topics = f'{xprofile}_person'
+    topics = request.param.get('topics', None)
+    topics = f'{xprofile}_person' if topics is None else topics
     yield register_s3sink(xkfssh, xprofile, topics, request.param)
 
 
