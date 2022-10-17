@@ -132,7 +132,7 @@ def insert_fake(conn, cursor, epoch, batch, pid, profile, table='person', dt=Non
             ]
             if dt is not None:
                 row.insert(0, dt)
-            rows.append(row)
+            rows.append(tuple(row))
             if show:
                 linfo(row)
         cursor.executemany(sql, rows)
@@ -439,9 +439,11 @@ def count_topic_message(profile, topic, timeout=None):
     linfo("[ ] count_topic_message")
     setup = load_setup(profile)
     kfk_ip = setup['kafka_public_ip']['value']
-    if timeout is not None:
-        time.sleep(timeout)
-    cmd = f'''kafkacat -b localhost:9092 -t {topic} -C -e -q | wc -l'''
+    timeout = timeout * 1000 if timeout is not None else None
+    stimeout = f"--timeout-ms {timeout}" if timeout is not None else ''
+    # cmd = f'''kafkacat -b localhost:9092 -t {topic} -C -e -q | wc -l'''
+    cmd = f'''kafka-console-consumer.sh --bootstrap-server localhost:9092 --topic {topic} {stimeout} --from-beginning | wc -l
+'''
     kfk_ssh = SSH(kfk_ip)
     ret = ssh_exec(kfk_ssh, cmd)
     cnt = int(ret.strip())
@@ -1252,11 +1254,11 @@ def inserter_kill_processes(profile, setup, cmd_ptrn):
 @pytest.fixture(params=[
         {
         'pre_epoch': 0, 'pre_batch': 0, 'fix_regdt': None, 'tables': ['person'],
-        'skip': False
+        'skip': False, 'datetime1': False
         }])
 def xtable(xprofile, xkafka, request):
     """테스트용 테이블 초기화."""
-    if request.param['skip']:
+    if request.param.get('skip', False):
         yield
 
     linfo("xtable")
@@ -1264,7 +1266,7 @@ def xtable(xprofile, xkafka, request):
     drop_all_tables(xprofile)
 
     # 생성
-    for table in request.param['tables']:
+    for table in request.param.get('tables', ['person']):
         _xtable(xprofile, table, request)
 
     yield time.time()
@@ -1276,7 +1278,8 @@ def _xtable(xprofile, table, request):
     pre_epoch = request.param.get('pre_epoch', 0)
     pre_batch = request.param.get('pre_batch', 0)
     fix_regdt = request.param.get('fix_regdt', None)
-    conn, cursor = reset_table(xprofile, table, fix_regdt)
+    datetime1 = request.param.get('datetime1', False)
+    conn, cursor = reset_table(xprofile, table, fix_regdt, datetime1=datetime1)
 
     from kfktest.inserter import insert
     if pre_epoch > 0 :

@@ -12,7 +12,7 @@ parser.add_argument('--db-name', type=str, default='test', help="이용할 데�
 parser.add_argument('-t', '--table', type=str, default='person', help="이용할 테이블 이름.")
 
 
-def reset_table(profile, table, fix_regdt=None, concur=None):
+def reset_table(profile, table, fix_regdt=None, concur=None, datetime1=False):
     regdt_def = 'CURRENT_TIMESTAMP' if fix_regdt is None else f"'{fix_regdt}'"
     linfo(f"[ ] reset_table for {profile} {table}")
     if concur is None:
@@ -32,14 +32,16 @@ def reset_table(profile, table, fix_regdt=None, concur=None):
         tail = ', PRIMARY KEY(id)'
     else:
         ## MSSQL
-        # DATETIME2 가 더 정밀해 중복 위험 때문에 권고 사항이긴 하나
-        # incremental+timestamp 형식으로 복합키로 사용할 때는 중복 위험 없을 듯
+        # DATETIME2 가 더 정밀해 중복 위험 때문에 권고 사항이나 테스트를 위해 DATETIME 이용가
+        # DATETIME 컬럼에 대해 Timestamp 모드 사용시 로그 유실이 드물지 않게 발생
+        #  -> timestamp.delay.interval.ms 로 대응
+        dt_type = 'DATETIME' if datetime1 else 'DATETIME2'
         head = f'''
     IF OBJECT_ID('{table}', 'U') IS NOT NULL
         DROP TABLE {table}
     CREATE TABLE {table} (
         id int IDENTITY(1,1) PRIMARY KEY,
-        regdt DATETIME2 DEFAULT {regdt_def} NOT NULL,
+        regdt {dt_type} DEFAULT {regdt_def} NOT NULL,
         pid INT NOT NULL,
         sid INT NOT NULL,
             '''

@@ -124,5 +124,3 @@ pytest test_mssql.py::test_ct_multitable -s
 
 - Kafka JDBC Source Connector 를 이용해 CT (Change Tracking) 방식으로 DB 에서 Kafka 로 로그성 데이터 가져오기를 테스트한다.
 - 대상 DBMS 별로 `mysql` 과 `mssql` 프로파일이 있다.
-
-

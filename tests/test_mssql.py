@@ -497,7 +497,7 @@ SELECT * FROM person
 def test_ct_rtbl_inc(xcp_setup, xjdbc, xtable, xprofile, xtopic, xkfssh):
     """로테이션되는 테이블을 Dynamic SQL 쿼리로 가져오기.
 
-    Incremental 컬럼만 이용하는 경우 경우
+    Incremental 컬럼만 이용하는 경우
 
     동기:
     - MSSQL 에서 로테이션되는 테이블을 CT 방식으로 가져오는 경우
@@ -620,3 +620,43 @@ def test_ct_rtbl_incts(xcp_setup, xjdbc, xs3sink, xtable, xprofile, xtopic, xkfs
     s3cnt = s3_count_sinkmsg(KFKTEST_S3_BUCKET, KFKTEST_S3_DIR + "/")
     linfo(f"Orignal Messages: {CTR_INSERTS * CTR_BATCH}, S3 Messages: {s3cnt}")
     assert CTR_INSERTS * CTR_BATCH == s3cnt
+
+
+@pytest.mark.parametrize('xjdbc', [{
+        'inc_col': None,
+        'ts_col': 'regdt',
+        'poll_interval': 1000,
+        'ts_delay': 1000
+    }],
+    indirect=True)
+@pytest.mark.parametrize('xtable', [{'datetime1': False}], indirect=True)
+def test_ct_tsloss(xcp_setup, xjdbc, xtable, xprofile, xtopic, xkfssh):
+    """CT 방식에서 DATETIME2 타입 컬럼에 대한 Timestamp 모드의 유실 대응
+
+    - 같은 시간에 메시지가 많은 경우 일부만 Ingest 한체 오프셋 커밋 가능
+        -> 유실 발생
+    - poll 인터벌이 작을 수록 (빈번하게 poll 할수록) 손실이 잦음
+    - 이런 경우 timestamp.delay.interval.ms 를 이용해 타임스탬프 기준 트랜잭션이
+      완성되기를 기다리면 유실 방지 가능
+
+    주: DATETIME 컬럼에 대한 Timestamp 모드 문제
+        DATETIME 을 사용하는 레가시 DB 에서 메시지가 더 이상 들어오지 않을 때
+        poll 할 때마다 마지막 타임스탬프의 메시지들이 계속 중복해서 토픽에
+        들어오는 문제가 있음.
+
+    """
+    # Insert 프로세스들 시작
+    ins_pros = []
+    for pid in range(1, NUM_INS_PROCS + 1):
+        # insert 프로세스
+        p = Process(target=local_insert_proc, args=(xprofile, pid))
+        ins_pros.append(p)
+        p.start()
+
+    for p in ins_pros:
+        p.join()
+    linfo("All insert processes are done.")
+
+    # 카프카 토픽 확인 (timeout 되기 전에 다 받아야 함)
+    cnt = count_topic_message(xprofile, f'{xprofile}_person', timeout=10)
+    assert DB_ROWS == cnt

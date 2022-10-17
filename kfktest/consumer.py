@@ -39,7 +39,7 @@ def consume(profile,
         topic=parser.get_default('topic'),
         fields=parser.get_default('fields'),
         ):
-    topic = f'{profile}-person' if topic is None else topic
+    topic = f'{profile}_person' if topic is None else topic
     linfo(f"[ ] consume {topic}.")
 
     setup = load_setup(profile)

@@ -10,3 +10,4 @@ boto3
 pandas
 seaborn
 pyarrow
+retry
