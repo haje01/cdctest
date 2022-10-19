@@ -1,4 +1,5 @@
 import time
+import json
 from multiprocessing import Process
 
 import pytest
@@ -9,7 +10,7 @@ from kfktest.util import (get_ksqldb_ssh, local_produce_proc,
     KFKTEST_S3_BUCKET, KFKTEST_S3_DIR, unregister_kconn, register_s3sink,
     load_setup, _hash, kill_proc_by_port, start_kafka_broker, ssh_exec,
     ksql_exec, list_ksql_tables, list_ksql_streams, delete_ksql_objects,
-    _ksql_exec, setup_filebeat, producer_logger_proc, SSH,
+    _ksql_exec, setup_filebeat, producer_logger_proc, SSH, create_topic,
     # 픽스쳐들
     xsetup, xtopic, xkfssh, xkvmstart, xcp_setup, xs3sink, xhash, xs3rmdir,
     xrmcons, xconn, xkafka, xzookeeper, xksql, xlog
@@ -288,7 +289,7 @@ def xdel_ksql_basic_strtbl(xprofile):
     """의존성을 고려한 테이블 및 스트림 삭제."""
     ssh = get_ksqldb_ssh(xprofile)
     delete_ksql_objects(ssh, [
-        (1, 'person_tbl'), (0, 'person_str'),
+        (1, 'person_tbl'), (0, 'person'),
         ])
 
 
@@ -308,7 +309,7 @@ def test_ksql_basic(xkafka, xprofile, xcp_setup, xtopic, xksql, xdel_ksql_basic_
 
     # 토픽에서 스트림 생성
     sql = '''
-    CREATE STREAM person_str (
+    CREATE STREAM person (
         pidid VARCHAR KEY,
         id VARCHAR, name VARCHAR, address VARCHAR,
         ip VARCHAR, birth VARCHAR, company VARCHAR, phone VARCHAR)
@@ -331,7 +332,7 @@ def test_ksql_basic(xkafka, xprofile, xcp_setup, xtopic, xksql, xdel_ksql_basic_
     SHOW PROPERTIES;
     CREATE TABLE person_tbl AS
         SELECT pidid, COUNT(id) AS count
-        FROM person_str WINDOW TUMBLING (SIZE 1 MINUTES)
+        FROM person WINDOW TUMBLING (SIZE 1 MINUTES)
         GROUP BY pidid;
     '''
     ret = ksql_exec(xprofile, sql)
@@ -359,7 +360,7 @@ def xdel_ksql_dedup_strtbl(xprofile, xtopic):
     ssh = get_ksqldb_ssh(xprofile)
     delete_ksql_objects(ssh, [
         (0, 'person_dedup'), (0, 'person_agg_str'),
-        (1, 'person_agg'), (0, 'person_str')
+        (1, 'person_agg'), (0, 'person')
         ])
 
 
@@ -373,7 +374,7 @@ def test_ksql_dedup(xkafka, xprofile, xcp_setup, xksql, xdel_ksql_dedup_strtbl):
     ssh = get_ksqldb_ssh(xprofile)
     # 토픽에서 스트림 생성
     sql = '''
-    CREATE STREAM person_str (
+    CREATE STREAM person (
         id INT, name VARCHAR, address VARCHAR,
         ip VARCHAR, birth VARCHAR, company VARCHAR, phone VARCHAR)
         with (kafka_topic = 'nodb_person', partitions=12,
@@ -406,7 +407,7 @@ def test_ksql_dedup(xkafka, xprofile, xcp_setup, xksql, xdel_ksql_dedup_strtbl):
             LATEST_BY_OFFSET(company) AS company,
             LATEST_BY_OFFSET(phone) AS phone,
             COUNT(*) AS count
-        FROM person_str WINDOW TUMBLING (SIZE 1 MINUTES)
+        FROM person WINDOW TUMBLING (SIZE 1 MINUTES)
         GROUP BY id, name;
 
     -- 메시지 카운팅 스트림
@@ -472,7 +473,7 @@ def xdel_ksql_flatjson(xprofile, xtopic):
 
 
 @pytest.mark.parametrize('xs3sink', [{'topics': "PERSON_FLAT2"}], indirect=True)
-def test_ksql_flatjson(xkafka, xprofile, xtopic, xdel_ksql_flatjson, xs3sink):
+def test_ksql_flatjson(xkafka, xprofile, xtopic, xksql, xdel_ksql_flatjson, xs3sink):
     """ksqlDB 를 사용해 Nested JSON 펼치기.
 
     - 임의의 깊이까지 완전히 펼치는 것은 어렵기에, 정해진 깊이까지만 펼침
@@ -526,7 +527,6 @@ def test_ksql_flatjson(xkafka, xprofile, xtopic, xdel_ksql_flatjson, xs3sink):
         },
     }
 
-    3
 
     """
     setup = load_setup(xprofile)
@@ -587,3 +587,229 @@ def test_ksql_flatjson(xkafka, xprofile, xtopic, xdel_ksql_flatjson, xs3sink):
     ret = _ksql_exec(ssh, sql, 'query')
     assert len(ret[1][0]) > 0
 
+
+@pytest.fixture
+def xdel_ksql_joinss(xprofile):
+    """의존성을 고려한 테이블 및 스트림 삭제."""
+    ssh = get_ksqldb_ssh(xprofile)
+    delete_ksql_objects(ssh, [
+        (1, 'latest_email'), (0, 'person_email'), (0, 'person'), (0, 'email'),
+        ])
+
+def test_ksql_joinss(xkafka, xprofile, xtopic, xksql, xkfssh, xdel_ksql_joinss):
+    """이벤트와 가까운 시간대의 정보를 스트림+스트림 조인
+
+    - person 스트림에 더해 별도 정보 스트림 생성
+    - 정보 스트림은 나중에 새로운 레코드 들어옴
+        - id 값이 2의 배수는 과거 정보, 3의 배수는 새 정보 있음
+    - 이벤트 레코드의 시간과 가까운 정보 레코드를 조인
+        - 이벤트 레코드 시간과 관계없이 최신 정보 조인이 필요하면 스트림+테이블 조인
+
+    - 시간대 (5초) 를 WITHIN 으로 명시하고 INNER 조인
+        - 시간대를 벗어나는 정보를 갖는 레코드는 제외되는 결과
+
+    참고:
+        https://docs.ksqldb.io/en/latest/developer-guide/joins/join-streams-and-tables/
+        https://developer.confluent.io/tutorials/join-a-stream-to-a-stream/ksql.html
+
+    """
+    # person 토픽 & 스트림 생성
+    local_produce_proc(xprofile, 1, 10, with_key=True, with_ts=True)
+
+    sql = '''
+    CREATE STREAM person (
+        key VARCHAR KEY,
+        id INT, regts TIMESTAMP, name VARCHAR, address VARCHAR,
+        ip VARCHAR, birth VARCHAR, company VARCHAR, phone VARCHAR)
+        with (kafka_topic = 'nodb_person', value_format='json', timestamp='regts');
+    '''
+    ksql_exec(xprofile, sql)
+
+    # 이메일 토픽 & 스트림 생성
+    create_topic(xkfssh, 'email', partitions=12, replications=1)
+
+    setup = load_setup(xprofile)
+    broker = f"{setup['kafka_public_ip']['value']}:19092"
+
+    prod = KafkaProducer(
+        bootstrap_servers=broker
+        )
+    # 이벤트 시간대의 정보
+    for i in range(1, 11):
+        # id 값 2의 배수만 이벤트 시간대의 정보 있음
+        if i % 2 != 0:
+            continue
+        email = f'old{i:02d}@email.com'
+        data = {'id': i, 'regts': int(time.time() * 1000), 'email': email}
+        key = f'0-{i}'.encode()
+        prod.send('email', json.dumps(data).encode(), key)
+    prod.flush()
+
+    # 새 정보와 이벤트의 시간대가 차이나도록 쉬어줌
+    time.sleep(7)
+    # 새 정보
+    for i in range(1, 11):
+        # id 값 3의 배수만 새 정보 있음
+        if i % 3 != 0:
+            continue
+        email = f'new{i:02d}@email.com'
+        data = {'id': i, 'regts': int(time.time() * 1000), 'email': email}
+        key = f'0-{i}'.encode()
+        prod.send('email', json.dumps(data).encode(), key)
+    prod.flush()
+
+    sql = '''
+    CREATE STREAM email (key VARCHAR KEY, id INT, regts TIMESTAMP, email VARCHAR)
+        with (kafka_topic = 'email', value_format='json', timestamp='regts');
+    '''
+    ksql_exec(xprofile, sql)
+
+    props = {
+        # 처음부터 카운트 (per query)
+        "ksql.streams.auto.offset.reset": "earliest",
+    }
+    sql = '''
+    CREATE STREAM person_email AS
+        SELECT p.id, p.name, e.email FROM person p INNER JOIN email e
+            WITHIN 5 SECONDS ON p.id = e.id;
+    '''
+    ksql_exec(xprofile, sql, 'ksql', props)
+
+    # 이벤트와 같은 시간대의 old 정보만 남는 결과
+    ret = ksql_exec(xprofile, 'SELECT COUNT(*) cnt FROM person_email EMIT CHANGES',
+        'query', props, timeout=7)
+    assert 5 == ret[1][0]
+    ret = ksql_exec(xprofile, 'SELECT * FROM person_email EMIT CHANGES',
+        'query', props, timeout=7)
+    for row in ret[1:]:
+        assert row[2].startswith('old')
+
+    ### 결과 (레코드 시점의 정보만 이용, 정보가 없는 행은 제거)
+    # +----------------------------------+----------------------------------+
+    # |P_ID                              |EMAIL                             |
+    # +----------------------------------+----------------------------------+
+    # |10                                |old10@email.com                   |
+    # |8                                 |old08@email.com                   |
+    # |4                                 |old04@email.com                   |
+    # |2                                 |old02@email.com                   |
+    # |6                                 |old06@email.com                   |
+
+
+@pytest.fixture
+def xdel_ksql_joinst(xprofile):
+    """의존성을 고려한 테이블 및 스트림 삭제."""
+    ssh = get_ksqldb_ssh(xprofile)
+    delete_ksql_objects(ssh, [
+        (0, 'person_email'), (1, 'latest_email'), (0, 'person'), (0, 'email'),
+        ])
+
+def test_ksql_joinst(xkafka, xprofile, xtopic, xksql, xkfssh, xdel_ksql_joinst):
+    """이벤트와 최신 정보를 스트림+테이블 조인
+
+    - person 스트림에 더해 별도 정보 스트림 생성
+    - 정보 스트림은 나중에 새로은 레코드 들어옴
+        - id 값이 2의 배수는 과거 정보, 3의 배수는 새 정보 있음
+    - 정보 스트림에서 최신 정보 기준으로 테이블 생성
+    - 이벤트 스트림과 정보 테이블 조인
+
+    참고:
+        https://docs.ksqldb.io/en/latest/developer-guide/joins/join-streams-and-tables/
+        https://developer.confluent.io/tutorials/join-a-stream-to-a-table/ksql.html
+
+    """
+    # person 토픽 & 스트림 생성
+    local_produce_proc(xprofile, 1, 10, with_key=True, with_ts=True)
+
+    sql = '''
+    CREATE STREAM person (
+        key VARCHAR KEY,
+        id INT, regts TIMESTAMP, name VARCHAR, address VARCHAR,
+        ip VARCHAR, birth VARCHAR, company VARCHAR, phone VARCHAR)
+        with (kafka_topic = 'nodb_person', value_format='json', timestamp='regts');
+    '''
+    ksql_exec(xprofile, sql)
+
+    # 이메일 토픽 & 스트림 생성
+    create_topic(xkfssh, 'email', partitions=12, replications=1)
+
+    setup = load_setup(xprofile)
+    broker = f"{setup['kafka_public_ip']['value']}:19092"
+
+    prod = KafkaProducer(
+        bootstrap_servers=broker
+        )
+    # 과거 정보
+    for i in range(1, 11):
+        # 2의 배수는 과거 정보 있음
+        if i % 2 != 0:
+            continue
+        email = f'old{i:02d}@email.com'
+        data = {'id': i, 'regts': int(time.time() * 1000), 'email': email}
+        key = f'0-{i}'.encode()
+        prod.send('email', json.dumps(data).encode(), key)
+    prod.flush()
+
+    # 새 정보
+    for i in range(1, 11):
+        # 3의 배수는 새 정보 있음
+        if i % 3 != 0:
+            continue
+        email = f'new{i:02d}@email.com'
+        data = {'id': i, 'regts': int(time.time() * 1000), 'email': email}
+        key = f'0-{i}'.encode()
+        prod.send('email', json.dumps(data).encode(), key)
+    prod.flush()
+
+    # 정보 스트림 생성
+    sql = '''
+    CREATE STREAM email (key VARCHAR KEY, id INT, regts TIMESTAMP, email VARCHAR)
+        with (kafka_topic = 'email', value_format='json', timestamp='regts');
+    '''
+    ksql_exec(xprofile, sql)
+
+    # 최신 값 기준 정보 테이블 생성
+    props = {
+        # 처음부터 카운트 (per query)
+        "ksql.streams.auto.offset.reset": "earliest",
+    }
+    sql = '''
+    CREATE TABLE latest_email AS
+        SELECT id, LATEST_BY_OFFSET(email) email FROM email GROUP BY id
+    '''
+    ksql_exec(xprofile, sql, 'ksql', props)
+
+    # 잠시 쉬어주지 않으면 결과값이 안나옴?!
+    time.sleep(1)
+    # 조인 스트림
+    sql = '''
+    CREATE STREAM person_email AS
+        SELECT p.id, p.name, e.email FROM person p
+            INNER JOIN latest_email e ON p.id = e.id;
+    '''
+    ksql_exec(xprofile, sql, 'ksql', props)
+
+    # 잠시 쉬어주지 않으면 결과값이 안나옴?!
+    time.sleep(1)
+    # 갯수가 맞고 최신 정보인지 확인
+    sql = '''
+        SELECT * FROM person_email;
+    '''
+    ret = ksql_exec(xprofile, sql, 'query', props, timeout=5)
+    for row in ret[1:]:
+        id, name, email = row
+        if id % 2 == 0 and id != 6:
+            assert email.startswith('old')
+        else:
+            assert email.startswith('new')
+
+    ### 결과 (최근 정보가 있는 행은 그것을, 정보가 없는 행은 제거)
+    # +----------------------------------+----------------------------------+
+    # |P_ID                              |EMAIL                             |
+    # +----------------------------------+----------------------------------+
+    # |10                                |old10@email.com                   |
+    # |9                                 |new09@email.com                   |
+    # |8                                 |old08@email.com                   |
+    # |4                                 |old04@email.com                   |
+    # |2                                 |old02@email.com                   |
+    # |3                                 |new03@email.com                   |
+    # |6                                 |new06@email.com                   |

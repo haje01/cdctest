@@ -8,6 +8,7 @@ from cgitb import enable
 import random
 import os
 import json
+import time
 from json import JSONDecodeError
 import re
 from datetime import datetime
@@ -72,7 +73,7 @@ def db_port(profile):
     return DB_PORTS[profile]
 
 
-def gen_fake_data(count):
+def gen_fake_data(count, with_ts=False):
     """Fake 데이터 생성."""
     fake = Faker()
     fake.add_provider(internet)
@@ -90,6 +91,8 @@ def gen_fake_data(count):
             'company': fake.company(),
             'phone': fake.phone_number()
         }
+        if with_ts:
+            data['regts'] = int(time.time() * 1000)
         yield data
 
 
@@ -1132,13 +1135,13 @@ def drop_all_tables(profile):
 
 
 def local_produce_proc(profile, pid, msg_cnt, acks=1, duprate=0, lagrate=0,
-        withkey=False):
+        with_key=False, with_ts=False):
     """로컬 프로듀서 프로세스 함수."""
     from kfktest.producer import produce
 
     linfo(f"[ ] produce process {pid}")
     produce(profile, messages=msg_cnt, acks=acks, dev=True, duprate=duprate,
-        lagrate=lagrate, withkey=withkey)
+        lagrate=lagrate, with_key=with_key, with_ts=with_ts)
     linfo(f"[v] produce process {pid}")
 
 

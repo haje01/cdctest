@@ -29,7 +29,8 @@ parser.add_argument('--lagdelay', type=int, default=60, help="지연 메시지 �
 parser.add_argument('--duprate', type=float, default=0, help="중복 메시지 비율.")
 parser.add_argument('--dupdelay', type=int, default=3, help="중복 메시지 지연 시간(초).")
 parser.add_argument('-t', '--topic', type=str, default=None, help="명시적 토픽명")
-parser.add_argument('-k', '--withkey', action='store_true', default=False, help="메시지 키 생성.")
+parser.add_argument('--with_key', action='store_true', default=False, help="메시지 키 생성.")
+parser.add_argument('--with_ts', action='store_true', default=False, help="메시지 타임스탬프 생성.")
 parser.add_argument('--dt', type=str, default=None, help="지정된 일시로 메시지 생성.")
 
 #
@@ -61,8 +62,8 @@ class SafeKafkaProducer(KafkaProducer):
         self.pending_futures = []
 
 
-def send(prod, topic, pid, data, withkey):
-    if withkey:
+def send(prod, topic, pid, data, with_key):
+    if with_key:
         key = f"{pid}-{data['id']}".encode()
         prod.send(topic, value=data, key=key)
     else:
@@ -80,7 +81,8 @@ def produce(profile,
         duprate=parser.get_default('duprate'),
         dupdelay=parser.get_default('dupdelay'),
         etopic=parser.get_default('topic'),
-        withkey=parser.get_default('withkey'),
+        with_key=parser.get_default('with_key'),
+        with_ts=parser.get_default('with_ts'),
         dt=parser.get_default('dt')
         ):
     """Fake 레코드 전송.
@@ -114,7 +116,7 @@ def produce(profile,
     dup_times = []
     lag_msgs = []
     lag_times = []
-    for i, data in enumerate(gen_fake_data(messages)):
+    for i, data in enumerate(gen_fake_data(messages, with_ts)):
         if dt is not None:
             data['regdt'] = dt
 
@@ -133,14 +135,14 @@ def produce(profile,
             lag_times.append(time.time())
             lagged = True
         if not lagged:
-            send(prod, topic, pid, data, withkey)
+            send(prod, topic, pid, data, with_key)
 
         # 지연/중복 메시지 발행
         now = time.time()
         sents = []
         for i, msg in enumerate(lag_msgs):
             if now - lag_times[i] >= lagdelay:
-                send(prod, topic, pid, data, withkey)
+                send(prod, topic, pid, data, with_key)
                 sents.append(i)
         for i in sents:
             del lag_msgs[i]
@@ -149,7 +151,7 @@ def produce(profile,
         sents = []
         for i, msg in enumerate(dup_msgs):
             if now - dup_times[i] >= dupdelay:
-                send(prod, topic, pid, data, withkey)
+                send(prod, topic, pid, data, with_key)
                 sents.append(i)
         for i in sents:
             del dup_msgs[i]
@@ -167,4 +169,4 @@ if __name__ == '__main__':
     args = parser.parse_args()
     produce(args.profile, args.messages, args.acks, args.compress, args.pid,
         args.dev, args.lagrate, args.lagdelay, args.duprate, args.dupdelay,
-        args.topic, args.withkey, args.dt)
+        args.topic, args.with_key, args.with_ts, args.dt)
