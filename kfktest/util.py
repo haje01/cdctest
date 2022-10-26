@@ -156,7 +156,8 @@ def SSH(host, name=None):
     linfo(f"[ ] ssh connect {name}")
     ssh_pkey = os.environ['KFKTEST_SSH_PKEY']
     ssh = paramiko.SSHClient()
-    ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    # ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    ssh.set_missing_host_key_policy(paramiko.MissingHostKeyPolicy())
     pkey = paramiko.RSAKey.from_private_key_file(ssh_pkey)
     try:
         ssh.connect(host, username='ubuntu', pkey=pkey)

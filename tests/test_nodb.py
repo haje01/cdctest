@@ -1,3 +1,4 @@
+from re import L
 import time
 import json
 from multiprocessing import Process
@@ -422,7 +423,7 @@ def test_ksql_dedup(xkafka, xprofile, xcp_setup, xksql, xdel_ksql_dedup_strtbl):
             id, name, address, ip, birth, company, phone
         FROM person_agg_str
         WHERE count = 1
-        PARTITION  BY id
+        PARTITION BY id
     '''
     _ksql_exec(ssh, sql, 'ksql', props)
 
@@ -597,7 +598,7 @@ def xdel_ksql_joinss(xprofile):
         ])
 
 def test_ksql_joinss(xkafka, xprofile, xtopic, xksql, xkfssh, xdel_ksql_joinss):
-    """이벤트와 가까운 시간대의 정보를 스트림+스트림 조인
+    """이벤트와 가까운 시간대의 정보를 스트림+스트림 이너 조인
 
     - person 스트림에 더해 별도 정보 스트림 생성
     - 정보 스트림은 나중에 새로운 레코드 들어옴
@@ -611,6 +612,7 @@ def test_ksql_joinss(xkafka, xprofile, xtopic, xksql, xkfssh, xdel_ksql_joinss):
     참고:
         https://docs.ksqldb.io/en/latest/developer-guide/joins/join-streams-and-tables/
         https://developer.confluent.io/tutorials/join-a-stream-to-a-stream/ksql.html
+        https://www.confluent.io/blog/crossing-streams-joins-apache-kafka/
 
     """
     # person 토픽 & 스트림 생성
@@ -707,7 +709,7 @@ def test_ksql_joinst(xkafka, xprofile, xtopic, xksql, xkfssh, xdel_ksql_joinst):
     """이벤트와 최신 정보를 스트림+테이블 조인
 
     - person 스트림에 더해 별도 정보 스트림 생성
-    - 정보 스트림은 나중에 새로은 레코드 들어옴
+    - 정보 스트림은 나중에 새로운 레코드 들어옴
         - id 값이 2의 배수는 과거 정보, 3의 배수는 새 정보 있음
     - 정보 스트림에서 최신 정보 기준으로 테이블 생성
     - 이벤트 스트림과 정보 테이블 조인
@@ -715,6 +717,7 @@ def test_ksql_joinst(xkafka, xprofile, xtopic, xksql, xkfssh, xdel_ksql_joinst):
     참고:
         https://docs.ksqldb.io/en/latest/developer-guide/joins/join-streams-and-tables/
         https://developer.confluent.io/tutorials/join-a-stream-to-a-table/ksql.html
+        https://www.confluent.io/blog/crossing-streams-joins-apache-kafka/
 
     """
     # person 토픽 & 스트림 생성
@@ -722,7 +725,7 @@ def test_ksql_joinst(xkafka, xprofile, xtopic, xksql, xkfssh, xdel_ksql_joinst):
 
     sql = '''
     CREATE STREAM person (
-        key VARCHAR KEY,
+        ey VARCHAR KEY,
         id INT, regts TIMESTAMP, name VARCHAR, address VARCHAR,
         ip VARCHAR, birth VARCHAR, company VARCHAR, phone VARCHAR)
         with (kafka_topic = 'nodb_person', value_format='json', timestamp='regts');
@@ -788,7 +791,7 @@ def test_ksql_joinst(xkafka, xprofile, xtopic, xksql, xkfssh, xdel_ksql_joinst):
     '''
     ksql_exec(xprofile, sql, 'ksql', props)
 
-    # 잠시 쉬어주지 않으면 결과값이 안나옴?!
+    # 잠시 쉬어주지 않으면 결과값이 안나옴!
     time.sleep(1)
     # 갯수가 맞고 최신 정보인지 확인
     sql = '''
@@ -813,3 +816,241 @@ def test_ksql_joinst(xkafka, xprofile, xtopic, xksql, xkfssh, xdel_ksql_joinst):
     # |2                                 |old02@email.com                   |
     # |3                                 |new03@email.com                   |
     # |6                                 |new06@email.com                   |
+
+
+
+# 참고: https://www.confluent.io/blog/crossing-streams-joins-apache-kafka/
+
+# - 구매와 가격 스트림
+# - 한 구매에 대해 가격이 여러번 찍히는 경우는 마지막 것을 선택
+
+# - 스트림-스트림 조인 : 이벤트 당시 가격 반영
+#     - 새 가격이 들어오면 반영 대상 구매 범위를 어디까지 할 것인가? (WITHIN)
+#         - 0: 이후 구매에 대해서만 반영
+#             - 단점: 최초 동기시 가격이 늦게 들어오면 그동안 null 가격 적용
+#         - 1분:
+#             - 장점: 최초 동기시 가격이 늦게 들어와도 1분 이내는 null 가격 없음
+#             - 단점: 최대 1분 동안 이전 가격 구매건에 최신 가격 소급 적용
+#     - 장점: 일부 오차 있으나 과거 이벤트 재작업시 당시 가격 반영
+#     - 스트림-스트림 조인은 코드성 테이블을 위한 것은 아닌 듯..
+#        - 테이블이 벌크로 들어올 때마다 모든 로그 행이 JOIN 되어 반복 등장!
+
+# - 스트림-테이블 조인 : 최신 가격만 반영
+#     - 가격 스트림에서 Hopping 윈도우로 테이블 만듦
+#         - 윈도우 크기는 가격 테이블 poll_interval 이상
+#         - 최종 가격으로 테이블 만듦
+#     - 단점:
+#         - 과거 이벤트 재작업시 모든 구매에 최신 가격 적용됨
+#         - 비대칭적이기에 가격이 늦게 들어온 구매는 null 가격 적용
+#     - 장점:
+
+@pytest.fixture
+def xdel_ksql_fillna(xprofile):
+    """의존성을 고려한 테이블 및 스트림 삭제."""
+    ssh = get_ksqldb_ssh(xprofile)
+    delete_ksql_objects(ssh, [
+        (0, 'person_email_fill'), (0, 'person_email'), (1, 'latest_email'), (1, 'earliest_email'),
+        (0, 'person'), (0, 'person_raw'), (0, 'email'),
+        ])
+def test_ksql_fillna(xkafka, xprofile, xtopic, xksql, xkfssh, xdel_ksql_fillna):
+    """로그 스트림과 코드성 테이블 레프트 조인시 시점 문제로 null 값이 나오는 경우와 대응.
+
+    - 처리 순서는 레코드의 타임스탬프 (보통 rowtime) 순
+        - 테이블이나 스트림 CREATE 시간과는 무관
+    - 따라서, 테이블 레코드가 스트림 레코드보다 늦게 들어왔으면
+        레프트 조인 결과는 null 값이 됨
+    - 때로는 테이블 레코드가 먼저 왔어도 null 인 경우도 있음.. -_-;
+        - 내부에서 전파되는 데 시간이 필요할 것으로 추정
+        - 전파되기 전에 사용하면 null 이 되는 듯
+        - 실재 인터랙션이 진행되는 정도의 시간차를 두고 실행하면 문제 없는 듯
+    - null 값을 같은 키의 가장 가까운 값으로 fillna
+
+    부언:
+        - 코파티셔닝 동작 확인을 위해 partitions=4 이용
+            - JOIN ON 에 들어가는 키도 맞춰주어야
+        - 조인 테이블을 만들 때는 참조하는 스트림 및 테이블이 생성된 후
+          1초 정도 시간이 지난 후에 하지 않으면 결과가 나오지 않는다!
+
+    참고:
+        https://groups.google.com/g/ksql-users/c/7YUMT8OY4Gg
+
+    """
+    # 필요한 스트림 & 테이블 먼저 선언
+    props = {
+        # 처음부터 카운트 (per query)
+        "ksql.streams.auto.offset.reset": "earliest",
+    }
+
+    sql = '''
+    -- person 스트림
+    CREATE STREAM person (
+            id INT KEY,   -- 키가 VARCHAR 이외 타입인 경우 json 포맷 사용해야
+            name VARCHAR)
+        WITH (kafka_topic='person', format='json', partitions=4);
+
+    -- 이메일 스트림
+    CREATE STREAM email (
+            id INT KEY,   -- 키가 VARCHAR 이외 타입인 경우 json 포맷 사용해야
+            email VARCHAR)
+        WITH (kafka_topic='email', format='json', partitions=4);
+
+    -- 최신 이메일 스트림
+    CREATE TABLE latest_email AS
+        SELECT
+            id,
+            LATEST_BY_OFFSET(email) email
+        FROM email GROUP BY id;
+
+    -- 최초 이메일 스트림
+    CREATE TABLE earliest_email
+        WITH (kafka_topic='earliest_email', timestamp='regdt')
+        AS SELECT
+            CAST(0 AS BIGINT) regdt,
+            id,
+            EARLIEST_BY_OFFSET(email) email
+        FROM email GROUP BY id;
+
+    -- 조인 결과 스트림
+    CREATE STREAM person_email AS
+        SELECT p.id id, name, email FROM person p
+            LEFT JOIN latest_email e ON p.id = e.id
+            EMIT CHANGES;
+    '''
+    ksql_exec(xprofile, sql, 'ksql', props)
+
+    # 스트림/테이블/토픽 생성시에 시간이 걸림
+    # 바로 insert 하면 유실
+    time.sleep(6)
+    # 로그보다 먼저 들어가 있던 코드
+    sql = f'''
+    INSERT INTO email (id, email) VALUES(1, '1-1@email.com');
+    INSERT INTO email (id, email) VALUES(2, '2-1@email.com');
+    '''
+    ksql_exec(xprofile, sql, 'ksql', props)
+
+    time.sleep(1)
+    # 로그 인서트
+    sql = f'''
+    INSERT INTO person (id, name) VALUES(1, 'Brittany Kelley 1');
+    INSERT INTO person (id, name) VALUES(2, 'Jeremy Allen 1');
+    INSERT INTO person (id, name) VALUES(3, 'Daniel Banks 1');
+    INSERT INTO person (id, name) VALUES(4, 'Charles Rice 1');    '''
+    ksql_exec(xprofile, sql, 'ksql', props)
+
+    time.sleep(1)
+    # 로그 이후 들어온 코드
+    sql = f'''
+    INSERT INTO email (rowtime, id, email) VALUES(0, 3, '3-1@email.com');
+    INSERT INTO email (rowtime, id, email) VALUES(0, 4, '4-1@email.com');
+    '''
+    ksql_exec(xprofile, sql, 'ksql', props)
+
+    time.sleep(3)
+    sql = '''
+    SELECT * FROM person_email
+    '''
+    ret = ksql_exec(xprofile, sql, 'query', props)
+    # 코드가 로그보다 나중에 들어온 경우는 NULL
+    for row in ret[1:]:
+        pid = row[0]
+        if pid in (1, 2):
+            assert row[2] is not None
+        elif pid in (3, 4):
+            assert row[2] is None
+
+    # 아래와 같은 결과
+    # +--------------------------------+--------------------------------+--------------------------------+
+    # |P_ID                            |NAME                            |EMAIL                           |
+    # +--------------------------------+--------------------------------+--------------------------------+
+    # |1                               |Brittany Kelley                 |1-1@email.com                   |
+    # |2                               |Jeremy Allen                    |2-1@email.com                   |
+    # |3                               |Daniel Banks                    |null                            |
+    # |4                               |Charles Rice                    |null                            |
+
+    time.sleep(1)
+    # 코드 변경
+    sql = f'''
+    INSERT INTO email (id, email) VALUES(1, '1-2@email.com');
+    INSERT INTO email (id, email) VALUES(2, '2-2@email.com');
+    INSERT INTO email (id, email) VALUES(3, '3-2@email.com');
+    INSERT INTO email (id, email) VALUES(4, '4-2@email.com');
+    '''
+    ksql_exec(xprofile, sql, 'ksql', props)
+
+    time.sleep(3)
+    # 로그 두 번째 인서트
+    sql = f'''
+    INSERT INTO person (id, name) VALUES(1, 'Brittany Kelley 2');
+    INSERT INTO person (id, name) VALUES(2, 'Jeremy Allen 2');
+    INSERT INTO person (id, name) VALUES(3, 'Daniel Banks 2');
+    INSERT INTO person (id, name) VALUES(4, 'Charles Rice 2');    '''
+    ksql_exec(xprofile, sql, 'ksql', props)
+
+    time.sleep(1)
+    sql = '''
+    SELECT * FROM person_email
+    '''
+    ret = ksql_exec(xprofile, sql, 'query', props)
+    # 두 번째 인서트된 로그는 두 번재 코드와 조인되어야 함
+    for row in ret[1:]:
+        pid = row[0]
+        second = row[1].endswith('2')
+        email = row[2]
+        if second:
+            step = email.split('@')[0].split('-')[1]
+            assert step == '2'
+
+    # 아래와 같은 결과 (순서는 보기 좋게 정리)
+    # +--------------------------------+--------------------------------+--------------------------------+
+    # |P_ID                            |NAME                            |EMAIL                           |
+    # +--------------------------------+--------------------------------+--------------------------------+
+    # |1                               |Brittany Kelley                 |1-1@email.com                   |
+    # |2                               |Jeremy Allen                    |2-1@email.com                   |
+    # |3                               |Daniel Banks                    |null                            |
+    # |4                               |Charles Rice                    |null                            |
+    # |1                               |Brittany Kelley 2               |1-2@email.com                   |
+    # |2                               |Jeremy Allen 2                  |2-2@email.com                   |
+    # |3                               |Daniel Banks 2                  |3-2@email.com                   |
+    # |4                               |Charles Rice 2                  |4-2@email.com                   |
+
+    sql = '''
+    -- 조인 결과에서 null 값을 최초 코드로 채워준 스트림
+    CREATE STREAM person_email_fill AS
+        SELECT p.id, name, IFNULL(p.email, e.email) FROM person_email p
+            LEFT JOIN earliest_email e ON p.id = e.id
+            EMIT CHANGES;
+    '''
+    ret = ksql_exec(xprofile, sql, 'ksql', props)
+
+    time.sleep(5)
+    sql = '''
+    SELECT * FROM person_email_fill
+    '''
+    ret = ksql_exec(xprofile, sql, 'query', props)
+
+    # 모든 email 이 채워져 있음
+    for row in ret[1:]:
+        pid = row[0]
+        second = row[1].endswith('2')
+        email = row[2]
+        assert email is not None
+        step = email.split('@')[0].split('-')[1]
+        # null 값은 처음 값으로 채워져 있어야
+        if pid in (3, 4) and not second:
+            assert step == '1'
+        # 갱신된 코드 확인
+        if second:
+            assert step == '2'
+
+    # 아래와 같은 결과 (순서는 보기 좋게 정리)
+    # +--------------------------------+--------------------------------+--------------------------------+
+    # |P_ID                            |NAME                            |KSQL_COL_0                      |
+    # +--------------------------------+--------------------------------+--------------------------------+
+    # |1                               |Brittany Kelley                 |1-1@email.com                   |
+    # |2                               |Jeremy Allen                    |2-1@email.com                   |
+    # |3                               |Daniel Banks                    |3-1@email.com      (채워짐)     |
+    # |4                               |Charles Rice                    |4-1@email.com      (채워짐)     |
+    # |1                               |Brittany Kelley 2               |1-2@email.com                   |
+    # |2                               |Jeremy Allen 2                  |2-2@email.com                   |
+    # |4                               |Charles Rice 2                  |4-2@email.com                   |
+    # |3                               |Daniel Banks 2                  |3-2@email.com                   |
