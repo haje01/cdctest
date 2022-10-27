@@ -305,6 +305,7 @@ def test_ct_modify(xcp_setup, xjdbc, xtable, xprofile, xkfssh):
     """CT 방식에서 기존 행이 변하는 경우 동작 확인.
 
     - CT 방식은 기존행이 변경 (update) 된 것은 전송하지 않는다.
+        - 단 Incrementing+Timestamp 모드에서 타임스탬프가 갱신되면 가능
     - 새 행이 추가된 것은 잘 보냄
     - 테이블 초기화 후 새로 insert 하면 ID 가 같은 것은 기존 데이터를 유지하고
       새 ID 의 데이터는 가져옴

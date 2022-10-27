@@ -389,7 +389,7 @@ def test_ksql_dedup(xkafka, xprofile, xcp_setup, xksql, xdel_ksql_dedup_strtbl):
         "ksql.streams.auto.offset.reset": "earliest",
     }
 
-    # 윈도우별 메시지 카운팅 테이블 생성
+    # 윈도우별 메시지 카운팅 테이블 생성3
     # id 와 name 을 복합키로 생각
     sql = '''
     CREATE TABLE person_agg
@@ -1054,3 +1054,12 @@ def test_ksql_fillna(xkafka, xprofile, xtopic, xksql, xkfssh, xdel_ksql_fillna):
     # |2                               |Jeremy Allen 2                  |2-2@email.com                   |
     # |4                               |Charles Rice 2                  |4-2@email.com                   |
     # |3                               |Daniel Banks 2                  |3-2@email.com                   |
+
+
+def test_ksql_offset():
+    """auto.offset.reset 의 특성 테스트.
+
+    - 스트림/테이블 생성시 설정된 offset reset 은 select 그대로 적용된다.
+    - 그러나, 스트림/테이블이 JOIN 되어 다른 스트림/테이블 에사용되면 그것의 offset reset 설정을 따른다.
+
+    """
