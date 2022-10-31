@@ -19,7 +19,7 @@ variable "key_pair_name" {}
 variable "mssql_user" {}
 variable "db_user" {}
 variable "db_port" {}
-variable "kafka_url" {}
+variable "confluent_url" {}
 variable "kafka_jdbc_connector" {}
 variable "kafka_s3_sink" {}
 variable "mysql_jdbc_driver" {}

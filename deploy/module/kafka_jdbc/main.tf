@@ -68,7 +68,7 @@ kjcon_dir=$(basename ${basename(var.kafka_jdbc_connector)} .zip)
 chmod 775 $kjcon_dir
 mkdir -p $kjcon_dir/lib
 rm ${basename(var.kafka_jdbc_connector)}
-sed -i "s/#plugin.path=/plugin.path=\\/home\\/ubuntu\\/$kafka_dir\\/connectors/" ../config/connect-distributed.properties
+sed -i "s/plugin.path=.*/plugin.path=\\/home\\/ubuntu\\/$confluent_dir\\/connectors/" ../etc/kafka/connect-distributed.properties
 cd ..
 EOT
   install_kafka_s3_sink = <<EOT
@@ -82,7 +82,7 @@ cd ..
 EOT
   install_mysql_jdbc_driver = <<EOT
 sudo apt install -y /tmp/${basename(var.mysql_jdbc_driver)}
-cp /usr/share/java/mysql-connector-java-*.jar /home/ubuntu/$kafka_dir/connectors/$kjc_dir/lib
+cp /usr/share/java/mysql-connector-java-*.jar /home/ubuntu/$confluent_dir/connectors/$kjc_dir/lib
 EOT
   install_mysql_dbzm_connector = <<EOT
 mkdir -p connectors
@@ -90,7 +90,7 @@ mv /tmp/${basename(var.mysql_dbzm_connector)} connectors/
 cd connectors/
 tar xzvf ${basename(var.mysql_dbzm_connector)}
 rm ${basename(var.mysql_dbzm_connector)}
-# sed -i "s/#plugin.path=/plugin.path=\\/home\\/ubuntu\\/$kafka_dir\\/connectors/" ../config/connect-distributed.properties
+sed -i "s/plugin.path=.*/plugin.path=\\/home\\/ubuntu\\/$confluent_dir\\/connectors/" ../etc/kafka/connect-distributed.properties
 cd ..
 EOT
   install_mssql_dbzm_connector = <<EOT
@@ -99,7 +99,7 @@ mv /tmp/${basename(var.mssql_dbzm_connector)} connectors/
 cd connectors/
 tar xzvf ${basename(var.mssql_dbzm_connector)}
 rm ${basename(var.mssql_dbzm_connector)}
-# sed -i "s/#plugin.path=/plugin.path=\\/home\\/ubuntu\\/$kafka_dir\\/connectors/" ../config/connect-distributed.properties
+sed -i "s/plugin.path=.*/plugin.path=\\/home\\/ubuntu\\/$confluent_dir\\/connectors/" ../etc/kafka/connect-distributed.properties
 cd ..
 EOT
 }
@@ -179,8 +179,9 @@ resource "null_resource" "kafka_public_ip" {
   provisioner "remote-exec" {
     inline = [<<EOT
 cloud-init status --wait
-kafka_file=${basename(var.kafka_url)}
-kafka_dir=$(basename $kafka_file .tgz)
+confluent_file=${basename(var.confluent_url)}
+confluent_dir=$(basename $confluent_file .zip)
+confluent_dir=$(echo $confluent_dir | sed s/-community//)
 kjc_file=${basename(var.kafka_jdbc_connector)}
 kjc_dir=$(basename $kjc_file .zip)
 
@@ -193,28 +194,28 @@ sudo apt install -y unzip jq kafkacat
 sudo apt install -y openjdk-8-jdk
 echo 'export JAVA_HOME=/usr/lib/jvm/java-8-openjdk-amd64' >> ~/.kenv
 echo 'export PATH=$PATH:$JAVA_HOME/bin' >> ~/.kenv
-echo "export KAFKA_HOME=~/$kafka_dir" >> ~/.kenv
+echo "export KAFKA_HOME=~/$confluent_dir" >> ~/.kenv
 echo "alias kcat=kafkacat" >> ~/.kenv
-wget -nv ${var.kafka_url}
-tar xzf $kafka_file
-rm $kafka_file
+curl -O ${var.confluent_url}
+unzip $confluent_file
+rm $confluent_file
 
 ## 설정
-cd $kafka_dir
-sed -i "s/#listeners=PLAINTEXT:\\/\\/:9092/listeners=INTERNAL:\\/\\/0.0.0.0:9092,EXTERNAL:\\/\\/0.0.0.0:19092/" config/server.properties
-sed -i "s/#advertised.listeners=PLAINTEXT:\\/\\/your.host.name:9092/advertised.listeners=INTERNAL:\\/\\/${aws_instance.kafka.private_ip}:9092,EXTERNAL:\\/\\/${aws_eip.kafka.public_ip}:19092/" config/server.properties
+cd $confluent_dir
+sed -i "s/#listeners=PLAINTEXT:\\/\\/:9092/listeners=INTERNAL:\\/\\/0.0.0.0:9092,EXTERNAL:\\/\\/0.0.0.0:19092/" etc/kafka/server.properties
+sed -i "s/#advertised.listeners=PLAINTEXT:\\/\\/your.host.name:9092/advertised.listeners=INTERNAL:\\/\\/${aws_instance.kafka.private_ip}:9092,EXTERNAL:\\/\\/${aws_eip.kafka.public_ip}:19092/" etc/kafka/server.properties
 # Connector 로그 뒤의 로그 출처 제거
-sed -i "s/connect.log.pattern=\\[%d\\] %p %X{connector.context}%m (%c:%L)%n/connect.log.pattern=[%d] %p %X{connector.context}%m%n/" config/connect-log4j.properties
-echo "listener.security.protocol.map=INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT" >> config/server.properties
-echo "inter.broker.listener.name=INTERNAL" >> config/server.properties
-echo "auto.create.topics.enable=false" >> config/server.properties
+sed -i "s/connect.log.pattern=\\[%d\\] %p %X{connector.context}%m (%c:%L)%n/connect.log.pattern=[%d] %p %X{connector.context}%m%n/" etc/kafka/connect-log4j.properties
+echo "listener.security.protocol.map=INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT" >> etc/kafka/server.properties
+echo "inter.broker.listener.name=INTERNAL" >> etc/kafka/server.properties
+echo "auto.create.topics.enable=false" >> etc/kafka/server.properties
 
 sudo mkdir -p /data/zookeeper
 sudo mkdir -p /data/kafka
 sudo chown ubuntu:ubuntu -R /data
-sed -i "s/dataDir=\\/tmp\\/zookeeper/dataDir=\\/data\\/zookeeper/" config/zookeeper.properties
-sed -i "s/log.dirs=\\/tmp\\/kafka-logs/log.dirs=\\/data\\/kafka/" config/server.properties
-echo "export PATH=$PATH:~/$kafka_dir/bin" >> ~/.kenv
+sed -i "s/dataDir=\\/tmp\\/zookeeper/dataDir=\\/data\\/zookeeper/" etc/kafka/zookeeper.properties
+sed -i "s/log.dirs=\\/tmp\\/kafka-logs/log.dirs=\\/data\\/kafka/" etc/kafka/server.properties
+echo "export PATH=$PATH:~/$confluent_dir/bin" >> ~/.kenv
 cat ~/.kenv >> ~/.bashrc
 
 sudo cp -p /usr/share/zoneinfo/Asia/Seoul /etc/localtime
@@ -273,7 +274,7 @@ data "template_file" "svc_zookeeper" {
   template = file("${path.module}/../svc_zookeeper.tpl")
   vars = {
     user = "ubuntu",
-    kafka_dir = trimsuffix(basename(var.kafka_url), ".tgz")
+    confluent_dir = replace(trimsuffix(basename(var.confluent_url), ".zip"), "-community", "")
   }
 }
 
@@ -282,7 +283,7 @@ data "template_file" "svc_kafka" {
   template = file("${path.module}/../svc_kafka.tpl")
   vars = {
     user = "ubuntu",
-    kafka_dir = trimsuffix(basename(var.kafka_url), ".tgz")
+    confluent_dir = replace(trimsuffix(basename(var.confluent_url), ".zip"), "-community", "")
     timezone = var.timezone
   }
 }
@@ -292,7 +293,7 @@ data "template_file" "svc_connect" {
   template = file("${path.module}/../svc_connect.tpl")
   vars = {
     user = "ubuntu",
-    kafka_dir = trimsuffix(basename(var.kafka_url), ".tgz")
+    confluent_dir = replace(trimsuffix(basename(var.confluent_url), ".zip"), "-community", "")
     timezone = var.timezone
   }
 }

@@ -35,12 +35,13 @@ locals {
 sudo apt install -y openjdk-8-jdk
 echo 'export JAVA_HOME=/usr/lib/jvm/java-8-openjdk-amd64' >> ~/.kenv
 echo 'export PATH=$PATH:$JAVA_HOME/bin' >> ~/.kenv
-wget -nv ${var.kafka_url}
-kafka_file=${basename(var.kafka_url)}
-kafka_dir=$(basename $kafka_file .tgz)
-tar xzf $kafka_file
-rm $kafka_file
-echo "export PATH=$PATH:~/$kafka_dir/bin" >> ~/.kenv
+confluent_file=${basename(var.confluent_url)}
+confluent_dir=$(basename $confluent_file .zip)
+confluent_dir=$(echo $confluent_dir | sed s/-community//)
+curl -O ${var.confluent_url}
+unzip $confluent_file
+rm $confluent_file
+echo "export PATH=$PATH:~/$confluent_dir/bin" >> ~/.kenv
 cat ~/.kenv >> ~/.bashrc
 EOT
 # Filebeat 설치
@@ -83,7 +84,7 @@ cd kfktest && pip3 install -q -r requirements.txt && pip3 install -e .
 cd
 
 # Kafka 설치
-${var.kafka_url != "" ? local.install_kafka : ""}
+${var.confluent_url != "" ? local.install_kafka : ""}
 # Filebeat 설치
 ${var.filebeat_url != "" ? local.install_filebeat : ""}
 EOT

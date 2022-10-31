@@ -13,6 +13,7 @@ export kafka_ip=$(cat ~/works/kfktest/temp/$PROFILE/setup.json | jq '.kafka_publ
 export kafka_pip=$(cat ~/works/kfktest/temp/$PROFILE/setup.json | jq '.kafka_private_ip.value' | tr -d '"')
 export prod_ip=$(cat ~/works/kfktest/temp/$PROFILE/setup.json | jq '.producer_public_ip.value' | tr -d '"')
 export cons_ip=$(cat ~/works/kfktest/temp/$PROFILE/setup.json | jq '.consumer_public_ip.value' | tr -d '"')
+export mysql_ip=$(cat ~/works/kfktest/temp/$PROFILE/setup.json | jq '.mysql_public_ip.value' | tr -d '"')
 export ksql_ip=$(cat ~/works/kfktest/temp/$PROFILE/setup.json | jq '.ksqldb_public_ip.value' | tr -d '"')
 
 echo "ksql_ip $ksl_ip"
@@ -21,9 +22,11 @@ window=0
 tmux rename-window -t $session:$window 'kafka'
 tmux send-keys -t $session:$window "ssh -o StrictHostKeyChecking=no ubuntu@$kafka_ip -i $PKEY" C-m
 
-window=1
-tmux new-window -t $session:$window -n 'producer'
-tmux send-keys -t $session:$window "ssh -o StrictHostKeyChecking=no ubuntu@$prod_ip -i $PKEY" C-m
+if [ $prod_ip 1= "null" ]; then
+    window=1
+    tmux new-window -t $session:$window -n 'producer'
+    tmux send-keys -t $session:$window "ssh -o StrictHostKeyChecking=no ubuntu@$prod_ip -i $PKEY" C-m
+fi
 
 window=2
 tmux new-window -t $session:$window -n 'consumer'
@@ -38,5 +41,12 @@ if [ $ksql_ip != "null" ]; then
     tmux new-window -t $session:$window -n 'ksqldb'
     tmux send-keys -t $session:$window "ssh -o StrictHostKeyChecking=no ubuntu@$ksql_ip -i $PKEY" C-m
 fi
+
+if [ $mysql_ip != "null" ]; then
+    window=5
+    tmux new-window -t $session:$window -n 'mysql'
+    tmux send-keys -t $session:$window "ssh -o StrictHostKeyChecking=no ubuntu@$mysql_ip -i $PKEY" C-m
+fi
+
 
 tmux attach-session -t $session

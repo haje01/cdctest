@@ -6,7 +6,7 @@ After=kafka.service
 [Service]
 Type=simple
 User=${user}
-ExecStart=/home/ubuntu/${kafka_dir}/bin/connect-distributed.sh /home/ubuntu/${kafka_dir}/config/connect-distributed.properties
+ExecStart=/home/ubuntu/${confluent_dir}/bin/connect-distributed /home/ubuntu/${confluent_dir}/etc/kafka/connect-distributed.properties
 ExecStop=pkill -ef ConnectDistributed
 Restart=on-abnormal
 Environment="EXTRA_ARGS=-Duser.timezone=${timezone}"

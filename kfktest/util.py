@@ -246,7 +246,7 @@ def list_topics(kfk_ssh, skip_internal=True):
 
     """
     linfo("list_topics at kafka")
-    ret = ssh_exec(kfk_ssh, f'kafka-topics.sh --list --bootstrap-server localhost:9092')
+    ret = ssh_exec(kfk_ssh, f'kafka-topics --list --bootstrap-server localhost:9092')
     topics = ret.strip().split('\n')
     if skip_internal:
         topics = [t for t in topics if t not in INTERNAL_TOPICS]
@@ -263,7 +263,7 @@ def create_topic(kfk_ssh, topic, partitions=TOPIC_PARTITIONS,
 
     """
     linfo(f"[ ] create_topic '{topic}'")
-    cmd = f'kafka-topics.sh --create --topic {topic} --bootstrap-server localhost:9092 --partitions {partitions} --replication-factor {replications}'
+    cmd = f'kafka-topics --create --topic {topic} --bootstrap-server localhost:9092 --partitions {partitions} --replication-factor {replications}'
     if config is not None:
         for ck, cv in config.items():
             cmd += f' --config {ck}={cv}'
@@ -297,7 +297,7 @@ def describe_topic(kfk_ssh, topic):
         tuple: 토픽 정보, 토픽 파티션들 정보
 
     """
-    ret = ssh_exec(kfk_ssh, f'kafka-topics.sh --describe --topic {topic} --bootstrap-server localhost:9092')
+    ret = ssh_exec(kfk_ssh, f'kafka-topics --describe --topic {topic} --bootstrap-server localhost:9092')
     items = ret.strip().split('\n')
     items = [item.split('\t') for item in items]
     return items[0], items[1:]
@@ -332,7 +332,7 @@ def check_topic_exists(kfk_ssh, topic):
 
 
 def _check_topic_exists(kfk_ssh, topic):
-    ret = ssh_exec(kfk_ssh, "kafka-topics.sh --list --bootstrap-server localhost:9092")
+    ret = ssh_exec(kfk_ssh, "kafka-topics --list --bootstrap-server localhost:9092")
     topics = ret.strip().split('\n')
     return topic in topics
 
@@ -357,7 +357,7 @@ def delete_topic(kfk_ssh, topic, ignore_not_exist=False):
     linfo(f"[ ] delete_topic '{topic}'")
 
     try:
-        ret = ssh_exec(kfk_ssh, f'kafka-topics.sh --delete --topic {topic}  --bootstrap-server localhost:9092')
+        ret = ssh_exec(kfk_ssh, f'kafka-topics --delete --topic {topic}  --bootstrap-server localhost:9092')
     except Exception as e:
         if 'does not exist' in str(e) and ignore_not_exist:
             linfo(f"   delete_topic '{topic}' - not exist")
@@ -409,7 +409,7 @@ def delete_all_topics(kfk_ssh, profile):
     if len(topics) > 0:
         topics = ','.join(topics)
         try:
-            ret = ssh_exec(kfk_ssh, f"kafka-topics.sh --delete --topic '{topics}' --bootstrap-server localhost:9092")
+            ret = ssh_exec(kfk_ssh, f"kafka-topics --delete --topic '{topics}' --bootstrap-server localhost:9092")
         except Exception as e:
             import pdb; pdb.set_trace()
             raise e
@@ -439,14 +439,14 @@ def reset_topic(ssh, topic, partitions=TOPIC_PARTITIONS,
     linfo(f"[v] reset_topic '{topic}'")
 
 
-def count_topic_message(profile, topic, timeout=None):
+def count_topic_message(profile, topic, timeout=10):
     linfo("[ ] count_topic_message")
     setup = load_setup(profile)
     kfk_ip = setup['kafka_public_ip']['value']
     timeout = timeout * 1000 if timeout is not None else None
     stimeout = f"--timeout-ms {timeout}" if timeout is not None else ''
     # cmd = f'''kafkacat -b localhost:9092 -t {topic} -C -e -q | wc -l'''
-    cmd = f'''kafka-console-consumer.sh --bootstrap-server localhost:9092 --topic {topic} {stimeout} --from-beginning | wc -l
+    cmd = f'''kafka-console-consumer --bootstrap-server localhost:9092 --topic {topic} {stimeout} --from-beginning | wc -l
 '''
     kfk_ssh = SSH(kfk_ip)
     ret = ssh_exec(kfk_ssh, cmd)
@@ -496,7 +496,7 @@ def count_topic_message(profile, topic, timeout=None):
 # def _count_topic_message(kfk_ip, topic, q, from_begin=True, timeout=10):
 #     time.sleep(random.random() * 10)
 #     linfo(f"[ ] _count_topic_message - topic: {topic}")
-#     # cmd = f'''kafka-console-consumer.sh --bootstrap-server localhost:9092 --topic {topic} --timeout-ms {timeout * 1000}'''
+#     # cmd = f'''kafka-console-consumer --bootstrap-server localhost:9092 --topic {topic} --timeout-ms {timeout * 1000}'''
 #     cmd = f'''kcat -b localhost:9092 --topic {topic} -m {timeout} -q | wc -l'''
 #     kfk_ssh = SSH(kfk_ip)
 
@@ -507,7 +507,7 @@ def count_topic_message(profile, topic, timeout=None):
 #     linfo("1")
     # if from_begin:
     #     linfo("2-1")
-    #     # cmd = f"""kafka-run-class.sh kafka.tools.GetOffsetShell --bootstrap-server=localhost:9092 --topic {topic} | awk -F ':' '{{sum += $3}} END {{print sum}}'"""
+    #     # cmd = f"""kafka-run-class kafka.tools.GetOffsetShell --bootstrap-server=localhost:9092 --topic {topic} | awk -F ':' '{{sum += $3}} END {{print sum}}'"""
     #     cmd = f'''kcat -'''
     #     ret = ssh_exec(kfk_ssh, cmd)
     #     linfo("2-2")
@@ -532,7 +532,7 @@ def count_topic_message(profile, topic, timeout=None):
 # def count_msg_from_topic(ssh, topics):
 #     total = 0
 #     for topic in topics:
-#         cmd = f"""kafka-run-class.sh kafka.tools.GetOffsetShell --bootstrap-server=localhost:9092 --topic {topic} | awk -F ':' '{{sum += $3}} END {{print sum}}'"""
+#         cmd = f"""kafka-run-class kafka.tools.GetOffsetShell --bootstrap-server=localhost:9092 --topic {topic} | awk -F ':' '{{sum += $3}} END {{print sum}}'"""
 #         ret = ssh_exec(ssh, cmd)
 #         print(topic, ret)
 #         cnt = int(ret.strip())
@@ -577,7 +577,7 @@ def register_jdbc(kfk_ssh, profile, db_addr, db_port, db_user, db_passwd,
     if profile == 'mssql':
         db_url = f"jdbc:sqlserver://{db_addr}:{db_port};databaseName={db_name};encrypt=true;trustServerCertificate=true;"
     else:
-        db_url = f"jdbc:mysql://{db_addr}:{db_port}/{db_name}"
+        db_url = f"jdbc:mysql://{db_addr}:{db_port}/{db_name}?serverTimezone=Asia/Seoul"
 
     # 반복된 테스트에 문제가 없으려면 커넥터 이름이 매번 달라야 한다.
     assert com_hash is not None
@@ -753,6 +753,13 @@ def register_dbzm(kfk_ssh, profile, svr_name, db_addr, db_port, db_name,
     conn_name = f'dbzm_{profile}_{name_hash}'
     linfo(f"[ ] register_dbzm {conn_name} for {db_name}")
 
+    # 필요한 토픽 먼저 생성
+    delete_topic(kfk_ssh, svr_name, ignore_not_exist=True)
+    create_topic(kfk_ssh, svr_name, 1, 1)
+    topic = f'{svr_name}.test.person'
+    delete_topic(kfk_ssh, topic, ignore_not_exist=True)
+    create_topic(kfk_ssh, topic, 1, 1)
+
     # 공통 설정
     config = {
         "database.hostname": db_addr,
@@ -762,6 +769,7 @@ def register_dbzm(kfk_ssh, profile, svr_name, db_addr, db_port, db_name,
         "database.server.name": svr_name,
         "database.history.kafka.bootstrap.servers": "localhost:9092",
         "database.history.kafka.topic": f"{profile}.history.{svr_name}",
+        "database.serverTimezone": "Asia/Seoul",
         "include.schema.changes": "true",
         "tasks.max": "1"
     }
@@ -794,7 +802,7 @@ def get_connector_status(kfk_ssh, conn_name):
     status = json.loads(ret)
     try:
         linfo(f"[v] get_connector_status {conn_name} {status['tasks'][0]['state']}")
-    except KeyError:
+    except (KeyError, IndexError)as ex:
         msg = str(status)
         print(msg)
         raise RuntimeError(msg)
@@ -972,7 +980,7 @@ def stop_kafka_broker(kfk_ssh, ignore_err=False):
     """
     linfo(f"[ ] stop_kafka_broker")
     ssh_exec(kfk_ssh, "sudo systemctl stop kafka", ignore_err=ignore_err)
-    # ssh_exec(kfk_ssh, "sudo $KAFKA_HOME/bin/kafka-server-stop.sh", ignore_err=ignore_err)
+    # ssh_exec(kfk_ssh, "sudo $KAFKA_HOME/bin/kafka-server-stop", ignore_err=ignore_err)
     linfo(f"[v] stop_kafka_broker")
 
 

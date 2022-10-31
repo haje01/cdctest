@@ -21,7 +21,7 @@
     - [MySQL 의 커넥터 다운로드 페이지](https://dev.mysql.com/downloads/connector/j/) 에서 OS 에 맞는 파일을 받음
   - `debezium-connector-mysql-1.9.4.Final-plugin.tar` 및  `debezium-connector-sqlserver-1.9.4.Final-plugin.tar`
     - [Debezium 커넥터 다운로드](https://debezium.io/documentation/reference/stable/install.html) 에서 MySQL 및 MSSQL 을 위한 Debezium 커넥트를 각각 내려 받음
-  - `confluent-hub install confluentinc/kafka-connect-replicator:7.1.1.zip`
+  - `kafka-connect-replicator:7.1.1.zip`
     - [Confluent 의 Kafka Replicator 다운로드](https://www7.confluent.io/hub/confluentinc/kafka-connect-replicator) 에서 Download 클릭하여 받음
 - `test.tfvars` 파일 만들기
   - 각 설정별  `deploy` 폴더 아래의 `variables.tf` 파일을 참고하여 아래와 같은 형식의 `test.tfvars` 파일을 만들어 준다.

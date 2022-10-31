@@ -6,7 +6,7 @@ mv /tmp/${basename(var.kafka_s3_sink)} connectors/
 cd connectors/
 unzip ${basename(var.kafka_s3_sink)}
 rm ${basename(var.kafka_s3_sink)}
-sed -i "s/#plugin.path=/plugin.path=\\/home\\/ubuntu\\/$kafka_dir\\/connectors/" ../config/connect-distributed.properties
+sed -i "s/#plugin.path=/plugin.path=\\/home\\/ubuntu\\/$confluent_dir\\/connectors/" ../etc/kafka/connect-distributed.properties
 cd ..
 EOT
 }
@@ -134,39 +134,39 @@ resource "null_resource" "kafka_public_ip" {
   provisioner "remote-exec" {
     inline = [<<EOT
 cloud-init status --wait
-kafka_file=${basename(var.kafka_url)}
-kafka_dir=$(basename $kafka_file .tgz)
-
+confluent_file=${basename(var.confluent_url)}
+confluent_dir=$(basename $confluent_file .zip)
+confluent_dir=$(echo $confluent_dir | sed s/-community//)
 sudo apt update
 sudo sed -i 's/#$nrconf{restart} = '"'"'i'"'"';/$nrconf{restart} = '"'"'a'"'"';/g' /etc/needrestart/needrestart.conf
 sudo sed -i 's/#MaxSessions 10/MaxSessions 200/g' /etc/ssh/sshd_config
 sudo service sshd restart
 sudo apt install -y unzip jq kafkacat
 
-# Kafka 설치
+# Confluent Platform (CCL) 설치
 sudo apt install -y openjdk-8-jdk
 echo 'export JAVA_HOME=/usr/lib/jvm/java-8-openjdk-amd64' >> ~/.kenv
 echo 'export PATH=$PATH:$JAVA_HOME/bin' >> ~/.kenv
-echo "export KAFKA_HOME=~/$kafka_dir" >> ~/.kenv
+echo "export CONFLUENT_HOME=~/$confluent_dir" >> ~/.kenv
 echo "alias kcat=kafkacat" >> ~/.kenv
-wget -nv ${var.kafka_url}
-tar xzf $kafka_file
-rm $kafka_file
+curl -O ${var.confluent_url}
+unzip $confluent_file
+rm $confluent_file
 
 # 설정
-cd $kafka_dir
-sed -i "s/#listeners=PLAINTEXT:\\/\\/:9092/listeners=INTERNAL:\\/\\/0.0.0.0:9092,EXTERNAL:\\/\\/0.0.0.0:19092/" config/server.properties
-sed -i "s/#advertised.listeners=PLAINTEXT:\\/\\/your.host.name:9092/advertised.listeners=INTERNAL:\\/\\/${aws_instance.kafka.private_ip}:9092,EXTERNAL:\\/\\/${aws_eip.kafka.public_ip}:19092/" config/server.properties
-echo "listener.security.protocol.map=INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT" >> config/server.properties
-echo "inter.broker.listener.name=INTERNAL" >> config/server.properties
-echo "auto.create.topics.enable=false" >> config/server.properties
+cd $confluent_dir
+sed -i "s/#listeners=PLAINTEXT:\\/\\/:9092/listeners=INTERNAL:\\/\\/0.0.0.0:9092,EXTERNAL:\\/\\/0.0.0.0:19092/" etc/kafka/server.properties
+sed -i "s/#advertised.listeners=PLAINTEXT:\\/\\/your.host.name:9092/advertised.listeners=INTERNAL:\\/\\/${aws_instance.kafka.private_ip}:9092,EXTERNAL:\\/\\/${aws_eip.kafka.public_ip}:19092/" etc/kafka/server.properties
+echo "listener.security.protocol.map=INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT" >> etc/kafka/server.properties
+echo "inter.broker.listener.name=INTERNAL" >> etc/kafka/server.properties
+echo "auto.create.topics.enable=false" >> etc/kafka/server.properties
 
 sudo mkdir -p /data/zookeeper
 sudo mkdir -p /data/kafka
 sudo chown ubuntu:ubuntu -R /data
-sed -i "s/dataDir=\\/tmp\\/zookeeper/dataDir=\\/data\\/zookeeper/" config/zookeeper.properties
-sed -i "s/log.dirs=\\/tmp\\/kafka-logs/log.dirs=\\/data\\/kafka/" config/server.properties
-echo "export PATH=$PATH:~/$kafka_dir/bin" >> ~/.kenv
+sed -i "s/dataDir=\\/tmp\\/zookeeper/dataDir=\\/data\\/zookeeper/" etc/kafka/zookeeper.properties
+sed -i "s/log.dirs=\\/tmp\\/kafka-logs/log.dirs=\\/data\\/kafka/" etc/kafka/server.properties
+echo "export PATH=$PATH:~/$confluent_dir/bin" >> ~/.kenv
 cat ~/.kenv >> ~/.bashrc
 
 sudo cp -p /usr/share/zoneinfo/Asia/Seoul /etc/localtime
@@ -244,7 +244,7 @@ data "template_file" "svc_zookeeper" {
   template = file("${path.module}/../svc_zookeeper.tpl")
   vars = {
     user = "ubuntu",
-    kafka_dir = trimsuffix(basename(var.kafka_url), ".tgz")
+    confluent_dir = replace(trimsuffix(basename(var.confluent_url), ".zip"), "-community", "")
   }
 }
 
@@ -253,7 +253,7 @@ data "template_file" "svc_kafka" {
   template = file("${path.module}/../svc_kafka.tpl")
   vars = {
     user = "ubuntu",
-    kafka_dir = trimsuffix(basename(var.kafka_url), ".tgz")
+    confluent_dir = replace(trimsuffix(basename(var.confluent_url), ".zip"), "-community", "")
     timezone = var.timezone
   }
 }
@@ -263,7 +263,7 @@ data "template_file" "svc_connect" {
   template = file("${path.module}/../svc_connect.tpl")
   vars = {
     user = "ubuntu",
-    kafka_dir = trimsuffix(basename(var.kafka_url), ".tgz")
+    confluent_dir = replace(trimsuffix(basename(var.confluent_url), ".zip"), "-community", "")
     timezone = var.timezone
   }
 }

@@ -366,8 +366,8 @@ def test_cdc_local_basic(xdbzm, xkfssh, xsetup, xprofile):
         p.start()
 
     # 카프카 토픽 확인 (timeout 되기전에 다 받아야 함)
-    cnt = count_topic_message(xprofile, f'db1.test.person', timeout=10)
-    assert DB_ROWS + DB_PRE_ROWS == cnt
+    cnt = count_topic_message(xprofile, f'db1.test.person', timeout=20)
+    assert DB_ROWS == cnt
 
     for p in ins_pros:
         p.join()
@@ -403,7 +403,7 @@ def test_cdc_remote_basic(xcp_setup, xdbzm, xprofile, xkfssh, xcdc):
 
     # 카프카 토픽 확인 (timeout 되기전에 다 받아야 함)
     cnt = count_topic_message(xprofile, f'db1.test.person', timeout=10)
-    assert DB_ROWS + DB_PRE_ROWS == cnt
+    assert DB_ROWS == cnt
 
     for p in ins_pros:
         p.join()
