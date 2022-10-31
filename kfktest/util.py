@@ -756,7 +756,8 @@ def register_dbzm(kfk_ssh, profile, svr_name, db_addr, db_port, db_name,
     # 필요한 토픽 먼저 생성
     delete_topic(kfk_ssh, svr_name, ignore_not_exist=True)
     create_topic(kfk_ssh, svr_name, 1, 1)
-    topic = f'{svr_name}.test.person'
+    scm = 'test' if profile == 'mysql' else 'dbo'
+    topic = f'{svr_name}.{scm}.person'
     delete_topic(kfk_ssh, topic, ignore_not_exist=True)
     create_topic(kfk_ssh, topic, 1, 1)
 

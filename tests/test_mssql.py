@@ -262,6 +262,43 @@ def test_ct_remote_basic(xcp_setup, xjdbc, xprofile, xkfssh):
     linfo("All select processes are done.")
 
 
+def test_cdc_local_basic(xdbzm, xkfssh, xsetup, xprofile):
+    """로컬 insert / select 로 기본적인 Change Data Capture 테스트.
+
+    - 테스트 시작전 이전 토픽을 참고하는 것이 없어야 함. (delete_topic 에러 발생)
+
+    """
+    # Selector 프로세스들 시작
+    sel_pros = []
+    for pid in range(1, NUM_SEL_PROCS + 1):
+        # select 프로세스
+        p = Process(target=local_select_proc, args=(xprofile, pid,))
+        sel_pros.append(p)
+        p.start()
+
+    # Insert 프로세스들 시작
+    ins_pros = []
+    for pid in range(1, NUM_INS_PROCS + 1):
+        # insert 프로세스
+        p = Process(target=local_insert_proc, args=(xprofile, pid))
+        ins_pros.append(p)
+        p.start()
+
+    time.sleep(10)
+
+    # 카프카 토픽 확인 (timeout 되기전에 다 받아야 함)
+    cnt = count_topic_message(xprofile, f'db1.dbo.person', timeout=30)
+    assert DB_ROWS == cnt
+
+    for p in ins_pros:
+        p.join()
+    linfo("All insert processes are done.")
+
+    for p in sel_pros:
+        p.join()
+    linfo("All select processes are done.")
+
+
 def test_cdc_remote_basic(xcp_setup, xdbzm, xprofile, xkfssh, xtable):
     """원격 insert / select 로 기본적인 Change Data Capture 테스트.
 
