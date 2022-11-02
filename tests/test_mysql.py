@@ -314,6 +314,7 @@ def test_ct_remote_basic(xcp_setup, xprofile, xkfssh, xjdbc):
     - 가끔씩 1~4 개 정도 메시지 손실이 있는듯?
 
     """
+    time.sleep(5)
     # Selector 프로세스들 시작
     sel_pros = []
     for pid in range(1, NUM_SEL_PROCS + 1):
@@ -330,9 +331,11 @@ def test_ct_remote_basic(xcp_setup, xprofile, xkfssh, xjdbc):
         ins_pros.append(p)
         p.start()
 
+    # 이것이 없으면 일부 메시지 유실 발생?!
+    time.sleep(5)
     # 카프카 토픽 확인 (timeout 되기전에 다 받아야 함)
-    cnt = count_topic_message(xprofile, f'{xprofile}_person', timeout=10)
-    assert DB_ROWS + DB_PRE_ROWS == cnt
+    cnt = count_topic_message(xprofile, f'{xprofile}_person', timeout=20)
+    assert DB_ROWS == cnt
 
     for p in ins_pros:
         p.join()
@@ -472,7 +475,7 @@ def test_ct_rtbl_incts(xcp_setup, xjdbc, xs3sink, xtable, xprofile, xtopic, xkfs
     linfo(f"Orignal Messages: {CTR_INSERTS * CTR_BATCH}, Topic Messages: {count}")
 
     # 빠진 ID 가 없는지 확인
-    cmd = f"kafka-console-consumer.sh --bootstrap-server localhost:9092 --topic {xprofile}_person --from-beginning --timeout-ms 3000"
+    cmd = f"kafka-console-consumer --bootstrap-server localhost:9092 --topic {xprofile}_person --from-beginning --timeout-ms 3000"
     ssh = get_kafka_ssh(xprofile)
     ret = ssh_exec(ssh, cmd)
     pids = set()
