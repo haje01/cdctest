@@ -5,17 +5,18 @@ import json
 import argparse
 from collections import defaultdict
 
-from kafka import KafkaConsumer
+from confluent_kafka import Consumer, KafkaError, KafkaException
 
 from kfktest.util import load_setup, linfo, DB_PRE_ROWS, DB_ROWS, \
-    count_topic_message, SSH
+    count_topic_message, SSH, consume_loop
 
 # CLI 용 파서
 parser = argparse.ArgumentParser(description="프로파일에 맞는 토픽 컨슘.",
     formatter_class=argparse.ArgumentDefaultsHelpFormatter
 )
 parser.add_argument('profile', type=str, help="프로파일 이름.")
-parser.add_argument('-t', '--timeout', type=int, default=10, help="타임아웃 시간(초)")
+parser.add_argument('-g', '--cgid', type=str, default='kfkteste', help="컨슈머 그룹")
+parser.add_argument('-t', '--timeout', type=int, default=5, help="타임아웃 시간(초)")
 parser.add_argument('-a', '--auto-commit', action='store_true', default=False, help="오프셋 자동 커밋")
 parser.add_argument('-b', '--from-begin', action='store_true', default=False, help="처음부터 컨슘")
 parser.add_argument('-c', '--count-only', action='store_true', default=False, help="메시지 수만 카운팅")
@@ -28,7 +29,32 @@ parser.add_argument('-f', '--fields', type=str, default=None, help="일치하는
 parser.add_argument('--field-types', type=str, default=None, help="일치하는 필드별 표시 타입 (',' 로 구분).")
 
 
+def msg_process(msg, duplicate, miss, count_only, idmsgs, fields):
+    topic = msg.topic()
+    partition = msg.partition()
+    offset = msg.offset()
+    key = msg.key()
+    value = msg.value()
+    if duplicate or miss:
+        data = json.loads(value.decode('utf8'))
+        id = data['payload']['id']
+        idmsgs[id].append((topic, partition, offset, data['payload']))
+    else:
+        if not count_only:
+            if fields is None:
+                linfo(f'{topic}:{partition}:{offset} key={key} value={value}')
+            else:
+                data = json.loads(value.decode('utf8'))
+                values = []
+                for f in fields.split(','):
+                    field = f.strip()
+                    if field in data['payload']:
+                        values.append(data['payload'][field])
+                linfo(f'{topic}:{partition}:{offset} key={key} value={values}')
+
+
 def consume(profile,
+        cgid=parser.get_default('cgid'),
         timeout=parser.get_default('timeout'),
         auto_commit=parser.get_default('auto_commit'),
         from_begin=parser.get_default('from_begin'),
@@ -53,37 +79,28 @@ def consume(profile,
     else:
         assert ',' not in topic
 
-    consumer = KafkaConsumer(topic,
-        group_id=f'my-group-{profile}',
-        bootstrap_servers=[f'{broker_addr}:{broker_port}'],
-        auto_offset_reset='earliest' if from_begin else 'latest',
-        enable_auto_commit=auto_commit,
-        consumer_timeout_ms=timeout * 1000,
-    )
+    consumer = Consumer({
+        'bootstrap.servers': f'{broker_addr}:{broker_port}',
+        'group.id': cgid,
+        'auto.offset.reset': 'earliest' if from_begin else 'latest',
+        'enable.auto.commit': auto_commit,
+        # 'session.timeout.ms': timeout * 1000
+    })
+    # consumer = KafkaConsumer(topic,
+    #     group_id=f'my-group-{profile}',
+    #     bootstrap_servers=[f'{broker_addr}:{broker_port}'],
+    #     auto_offset_reset='earliest' if from_begin else 'latest',
+    #     enable_auto_commit=auto_commit,
+    #     consumer_timeout_ms=timeout * 1000,
+    # )
 
     linfo("Connected")
     cnt = 0
     dup_cnt = 0
     idmsgs = defaultdict(list)
-    for msg in consumer:
-        cnt += 1
-        show = False
-        if duplicate or miss:
-            data = json.loads(msg.value.decode('utf8'))
-            id = data['payload']['id']
-            idmsgs[id].append((msg.topic, msg.partition, msg.offset, data['payload']))
-        else:
-            if not count_only:
-                if fields is None:
-                    linfo(f'{msg.topic}:{msg.partition}:{msg.offset} key={msg.key} value={msg.value}')
-                else:
-                    data = json.loads(msg.value.decode('utf8'))
-                    values = []
-                    for f in fields.split(','):
-                        field = f.strip()
-                        if field in data['payload']:
-                            values.append(data['payload'][field])
-                    linfo(f'{msg.topic}:{msg.partition}:{msg.offset} key={msg.key} value={values}')
+    consume_loop(consumer, [topic],
+        lambda msg: msg_process(msg, duplicate, miss, count_only, idmsgs, fields),
+        timeout)
 
     if duplicate:
         for id, msgs in idmsgs.items():
@@ -110,6 +127,6 @@ def consume(profile,
 
 if __name__ == '__main__':
     args = parser.parse_args()
-    consume(args.profile, args.timeout, args.auto_commit, args.from_begin,
+    consume(args.profile, args.cgid, args.timeout, args.auto_commit, args.from_begin,
         args.count_only, args.duplicate, args.miss, args.dev, args.topic,
         args.fields)

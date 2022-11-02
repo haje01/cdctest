@@ -5,7 +5,7 @@ from datetime import datetime, timedelta
 
 import pymssql
 import pytest
-from kafka import KafkaConsumer
+from confluent_kafka import Consumer
 
 from kfktest.table import reset_table
 from kfktest.util import (count_topic_message, get_kafka_ssh,
@@ -366,15 +366,13 @@ def test_ct_modify(xcp_setup, xjdbc, xtable, xprofile, xkfssh):
     broker_port = 19092
 
     def consume():
-        consumer = KafkaConsumer(
-            topic,
-            group_id=f'my-group-mssql',
-            bootstrap_servers=[f'{broker_addr}:{broker_port}'],
-            auto_offset_reset='earliest',
-            value_deserializer=lambda x: json.loads(x.decode('utf8')),
-            enable_auto_commit=False,
-            consumer_timeout_ms=1000 * 10
-            )
+        consumer = Consumer({
+                'group.id': 'my-group-mssql',
+                'bootstrap.servers': f'{broker_addr}:{broker_port}',
+                'auto.offset.reset': 'earliest',
+                'enable.auto.commit': False,
+            })
+        consumer.subscribe(topic)
         return consumer
 
     cnt = 0

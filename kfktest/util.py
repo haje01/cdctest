@@ -7,6 +7,7 @@ import io
 from cgitb import enable
 import random
 import os
+import sys
 import json
 import time
 from json import JSONDecodeError
@@ -29,6 +30,7 @@ import pytest
 from retry import retry
 import pandas as pd
 import boto3
+from confluent_kafka import KafkaError, KafkaException
 
 # Insert / Select 프로세스 수
 NUM_INS_PROCS = 10  # 10 초과이면 sshd 세션수 문제(?)로 Insert가 안되는 문제 발생
@@ -2137,3 +2139,28 @@ def delete_schema(ksql_ssh, name, hard=False):
             raise RuntimeError(msg)
 
     linfo(f"[v] delete_schema {name}")
+
+
+def consume_loop(consumer, topics, msg_process, timeout=5):
+    """메시지 컨슘 루프."""
+    running = True
+    try:
+        consumer.subscribe(topics)
+
+        while running:
+            msg = consumer.poll(timeout=timeout)
+            if msg is None:
+                break
+
+            if msg.error():
+                if msg.error().code() == KafkaError._PARTITION_EOF:
+                    # End of partition event
+                    sys.stderr.write('%% %s [%d] reached end at offset %d\n' %
+                                     (msg.topic(), msg.partition(), msg.offset()))
+                elif msg.error():
+                    raise KafkaException(msg.error())
+            else:
+                msg_process(msg)
+    finally:
+        # Close down consumer to commit final offsets.
+        consumer.close()

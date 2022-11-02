@@ -2,7 +2,7 @@ snakemake
 pymssql
 mysql-connector-python
 faker
-kafka-python
+confluent-kafka
 pytest
 pytest-shell
 paramiko

@@ -4,7 +4,7 @@ import json
 from multiprocessing import Process
 
 import pytest
-from kafka import KafkaProducer, KafkaConsumer
+from confluent_kafka import Producer, Consumer
 
 from kfktest.util import (delete_schema, get_ksqldb_ssh, local_produce_proc,
     linfo, remote_produce_proc, count_topic_message, s3_count_sinkmsg,
@@ -12,7 +12,7 @@ from kfktest.util import (delete_schema, get_ksqldb_ssh, local_produce_proc,
     load_setup, _hash, kill_proc_by_port, start_kafka_broker, ssh_exec,
     ksql_exec, list_ksql_tables, list_ksql_streams, delete_ksql_objects,
     _ksql_exec, setup_filebeat, producer_logger_proc, SSH, create_topic,
-    register_schema, delete_schema,
+    register_schema, delete_schema, consume_loop,
     # 픽스쳐들
     xsetup, xtopic, xkfssh, xkvmstart, xcp_setup, xs3sink, xhash, xs3rmdir,
     xrmcons, xconn, xkafka, xzookeeper, xksql, xlog, xksqlssh
@@ -127,40 +127,45 @@ def test_log_comp(xprofile, xcp_setup, xtopic):
     setup = load_setup(xprofile)
     broker = f"{setup['kafka_public_ip']['value']}:19092"
     # 메시지 생성
-    prod = KafkaProducer(
-        bootstrap_servers=broker
-        )
-    prod.send(xtopic, b'100', b'Bob')
-    prod.send(xtopic, b'100', b'Lucy')
+    prod = Producer({
+        'boostrap.servers': broker
+        })
+    prod.produce(xtopic, b'Bob', b'100')
+    prod.produce(xtopic, b'Lucy', b'100')
     prod.flush()
     time.sleep(1)  # 세그먼트 종료 대기
 
-    prod.send(xtopic, b'200', b'Bob')
-    prod.send(xtopic, b'200', b'Lucy')
-    prod.send(xtopic, b'200', b'Patric')
+    prod.produce(xtopic, b'Bob', b'200')
+    prod.produce(xtopic, b'Lucy', b'200')
+    prod.produce(xtopic, b'Patric', b'200')
     prod.flush()
     time.sleep(1)  # 세그먼트 종료 대기
 
     # 로그 컴팩션은 헤드 세그먼트가 존재할 때 종료된 세그먼트들에 대해 수행되고
     # 컴팩션 결과 종료된 세그먼트들은 지워지고 하나의 테일 세그만트만 남는다.
 
-    prod.send(xtopic, b'300', b'Patric')
+    prod.send(xtopic, b'Patric', b'300')
     prod.flush()
 
     decoder = lambda x: x.decode('utf-8')
 
     # 로그 컴팩션 완료를 기다린 후 결과 확인
     time.sleep(13)
-    cons = KafkaConsumer(xtopic,
-        bootstrap_servers=broker,
-        auto_offset_reset='earliest',
-        consumer_timeout_ms=5000,
-        key_deserializer=decoder,
-        value_deserializer=decoder
+    cons = Consumer(
+        {
+            'bootstrap.servers': broker,
+            'auto.offset.reset': 'earliest',
+        }
+        # bootstrap_servers=broker,
+        # auto_offset_reset='earliest',
+        # consumer_timeout_ms=5000,
+        # key_deserializer=decoder,
+        # value_deserializer=decoder
     )
+    cons.subscribe(xtopic)
 
-    # 로그 컴팩션이 되기를 기다린 후 결과 확인
-    for msg in cons:
+    def msg_process(msg):
+        """로그 컴팩션이 되기를 기다린 후 결과 확인."""
         print(msg.key, msg.value)
         if msg.key in ('Bob', 'Lucy'):
             # 테일 세그먼트에는 중복이 없음
@@ -168,6 +173,8 @@ def test_log_comp(xprofile, xcp_setup, xtopic):
         if msg.key == 'Patric':
             # 헤드 세그먼트의 메시지 중복
             assert msg.value in ('200', '300')
+
+    consume_loop(cons, [xtopic], msg_process)
 
 
 S3SK_NUM_MSG = 1000
@@ -537,10 +544,10 @@ def test_ksql_flatjson(xkafka, xprofile, xtopic, xksql, xdel_ksql_flatjson, xs3s
     ssh = get_ksqldb_ssh(xprofile)
 
     # nested json 파일 토픽에 보내기
-    prod = KafkaProducer(bootstrap_servers=broker)
+    prod = Producer({'bootstrap.servers': broker})
     with open('../refers/nested_json.txt') as f:
         for line in f:
-            prod.send('nodb_person', line.encode())
+            prod.producer('nodb_person', value=line.encode())
 
     # 그대로의 스트림 생성
     sql = '''
@@ -634,9 +641,9 @@ def test_ksql_joinss(xkafka, xprofile, xtopic, xksql, xkfssh, xdel_ksql_joinss):
     setup = load_setup(xprofile)
     broker = f"{setup['kafka_public_ip']['value']}:19092"
 
-    prod = KafkaProducer(
-        bootstrap_servers=broker
-        )
+    prod = Producer({
+            'bootstrap.servers': broker
+        })
     # 이벤트 시간대의 정보
     for i in range(1, 11):
         # id 값 2의 배수만 이벤트 시간대의 정보 있음
@@ -645,7 +652,7 @@ def test_ksql_joinss(xkafka, xprofile, xtopic, xksql, xkfssh, xdel_ksql_joinss):
         email = f'old{i:02d}@email.com'
         data = {'id': i, 'regts': int(time.time() * 1000), 'email': email}
         key = f'0-{i}'.encode()
-        prod.send('email', json.dumps(data).encode(), key)
+        prod.produce('email', key, json.dumps(data).encode())
     prod.flush()
 
     # 새 정보와 이벤트의 시간대가 차이나도록 쉬어줌
@@ -739,9 +746,9 @@ def test_ksql_joinst(xkafka, xprofile, xtopic, xksql, xkfssh, xdel_ksql_joinst):
     setup = load_setup(xprofile)
     broker = f"{setup['kafka_public_ip']['value']}:19092"
 
-    prod = KafkaProducer(
-        bootstrap_servers=broker
-        )
+    prod = Producer({
+        'bootstrap.servers': broker
+        })
     # 과거 정보
     for i in range(1, 11):
         # 2의 배수는 과거 정보 있음
@@ -750,7 +757,7 @@ def test_ksql_joinst(xkafka, xprofile, xtopic, xksql, xkfssh, xdel_ksql_joinst):
         email = f'old{i:02d}@email.com'
         data = {'id': i, 'regts': int(time.time() * 1000), 'email': email}
         key = f'0-{i}'.encode()
-        prod.send('email', json.dumps(data).encode(), key)
+        prod.produce('email', json.dumps(data).encode(), key)
     prod.flush()
 
     # 새 정보
@@ -761,7 +768,7 @@ def test_ksql_joinst(xkafka, xprofile, xtopic, xksql, xkfssh, xdel_ksql_joinst):
         email = f'new{i:02d}@email.com'
         data = {'id': i, 'regts': int(time.time() * 1000), 'email': email}
         key = f'0-{i}'.encode()
-        prod.send('email', json.dumps(data).encode(), key)
+        prod.produce('email', json.dumps(data).encode(), key)
     prod.flush()
 
     # 정보 스트림 생성

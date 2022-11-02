@@ -1,11 +1,12 @@
 import time
 import json
 import argparse
+import socket
 from random import random
 
-from kafka import KafkaProducer
-from kafka.errors import (KafkaConnectionError, KafkaTimeoutError,
-    UnknownTopicOrPartitionError)
+from confluent_kafka import Producer
+# from kafka.errors import (KafkaConnectionError, KafkaTimeoutError,
+#     UnknownTopicOrPartitionError)
 from faker import Faker
 from faker.providers import internet, date_time, company, phone_number
 
@@ -37,37 +38,49 @@ parser.add_argument('--dt', type=str, default=None, help="지정된 일시로 �
 # 브로커가 없을 때 조용히 전송 메시지를 손실하는 문제
 # https://github.com/dpkp/kafka-python/issues/2198
 #
-class SafeKafkaProducer(KafkaProducer):
-    """메시지 전송이 실패하면 예외를 발생시키는 프로듀서.
+# class SafeKafkaProducer(KafkaProducer):
+#     """메시지 전송이 실패하면 예외를 발생시키는 프로듀서.
 
-    - 브로커가 죽었을 때 조용히 전송 메시지를 손실하는 문제
-      https://github.com/dpkp/kafka-python/issues/2198
-    - 프로듀서에 retry 설정이 되어 있으면 재시도하는 듯
-      - 그렇지만 메시지는 유실되는 경우도 있고 아닌 경우도 있음
+#     - 브로커가 죽었을 때 조용히 전송 메시지를 손실하는 문제
+#       https://github.com/dpkp/kafka-python/issues/2198
+#     - 프로듀서에 retry 설정이 되어 있으면 재시도하는 듯
+#       - 그렇지만 메시지는 유실되는 경우도 있고 아닌 경우도 있음
 
-    """
+#     """
 
-    pending_futures = []
+#     pending_futures = []
 
-    def send(self, *args, **kwargs):
-        future = super().send(*args, **kwargs)
-        self.pending_futures.append(future)
-        return future
+#     def send(self, *args, **kwargs):
+#         future = super().send(*args, **kwargs)
+#         self.pending_futures.append(future)
+#         return future
 
-    def flush(self, timeout=None):
-        super().flush(timeout=timeout)
-        for future in self.pending_futures:
-            if future.failed():
-                raise Exception("Failed to send batch, bailing out")
-        self.pending_futures = []
+#     def flush(self, timeout=None):
+#         super().flush(timeout=timeout)
+#         for future in self.pending_futures:
+#             if future.failed():
+#                 raise Exception("Failed to send batch, bailing out")
+#         self.pending_futures = []
 
 
-def send(prod, topic, pid, data, with_key):
+def delivery_report(err, msg):
+    """ Called once for each message produced to indicate delivery result.
+        Triggered by poll() or flush(). """
+    if err is not None:
+        print('Message delivery failed: {}'.format(err))
+    # else:
+    #     print('Message delivered to {} [{}]'.format(msg.topic(), msg.partition()))
+
+
+def send(prod, topic, pid, _data, with_key):
+    # Trigger any available delivery report callbacks from previous produce() calls
+    prod.poll(0)
+    data = json.dumps(_data).encode()
     if with_key:
-        key = f"{pid}-{data['id']}".encode()
-        prod.send(topic, value=data, key=key)
+        key = f"{pid}-{_data['id']}".encode()
+        prod.produce(topic, data, key=key, callback=delivery_report)
     else:
-        prod.send(topic, value=data)
+        prod.produce(topic, data, callback=delivery_report)
 
 
 def produce(profile,
@@ -103,13 +116,19 @@ def produce(profile,
     broker_addr = setup[ip_key]['value']
     broker_port = 19092 if dev else 9092
     linfo(f"kafka broker at {broker_addr}:{broker_port}")
-    compress = compress if compress != 'none' else None
-    prod = SafeKafkaProducer(
-        acks=acks,
-        compression_type=compress,
-        bootstrap_servers=[f'{broker_addr}:{broker_port}'],
-        value_serializer=lambda x: json.dumps(x).encode('utf-8'),
-        )
+
+    conf = {
+        'bootstrap.servers': f'{broker_addr}:{broker_port}',
+        'client.id': socket.gethostname(),
+        'compression.codec': compress
+        }
+    prod = Producer(conf)
+    # prod = SafeKafkaProducer(
+    #     acks=acks,
+    #     compression_type=compress,
+    #     bootstrap_servers=[f'{broker_addr}:{broker_port}'],
+    #     value_serializer=lambda x: json.dumps(x).encode('utf-8'),
+    #     )
 
     st = time.time()
     dup_msgs = []
@@ -161,6 +180,7 @@ def produce(profile,
         if duprate > 0 or lagrate > 0:
             time.sleep(0.1)
 
+    prod.flush()
     vel = messages / (time.time() - st)
     linfo(f"[v] producer {pid} produces {messages} messages to {topic}. {int(vel)} rows per seconds.")
 
