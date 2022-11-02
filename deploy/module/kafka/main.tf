@@ -6,7 +6,7 @@ mv /tmp/${basename(var.kafka_s3_sink)} connectors/
 cd connectors/
 unzip ${basename(var.kafka_s3_sink)}
 rm ${basename(var.kafka_s3_sink)}
-sed -i "s/#plugin.path=/plugin.path=\\/home\\/ubuntu\\/$confluent_dir\\/connectors/" ../etc/kafka/connect-distributed.properties
+sed -i "s/plugin.path=.*/plugin.path=\\/home\\/ubuntu\\/$confluent_dir\\/connectors/" ../etc/kafka/connect-distributed.properties
 cd ..
 EOT
 }

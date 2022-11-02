@@ -128,7 +128,7 @@ def test_log_comp(xprofile, xcp_setup, xtopic):
     broker = f"{setup['kafka_public_ip']['value']}:19092"
     # 메시지 생성
     prod = Producer({
-        'boostrap.servers': broker
+        'bootstrap.servers': broker
         })
     prod.produce(xtopic, b'Bob', b'100')
     prod.produce(xtopic, b'Lucy', b'100')
@@ -144,7 +144,7 @@ def test_log_comp(xprofile, xcp_setup, xtopic):
     # 로그 컴팩션은 헤드 세그먼트가 존재할 때 종료된 세그먼트들에 대해 수행되고
     # 컴팩션 결과 종료된 세그먼트들은 지워지고 하나의 테일 세그만트만 남는다.
 
-    prod.send(xtopic, b'Patric', b'300')
+    prod.produce(xtopic, b'Patric', b'300')
     prod.flush()
 
     decoder = lambda x: x.decode('utf-8')
@@ -155,6 +155,7 @@ def test_log_comp(xprofile, xcp_setup, xtopic):
         {
             'bootstrap.servers': broker,
             'auto.offset.reset': 'earliest',
+            'group.id': 'foo'
         }
         # bootstrap_servers=broker,
         # auto_offset_reset='earliest',
@@ -162,17 +163,17 @@ def test_log_comp(xprofile, xcp_setup, xtopic):
         # key_deserializer=decoder,
         # value_deserializer=decoder
     )
-    cons.subscribe(xtopic)
 
     def msg_process(msg):
         """로그 컴팩션이 되기를 기다린 후 결과 확인."""
-        print(msg.key, msg.value)
-        if msg.key in ('Bob', 'Lucy'):
+        key, value = msg.key(), msg.value()
+        print(key, value)
+        if key in ('Bob', 'Lucy'):
             # 테일 세그먼트에는 중복이 없음
-            assert msg.value == '200'
-        if msg.key == 'Patric':
+            assert value == '200'
+        if key == 'Patric':
             # 헤드 세그먼트의 메시지 중복
-            assert msg.value in ('200', '300')
+            assert value in ('200', '300')
 
     consume_loop(cons, [xtopic], msg_process)
 
@@ -192,7 +193,7 @@ def test_s3sink(xprofile, xcp_setup, xtopic, xkfssh, xs3sink):
         p.join()
 
     # rotate.schedule.interval.ms 가 지나도록 대기
-    time.sleep(10)
+    time.sleep(30)
 
     tot_msg = NUM_PRO_PROCS * S3SK_NUM_MSG
     # S3 Sink 커넥터가 올린 내용 확인
@@ -255,7 +256,7 @@ def test_s3sink_brk(xkafka, xprofile, xcp_setup, xtopic, xkfssh, xs3sink):
     프로듀서가 메시지를 모두(=프로세스당 1000개) 보낸 후 브로커가 죽는 경우
     - 지연이 있으나 최종적으로는 S3 에 모든 메시지가 올라감
 
-    프로듀서가 메시지를 모두 보내지 못한(=프로세스당 총 4000개 중 1000개) 보낸 후 브로커가 죽는 경우
+    프로듀서가 메시지를 모두 보내지 못하고(=프로세스당 총 4000개 중 1000개) 브로커가 죽는 경우
     - 토픽 레벨에서 메시지 손실 발생
     - 토픽에 있는 메시지는 모두 S3 에 올라감
 
@@ -278,14 +279,15 @@ def test_s3sink_brk(xkafka, xprofile, xcp_setup, xtopic, xkfssh, xs3sink):
         p.join()
 
     # 이 경우는 rotate.schedule.interval.ms 가 지난 후 더 기다려야함
-    time.sleep(20)
+    # 상황에 따라 속도 차이가 있기에 여유를 많이 둠
+    time.sleep(40)
 
     tot_msg = NUM_PRO_PROCS * S3SBK_NUM_MSG
+    tocnt = count_topic_message(xprofile, xtopic)
     # S3 Sink 커넥터가 올린 내용 확인
     s3cnt = s3_count_sinkmsg(KFKTEST_S3_BUCKET, KFKTEST_S3_DIR + "/")
-    linfo(f"Orignal Messages: {tot_msg}, S3 Messages: {s3cnt}")
-    assert tot_msg == s3cnt
-
+    linfo(f"Orignal Messages: {tot_msg}, Topic Messages: {tocnt}, S3 Messages: {s3cnt}")
+    assert tocnt == s3cnt
 
 ##
 #  TODO: S3 Sink Field Partitioner 테스트
@@ -329,7 +331,7 @@ def test_ksql_basic(xkafka, xprofile, xcp_setup, xtopic, xksql, xdel_ksql_basic_
 
     # 스트림 확인
     sql = '''
-        SELECT * FROM NODB_PERSON_STR;
+        SELECT * FROM person;
     '''
     ret = ksql_exec(xprofile, sql, 'query')
     # 헤더 제외 후 크기 확인
@@ -369,9 +371,8 @@ def xdel_ksql_dedup_strtbl(xprofile, xtopic):
     ssh = get_ksqldb_ssh(xprofile)
     delete_ksql_objects(ssh, [
         (0, 'person_dedup'), (0, 'person_agg_str'),
-        (1, 'person_agg'), (0, 'person')
+        (1, 'person_agg'), (1, 'person_tbl'), (0, 'person')
         ])
-
 
 def test_ksql_dedup(xkafka, xprofile, xcp_setup, xksql, xdel_ksql_dedup_strtbl):
     """ksqlDB 로 중복 제거 테스트."""
@@ -436,18 +437,8 @@ def test_ksql_dedup(xkafka, xprofile, xcp_setup, xksql, xdel_ksql_dedup_strtbl):
     _ksql_exec(ssh, sql, 'ksql', props)
 
     # 중복 제거 확인
-    sql = '''
-        SELECT count(id) FROM person_dedup EMIT CHANGES LIMIT 1
-    '''
-    props = {
-        # ksql API 호출시 ksql-server.properties 의 속성은 모두 무시됨
-        # 스트림/테이블 생성시 필요한 속성은 모두 명시해야
-
-        # 처음부터 카운트 (per query)
-        "ksql.streams.auto.offset.reset": "earliest",
-    }
-    ret = _ksql_exec(ssh, sql, 'query', props)
-    assert ret[1][0] == 100
+    cnt = count_topic_message(xprofile, 'PERSON_DEDUP')
+    assert cnt == 100
 
 
 ## TODO
@@ -479,7 +470,6 @@ def xdel_ksql_flatjson(xprofile, xtopic):
     delete_ksql_objects(ssh, [
         (0, 'person_flat2'), (0, 'person_flat1'), (0, 'person_merge'), (0, 'person_raw'),
         ])
-
 
 @pytest.mark.parametrize('xs3sink', [{'topics': "PERSON_FLAT2"}], indirect=True)
 def test_ksql_flatjson(xkafka, xprofile, xtopic, xksql, xdel_ksql_flatjson, xs3sink):
@@ -547,7 +537,7 @@ def test_ksql_flatjson(xkafka, xprofile, xtopic, xksql, xdel_ksql_flatjson, xs3s
     prod = Producer({'bootstrap.servers': broker})
     with open('../refers/nested_json.txt') as f:
         for line in f:
-            prod.producer('nodb_person', value=line.encode())
+            prod.produce('nodb_person', value=line.encode())
 
     # 그대로의 스트림 생성
     sql = '''
@@ -602,7 +592,8 @@ def xdel_ksql_joinss(xprofile):
     """의존성을 고려한 테이블 및 스트림 삭제."""
     ssh = get_ksqldb_ssh(xprofile)
     delete_ksql_objects(ssh, [
-        (1, 'latest_email'), (0, 'person_email'), (0, 'person'), (0, 'email'),
+        (1, 'latest_email'), (0, 'person_email'), (1, 'person_agg'), (0, 'person'),
+        (0, 'email'),
         ])
 
 def test_ksql_joinss(xkafka, xprofile, xtopic, xksql, xkfssh, xdel_ksql_joinss):
@@ -652,7 +643,7 @@ def test_ksql_joinss(xkafka, xprofile, xtopic, xksql, xkfssh, xdel_ksql_joinss):
         email = f'old{i:02d}@email.com'
         data = {'id': i, 'regts': int(time.time() * 1000), 'email': email}
         key = f'0-{i}'.encode()
-        prod.produce('email', key, json.dumps(data).encode())
+        prod.produce('email', json.dumps(data).encode(), key)
     prod.flush()
 
     # 새 정보와 이벤트의 시간대가 차이나도록 쉬어줌
@@ -665,7 +656,7 @@ def test_ksql_joinss(xkafka, xprofile, xtopic, xksql, xkfssh, xdel_ksql_joinss):
         email = f'new{i:02d}@email.com'
         data = {'id': i, 'regts': int(time.time() * 1000), 'email': email}
         key = f'0-{i}'.encode()
-        prod.send('email', json.dumps(data).encode(), key)
+        prod.produce('email', json.dumps(data).encode(), key)
     prod.flush()
 
     sql = '''
@@ -686,9 +677,8 @@ def test_ksql_joinss(xkafka, xprofile, xtopic, xksql, xkfssh, xdel_ksql_joinss):
     ksql_exec(xprofile, sql, 'ksql', props)
 
     # 이벤트와 같은 시간대의 old 정보만 남는 결과
-    ret = ksql_exec(xprofile, 'SELECT COUNT(*) cnt FROM person_email EMIT CHANGES',
-        'query', props, timeout=7)
-    assert 5 == ret[1][0]
+    cnt = count_topic_message(xprofile, 'PERSON_EMAIL')
+    assert 5 == cnt
     ret = ksql_exec(xprofile, 'SELECT * FROM person_email EMIT CHANGES',
         'query', props, timeout=7)
     for row in ret[1:]:
