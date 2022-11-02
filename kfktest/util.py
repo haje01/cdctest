@@ -58,6 +58,7 @@ TOPIC_REPLICATIONS = 1     # 토픽 기본 복제 수
 INTERNAL_TOPICS = ['__consumer_offsets', 'connect-configs', 'connect-offsets',
     'connect-status', '__transaction_state',
     '_confluent-ksql-default__command_topic', 'default_ksql_processing_log',
+    '_schemas',
     ]
 DB_PORTS = {'mysql': 3306, 'mssql': 1433}
 HOME = os.path.abspath(
@@ -323,6 +324,15 @@ def get_ksqldb_ssh(profile):
 def xkfssh(xprofile, xkvmstart):
     linfo("xkfssh")
     ssh = get_kafka_ssh(xprofile)
+    yield ssh
+
+
+@pytest.fixture
+def xksqlssh(xprofile, xkvmstart):
+    linfo("xksqlssh")
+    setup = load_setup(xprofile)
+    ip = setup['ksqldb_public_ip']['value']
+    ssh = SSH(ip, 'ksqldb')
     yield ssh
 
 
@@ -792,6 +802,48 @@ def register_dbzm(kfk_ssh, profile, svr_name, db_addr, db_port, db_name,
     if status['tasks'][0]['state'] == 'FAILED':
         raise RuntimeError(status['tasks'][0]['trace'])
     linfo(f"[v] register_dbzm {conn_name} for {db_name}")
+    return data
+
+
+@retry(RuntimeError, tries=6, delay=5)
+def register_schema(ksql_ssh, _schema, retry=True):
+    """Schemay Registry 에 스키마 등록
+
+    참조:
+        https://docs.confluent.io/platform/current/schema-registry/schema_registry_onprem_tutorial.html#changing-compatibility-type
+
+    Args:
+        ksql_ssh: ksqlDB 노드로의 Paramiko SSH 객체
+        name (str): 스키마 명
+        schema (dict): 스키마 내용
+
+    """
+    assert 'name' in _schema
+    name = _schema['name']
+    linfo(f"[ ] register_schema {name}")
+
+    schema = json.dumps(_schema)
+    schema = schema.replace('"', '\\"').replace("'", r"'\''")
+    cmd = f'''
+        curl -vs -X POST 'http://localhost:8081/subjects/{name}/versions' \
+        -H 'Content-Type: application/vnd.schemaregistry.v1+json' \
+        --data-raw '{{"schema": "{schema}"}}'
+    '''
+    ret = ssh_exec(ksql_ssh, cmd, kafka_env=False)
+    if 'error_code' in ret:
+        if retry:
+            raise RuntimeError(ret)
+        return eval(ret)
+    try:
+        data = json.loads(ret)
+    except Exception as e:
+        msg = str(e)
+        linfo(msg)
+        if retry:
+            raise RuntimeError(msg)
+        return eval(ret)
+
+    linfo(f"[v] register_schema {name}")
     return data
 
 
@@ -2051,3 +2103,37 @@ def xlog(xprofile):
     pro_ip = setup['producer_public_ip']['value']
     ssh = SSH(pro_ip, 'producer')
     ssh_exec(ssh, 'rm -f /home/ubuntu/test.log*')
+
+
+@retry(RuntimeError, tries=10, delay=3)
+def delete_schema(ksql_ssh, name, hard=False):
+    """schema registry 의 스키마를 지움."""
+    linfo(f"[ ] delete_schema {name}")
+
+    cmd = '''
+        curl -X GET http://localhost:8081/subjects
+    '''
+    ret = ssh_exec(ksql_ssh, cmd, kafka_env=False)
+    scms = eval(ret)
+    if name not in scms:
+        return
+
+    for i in range(2):
+        if not hard and i == 1:
+            break
+        time.sleep(1)
+        perm = '?permanent=true' if i == 1 else ''
+        cmd = f'''
+            curl -vs -X DELETE 'http://localhost:8081/subjects/{name}{perm}'
+        '''
+        ret = ssh_exec(ksql_ssh, cmd, kafka_env=False)
+        if 'error_code' in ret:
+            raise RuntimeError(ret)
+        try:
+            data = json.loads(ret)
+        except Exception as e:
+            msg = str(e)
+            linfo(msg)
+            raise RuntimeError(msg)
+
+    linfo(f"[v] delete_schema {name}")

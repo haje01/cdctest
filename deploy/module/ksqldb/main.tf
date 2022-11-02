@@ -62,7 +62,7 @@ confluent_dir=$(echo $confluent_dir | sed s/-community//)
 echo "$confluent_dir" > /tmp/cdir
 echo "$confluent_file" > /tmp/cfile
 sudo apt update
-sudo apt install -y unzip
+sudo apt install -y unzip jq
 
 # Confluent Platform (CCL) 설치
 echo "curl -O ${var.confluent_url}" > /tmp/ecurl
@@ -70,13 +70,16 @@ curl -O ${var.confluent_url}
 unzip $confluent_file
 rm $confluent_file
 
-# 설정
+# ksqlDB 설정
 sudo sed -i 's/bootstrap.servers=localhost:9092/bootstrap.servers=${var.kafka_private_ip}:9092/' /home/ubuntu/$confluent_dir/etc/ksqldb/ksql-server.properties
 # 토픽 처음부터
 sudo echo 'ksql.streams.auto.offset.reset=earliest' >> /home/ubuntu/$confluent_dir/etc/ksqldb/ksql-server.properties
 # Timeout 에러 방지
 echo 'ksql.streams.shutdown.timeout.ms=30000' | sudo tee -a /home/ubuntu/$confluent_dir/etc/ksqldb/ksql-server.properties
 echo 'ksql.idle.connection.timeout.seconds=30000' | sudo tee -a /home/ubuntu/$confluent_dir/etc/ksqldb/ksql-server.properties
+
+# schema registry 설정
+sudo sed -i 's/kafkastore.bootstrap.servers=.*/kafkastore.bootstrap.servers=PLAINTEXT:\/\/${var.kafka_private_ip}:9092/' /home/ubuntu/$confluent_dir/etc/schema-registry/schema-registry.properties
 
 sudo apt install -y openjdk-8-jdk
 echo 'export JAVA_HOME=/usr/lib/jvm/java-8-openjdk-amd64' >> ~/.bashrc
@@ -99,9 +102,15 @@ cat <<EOF | sudo tee /etc/systemd/system/ksqldb.service
 ${data.template_file.svc_ksqldb.rendered}
 EOF
 
+cat <<EOF | sudo tee /etc/systemd/system/schema-registry.service
+${data.template_file.svc_scmreg.rendered}
+EOF
+
 # 서비스 실행
 sudo systemctl enable ksqldb
 sudo systemctl start ksqldb
+sudo systemctl enable schema-registry
+sudo systemctl start schema-registry
 
 sleep 10
 EOT
@@ -120,6 +129,16 @@ EOT
 # ksqlDB 서비스 등록
 data "template_file" "svc_ksqldb" {
   template = file("${path.module}/../svc_ksqldb.tpl")
+  vars = {
+    user = "root",
+    confluent_dir = replace(trimsuffix(basename(var.confluent_url), ".zip"), "-community", "")
+    timezone = var.timezone
+  }
+}
+
+# schema registry 서비스 등록
+data "template_file" "svc_scmreg" {
+  template = file("${path.module}/../svc_scmreg.tpl")
   vars = {
     user = "root",
     confluent_dir = replace(trimsuffix(basename(var.confluent_url), ".zip"), "-community", "")

@@ -6,15 +6,16 @@ from multiprocessing import Process
 import pytest
 from kafka import KafkaProducer, KafkaConsumer
 
-from kfktest.util import (get_ksqldb_ssh, local_produce_proc,
+from kfktest.util import (delete_schema, get_ksqldb_ssh, local_produce_proc,
     linfo, remote_produce_proc, count_topic_message, s3_count_sinkmsg,
     KFKTEST_S3_BUCKET, KFKTEST_S3_DIR, unregister_kconn, register_s3sink,
     load_setup, _hash, kill_proc_by_port, start_kafka_broker, ssh_exec,
     ksql_exec, list_ksql_tables, list_ksql_streams, delete_ksql_objects,
     _ksql_exec, setup_filebeat, producer_logger_proc, SSH, create_topic,
+    register_schema, delete_schema,
     # 픽스쳐들
     xsetup, xtopic, xkfssh, xkvmstart, xcp_setup, xs3sink, xhash, xs3rmdir,
-    xrmcons, xconn, xkafka, xzookeeper, xksql, xlog
+    xrmcons, xconn, xkafka, xzookeeper, xksql, xlog, xksqlssh
 )
 from kfktest.producer import produce
 from kfktest.consumer import consume
@@ -706,7 +707,7 @@ def xdel_ksql_joinst(xprofile):
         ])
 
 def test_ksql_joinst(xkafka, xprofile, xtopic, xksql, xkfssh, xdel_ksql_joinst):
-    """이벤트와 최신 정보를 스트림+테이블 조인
+    """이벤트와 최신 정보를 스트림+테이블 이너 조인
 
     - person 스트림에 더해 별도 정보 스트림 생성
     - 정보 스트림은 나중에 새로운 레코드 들어옴
@@ -725,7 +726,7 @@ def test_ksql_joinst(xkafka, xprofile, xtopic, xksql, xkfssh, xdel_ksql_joinst):
 
     sql = '''
     CREATE STREAM person (
-        ey VARCHAR KEY,
+        key VARCHAR KEY,
         id INT, regts TIMESTAMP, name VARCHAR, address VARCHAR,
         ip VARCHAR, birth VARCHAR, company VARCHAR, phone VARCHAR)
         with (kafka_topic = 'nodb_person', value_format='json', timestamp='regts');
@@ -816,7 +817,6 @@ def test_ksql_joinst(xkafka, xprofile, xtopic, xksql, xkfssh, xdel_ksql_joinst):
     # |2                                 |old02@email.com                   |
     # |3                                 |new03@email.com                   |
     # |6                                 |new06@email.com                   |
-
 
 
 # 참고: https://www.confluent.io/blog/crossing-streams-joins-apache-kafka/
@@ -1060,6 +1060,100 @@ def test_ksql_offset():
     """auto.offset.reset 의 특성 테스트.
 
     - 스트림/테이블 생성시 설정된 offset reset 은 select 그대로 적용된다.
-    - 그러나, 스트림/테이블이 JOIN 되어 다른 스트림/테이블 에사용되면 그것의 offset reset 설정을 따른다.
+    - 그러나, 그 스트림/테이블이 JOIN 되어 다른 스트림/테이블 에사용되면 그것의 offset reset 설정을 따른다.
 
     """
+
+
+
+def test_schema_register(xkafka, xprofile, xtopic, xksqlssh):
+    """스키마 등록 테스트."""
+    delete_schema(xksqlssh, 'person')
+
+    # 최초 스키마 등록
+    schema = {
+        "type": "record",
+        "name": "person",
+        "namespace": "io.kfktest",
+        "fields": [
+            {"name": "id", "type": "int"},
+            {"name": "regdt", "type": "string"},
+            {"name": "pid", "type": "int", "default": 0},
+            {"name": "sid", "type": "int", "default": 0},
+        ]
+    }
+    ret = register_schema(xksqlssh, schema)
+    id1 = ret['id']
+
+    # 같은 스키마를 반복 등록하면 같은 id 반환
+    schema = {
+        "type": "record",
+        "name": "person",
+        "namespace": "io.kfktest",
+        "fields": [
+            {"name": "id", "type": "int"},
+            {"name": "regdt", "type": "string"},
+            {"name": "pid", "type": "int", "default": 0},
+            {"name": "sid", "type": "int", "default": 0},
+        ]
+    }
+    ret = register_schema(xksqlssh, schema)
+    assert ret['id'] == id1
+
+    # 추가 필드
+    schema = {
+        "type": "record",
+        "name": "person",
+        "namespace": "io.kfktest",
+        "fields": [
+            {"name": "id", "type": "int"},
+            {"name": "regdt", "type": "string"},
+            {"name": "pid", "type": "int", "default": 0},
+            {"name": "sid", "type": "int", "default": 0},
+            {"name": "name", "type": "string"},
+            {"name": "address", "type": "string"},
+            {"name": "ip", "type": "string"},
+        ]
+    }
+    ret = register_schema(xksqlssh, schema, False)
+    # 추가 필드 기본값 없음 -> 호환성이 없어 스키마 등록 실패
+    assert 'READER_FIELD_MISSING_DEFAULT_VALUE' in ret['message']
+
+    # 추가 필드에 기본값을 넣어주면 등록 성공
+    schema = {
+        "type": "record",
+        "name": "person",
+        "namespace": "io.kfktest",
+        "fields": [
+            {"name": "id", "type": "int"},
+            {"name": "regdt", "type": "string"},
+            {"name": "pid", "type": "int", "default": 0},
+            {"name": "sid", "type": "int", "default": 0},
+            {"name": "name", "type": "string", "default": "N/A"},
+            {"name": "address", "type": "string", "default": "N/A"},
+            {"name": "ip", "type": "string", "default": "N/A"},
+        ]
+    }
+    ret = register_schema(xksqlssh, schema)
+    assert 'id' in ret
+
+    # 기존 필드(기본값 있는)를 제거하고 기본값 있는 필드 추가
+    schema = {
+        "type": "record",
+        "name": "person",
+        "namespace": "io.kfktest",
+        "fields": [
+            {"name": "id", "type": "int"},
+            {"name": "regdt", "type": "string"},
+            {"name": "pid", "type": "int", "default": 0},
+            {"name": "sid", "type": "int", "default": 0},
+            # {"name": "name", "type": "string", "default": "N/A"},
+            # {"name": "address", "type": "string", "default": "N/A"},
+            # {"name": "ip", "type": "string", "default": "N/A"},
+            {"name": "birth", "type": "string", "default": "N/A"},
+            {"name": "company", "type": "string", "default": "N/A"},
+            {"name": "phone", "type": "string", "default": "N/A"},
+        ]
+    }
+    ret = register_schema(xksqlssh, schema)
+    assert 'id' in ret
