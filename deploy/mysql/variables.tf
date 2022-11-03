@@ -17,7 +17,6 @@ variable "work_cidr" {}
 variable "key_pair_name" {}
 variable "db_user" {}
 variable "db_port" {}
-variable "confluent_url" {}
 variable "kafka_jdbc_connector" {}
 variable "kafka_s3_sink" {}
 variable "mysql_jdbc_driver" {}

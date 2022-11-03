@@ -182,7 +182,6 @@ module "inserter" {
   private_key = var.private_key
   work_cidr = var.work_cidr
   key_pair_name = var.key_pair_name
-  confluent_url = ""
   filebeat_url = ""
   tags = var.tags
 }
@@ -196,7 +195,6 @@ module "selector" {
   private_key = var.private_key
   work_cidr = var.work_cidr
   key_pair_name = var.key_pair_name
-  confluent_url = ""
   filebeat_url = ""
   tags = var.tags
 }
@@ -210,7 +208,6 @@ module "consumer" {
   private_key = var.private_key
   work_cidr = var.work_cidr
   key_pair_name = var.key_pair_name
-  confluent_url = var.confluent_url
   filebeat_url = ""
   tags = var.tags
 }
@@ -225,7 +222,6 @@ module "kafka" {
   work_cidr = var.work_cidr
   key_pair_name = var.key_pair_name
   consumer_sg_id = module.consumer.sg_id
-  confluent_url = var.confluent_url
   kafka_jdbc_connector = var.kafka_jdbc_connector
   mysql_jdbc_driver = var.mysql_jdbc_driver
   mysql_dbzm_connector = var.mysql_dbzm_connector

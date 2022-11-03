@@ -1064,7 +1064,15 @@ def test_ksql_offset():
 
 
 def test_schema_register(xkafka, xprofile, xtopic, xksqlssh):
-    """스키마 등록 테스트."""
+    """스키마 등록 테스트.
+
+    - SR 의 기본 호환성 설정은 BACKWARD
+        - 새 스키마를 이용하는 컨슈머가 옛 프로듀서 데이터를 읽을 수 있음
+    - 이를 위해 새로 추가되는 필드에는 기본값이 있어야 함
+    - FORWARD 호환성: 옛 스키마를 이용하는 컨슈머가 새 프로듀서 데이터를 읽을 수 있음
+
+
+    """
     delete_schema(xksqlssh, 'person')
 
     # 최초 스키마 등록

@@ -9,7 +9,6 @@ module "kafka" {
   producer_sg_id = module.producer.sg_id
   consumer_sg_id = module.consumer.sg_id
   ksqldb_sg_id = module.ksqldb.sg_id
-  confluent_url = var.confluent_url
   kafka_s3_sink = var.kafka_s3_sink
   timezone = var.timezone
   tags = var.tags
@@ -24,7 +23,6 @@ module "producer" {
   private_key = var.private_key
   work_cidr = var.work_cidr
   key_pair_name = var.key_pair_name
-  confluent_url = var.confluent_url
   filebeat_url = var.filebeat_url
   tags = var.tags
 }
@@ -38,7 +36,6 @@ module "consumer" {
   private_key = var.private_key
   work_cidr = var.work_cidr
   key_pair_name = var.key_pair_name
-  confluent_url = var.confluent_url
   filebeat_url = ""
   tags = var.tags
 }
@@ -52,7 +49,6 @@ module "ksqldb" {
   instance_type = var.ksqldb_instance_type
   private_key = var.private_key
   work_cidr = var.work_cidr
-  confluent_url = var.confluent_url
   key_pair_name = var.key_pair_name
   depends_on = [module.kafka.id]
   kafka_private_ip = module.kafka.private_ip

@@ -6,7 +6,6 @@ variable "instance_type" {
 }
 variable "private_key" {}
 variable "work_cidr" {}
-variable "confluent_url" {}
 variable "key_pair_name" {}
 variable "kafka_private_ip" {}
 variable "timezone" {}

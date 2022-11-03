@@ -418,7 +418,7 @@ def delete_all_topics(kfk_ssh, profile):
     """
     topics = list_topics(kfk_ssh)
     linfo(f"[ ] delete_all_topics")
-    if len(topics) > 0:
+    if len(topics) > 0 and len(topics[0]) > 0:
         topics = ','.join(topics)
         try:
             ret = ssh_exec(kfk_ssh, f"kafka-topics --delete --topic '{topics}' --bootstrap-server localhost:9092")
@@ -880,11 +880,18 @@ def put_connector(kfk_ssh, name, config, poll_interval=5000, aws_vars=None):
 
     # AWS credential 필요한 경우
     if aws_vars is not None:
-        cmd = f'''mkdir -p ~/.aws && cat <<EOT > ~/.aws/credentials
-[default]
-aws_access_key_id = {aws_vars[0]}
-aws_secret_access_key = {aws_vars[1]}
-EOT
+        cmd = f'''
+if [ ! -f /etc/systemd/system/confluent-kafka-connect.service.d/local.conf ]
+then
+    sudo mkdir -p /etc/systemd/system/confluent-kafka-connect.service.d
+    cat << EOF | sudo tee /etc/systemd/system/confluent-kafka-connect.service.d/local.conf
+[Service]
+Environment=AWS_ACCESS_KEY_ID={aws_vars[0]}
+Environment=AWS_SECRET_ACCESS_KEY={aws_vars[1]}
+EOF
+    sudo systemctl daemon-reload
+    sudo service confluent-kafka-connect restart
+fi
 '''
         ret = ssh_exec(kfk_ssh, cmd)
         if 'error_code' in ret:
@@ -984,11 +991,11 @@ def unregister_all_kconn(kfk_ssh):
 def start_zookeeper(kfk_ssh):
     """주키퍼 시작."""
     linfo(f"[ ] start_zookeeper")
-    ssh_exec(kfk_ssh, "sudo systemctl start zookeeper")
+    ssh_exec(kfk_ssh, "sudo systemctl start confluent-zookeeper")
     # 시간 경과 후에 동작 확인
     time.sleep(5)
     # 브로커 시작 확인
-    if not is_service_active(kfk_ssh, 'zookeeper'):
+    if not is_service_active(kfk_ssh, 'confluent-zookeeper'):
         raise RuntimeError('Zookeeper not launched!')
     linfo(f"[v] start_zookeeper")
 
@@ -997,7 +1004,7 @@ def start_zookeeper(kfk_ssh):
 def stop_zookeeper(kfk_ssh, ignore_err=False):
     """주키퍼 정지."""
     linfo(f"[ ] stop_zookeeper")
-    ssh_exec(kfk_ssh, "sudo systemctl stop zookeeper", ignore_err=ignore_err)
+    ssh_exec(kfk_ssh, "sudo systemctl stop confluent-zookeeper", ignore_err=ignore_err)
     linfo(f"[v] stop_zookeeper")
 
 
@@ -1009,12 +1016,12 @@ def start_kafka_broker(kfk_ssh):
 
     """
     linfo(f"[ ] start_kafka_broker")
-    ssh_exec(kfk_ssh, "sudo systemctl start kafka")
+    ssh_exec(kfk_ssh, "sudo systemctl start confluent-kafka")
     # 충분한 시간 경과 후에 동작을 확인해야 한다.
     # kill 시 Zookeeper 의 기존 /brokers/ids/0 겹치는 문제로 기동중 다시 죽을 수 있음
     time.sleep(20)
     # 브로커 시작 확인
-    if not is_service_active(kfk_ssh, 'kafka'):
+    if not is_service_active(kfk_ssh, 'confluent-kafka'):
         raise RuntimeError('Broker not launched!')
     linfo(f"[v] start_kafka_broker")
 
@@ -1034,7 +1041,7 @@ def stop_kafka_broker(kfk_ssh, ignore_err=False):
 
     """
     linfo(f"[ ] stop_kafka_broker")
-    ssh_exec(kfk_ssh, "sudo systemctl stop kafka", ignore_err=ignore_err)
+    ssh_exec(kfk_ssh, "sudo systemctl stop confluent-kafka", ignore_err=ignore_err)
     # ssh_exec(kfk_ssh, "sudo $KAFKA_HOME/bin/kafka-server-stop", ignore_err=ignore_err)
     linfo(f"[v] stop_kafka_broker")
 
@@ -1086,7 +1093,7 @@ def claim_kafka(kfk_ssh):
     """카프카 브로커 동작 확인."""
     linfo("[ ] claim_kafka")
     # 카프카가 떠있지 않으면 시작
-    if not is_service_active(kfk_ssh, 'kafka'):
+    if not is_service_active(kfk_ssh, 'confluent-kafka'):
         start_kafka_broker(kfk_ssh)
     linfo("[v] claim_kafka")
 
@@ -1384,7 +1391,7 @@ def xconn(xkfssh, xsetup, xkafka):
 def claim_kafka_connect(kfk_ssh):
     """카프카 커넥트 요청."""
     linfo("[ ] claim_kafka_connect")
-    if not is_service_active(kfk_ssh, 'kafka-connect'):
+    if not is_service_active(kfk_ssh, 'confluent-kafka-connect'):
         start_kafka_connect(kfk_ssh)
     linfo("[v] claim_kafka_connect")
 
@@ -1393,12 +1400,12 @@ def claim_kafka_connect(kfk_ssh):
 def start_kafka_connect(kfk_ssh):
     """카프카 커넥트 시작."""
     linfo(f"[ ] start_kafka_connect")
-    ssh_exec(kfk_ssh, "sudo systemctl start kafka-connect")
+    ssh_exec(kfk_ssh, "sudo systemctl start confluent-kafka-connect")
 
     # 잠시 후 동작 확인
     time.sleep(5)
     # 시작 확인
-    if not is_service_active(kfk_ssh, 'kafka-connect'):
+    if not is_service_active(kfk_ssh, 'confluent-kafka-connect'):
         raise RuntimeError('Connect not launched!')
     linfo(f"[v] start_kafka_connect")
 

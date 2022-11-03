@@ -55,36 +55,32 @@ resource "aws_instance" "ksqldb" {
   provisioner "remote-exec" {
     inline = [<<EOT
 cloud-init status --wait
-echo "${var.confluent_url}" > /tmp/curl
-confluent_file=${basename(var.confluent_url)}
-confluent_dir=$(basename $confluent_file .zip)
-confluent_dir=$(echo $confluent_dir | sed s/-community//)
-echo "$confluent_dir" > /tmp/cdir
-echo "$confluent_file" > /tmp/cfile
-sudo apt update
+sudo apt-get update
+sudo sed -i 's/#$nrconf{restart} = '"'"'i'"'"';/$nrconf{restart} = '"'"'a'"'"';/g' /etc/needrestart/needrestart.conf
+
+# Confluent Community Edition 설치
+wget -qO - https://packages.confluent.io/deb/7.2/archive.key | sudo apt-key add -
+sudo add-apt-repository "deb [arch=amd64] https://packages.confluent.io/deb/7.2 stable main"
+# 현재(2022-11-02) 공식 지원 OS 가 20.x 대 (focal)
+sudo add-apt-repository -y "deb https://packages.confluent.io/clients/deb $(lsb_release -cs) main"
+sudo apt-get install -y confluent-community-2.13
+
 sudo apt install -y unzip jq
 
-# Confluent Platform (CCL) 설치
-echo "curl -O ${var.confluent_url}" > /tmp/ecurl
-curl -O ${var.confluent_url}
-unzip $confluent_file
-rm $confluent_file
-
 # ksqlDB 설정
-sudo sed -i 's/bootstrap.servers=localhost:9092/bootstrap.servers=${var.kafka_private_ip}:9092/' /home/ubuntu/$confluent_dir/etc/ksqldb/ksql-server.properties
+sudo sed -i 's/bootstrap.servers=localhost:9092/bootstrap.servers=${var.kafka_private_ip}:9092/' /etc/ksqldb/ksql-server.properties
 # 토픽 처음부터
-sudo echo 'ksql.streams.auto.offset.reset=earliest' >> /home/ubuntu/$confluent_dir/etc/ksqldb/ksql-server.properties
+sudo echo 'ksql.streams.auto.offset.reset=earliest' >> /etc/ksqldb/ksql-server.properties
 # Timeout 에러 방지
-echo 'ksql.streams.shutdown.timeout.ms=30000' | sudo tee -a /home/ubuntu/$confluent_dir/etc/ksqldb/ksql-server.properties
-echo 'ksql.idle.connection.timeout.seconds=30000' | sudo tee -a /home/ubuntu/$confluent_dir/etc/ksqldb/ksql-server.properties
+echo 'ksql.streams.shutdown.timeout.ms=30000' | sudo tee -a /etc/ksqldb/ksql-server.properties
+echo 'ksql.idle.connection.timeout.seconds=30000' | sudo tee -a /etc/ksqldb/ksql-server.properties
 
 # schema registry 설정
-sudo sed -i 's/kafkastore.bootstrap.servers=.*/kafkastore.bootstrap.servers=PLAINTEXT:\/\/${var.kafka_private_ip}:9092/' /home/ubuntu/$confluent_dir/etc/schema-registry/schema-registry.properties
+sudo sed -i 's/kafkastore.bootstrap.servers=.*/kafkastore.bootstrap.servers=PLAINTEXT:\/\/${var.kafka_private_ip}:9092/' /etc/schema-registry/schema-registry.properties
 
-sudo apt install -y openjdk-8-jdk
-echo 'export JAVA_HOME=/usr/lib/jvm/java-8-openjdk-amd64' >> ~/.bashrc
+sudo apt install -y openjdk-11-jdk
+echo 'export JAVA_HOME=/usr/lib/jvm/java-11-openjdk-amd64' >> ~/.bashrc
 echo 'export PATH=$PATH:$JAVA_HOME/bin' >> ~/.bashrc
-echo "export PATH=$PATH:~/$confluent_dir/bin" >> ~/.bashrc
 
 cat <<EOF > ~/.tmux.conf
 set -g mouse on
@@ -97,20 +93,9 @@ bind-key -T copy-mode-vi y send -X copy-pipe-and-cancel 'xclip -in -selection cl
 EOF
 
 
-# 서비스 등록
-cat <<EOF | sudo tee /etc/systemd/system/ksqldb.service
-${data.template_file.svc_ksqldb.rendered}
-EOF
-
-cat <<EOF | sudo tee /etc/systemd/system/schema-registry.service
-${data.template_file.svc_scmreg.rendered}
-EOF
-
 # 서비스 실행
-sudo systemctl enable ksqldb
-sudo systemctl start ksqldb
-sudo systemctl enable schema-registry
-sudo systemctl start schema-registry
+sudo systemctl start confluent-ksqldb
+sudo systemctl start confluent-schema-registry
 
 sleep 10
 EOT
@@ -124,24 +109,4 @@ EOT
     },
     var.tags
   )
-}
-
-# ksqlDB 서비스 등록
-data "template_file" "svc_ksqldb" {
-  template = file("${path.module}/../svc_ksqldb.tpl")
-  vars = {
-    user = "root",
-    confluent_dir = replace(trimsuffix(basename(var.confluent_url), ".zip"), "-community", "")
-    timezone = var.timezone
-  }
-}
-
-# schema registry 서비스 등록
-data "template_file" "svc_scmreg" {
-  template = file("${path.module}/../svc_scmreg.tpl")
-  vars = {
-    user = "root",
-    confluent_dir = replace(trimsuffix(basename(var.confluent_url), ".zip"), "-community", "")
-    timezone = var.timezone
-  }
 }

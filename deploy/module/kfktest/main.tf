@@ -30,20 +30,6 @@ resource "aws_security_group" "kfktest" {
 }
 
 locals {
-# Kafka 설치
-  install_kafka = <<EOT
-sudo apt install -y openjdk-8-jdk
-echo 'export JAVA_HOME=/usr/lib/jvm/java-8-openjdk-amd64' >> ~/.kenv
-echo 'export PATH=$PATH:$JAVA_HOME/bin' >> ~/.kenv
-confluent_file=${basename(var.confluent_url)}
-confluent_dir=$(basename $confluent_file .zip)
-confluent_dir=$(echo $confluent_dir | sed s/-community//)
-curl -O ${var.confluent_url}
-unzip $confluent_file
-rm $confluent_file
-echo "export PATH=$PATH:~/$confluent_dir/bin" >> ~/.kenv
-cat ~/.kenv >> ~/.bashrc
-EOT
 # Filebeat 설치
   install_filebeat = <<EOT
 curl -L -O ${var.filebeat_url}
@@ -74,8 +60,6 @@ resource "aws_instance" "kfktest" {
 cloud-init status --wait
 sudo apt update
 sudo sed -i 's/#$nrconf{restart} = '"'"'i'"'"';/$nrconf{restart} = '"'"'a'"'"';/g' /etc/needrestart/needrestart.conf
-sudo sed -i 's/#MaxSessions 10/MaxSessions 200/g' /etc/ssh/sshd_config
-sudo service sshd restart
 sudo apt install -y python3-pip unzip
 
 # 코드 설치
@@ -83,8 +67,19 @@ git clone --quiet https://github.com/haje01/kfktest.git
 cd kfktest && pip3 install -q -r requirements.txt && pip3 install -e .
 cd
 
-# Kafka 설치
-${var.confluent_url != "" ? local.install_kafka : ""}
+# Java 설치
+sudo apt install -y openjdk-11-jdk
+echo 'export JAVA_HOME=/usr/lib/jvm/java-11-openjdk-amd64' >> ~/.kenv
+echo 'export PATH=$PATH:$JAVA_HOME/bin' >> ~/.kenv
+
+# Confluent Community Edition 설치
+wget -qO - https://packages.confluent.io/deb/7.2/archive.key | sudo apt-key add -
+sudo add-apt-repository "deb [arch=amd64] https://packages.confluent.io/deb/7.2 stable main"
+# 현재(2022-11-02) 공식 지원 OS 가 20.x 대 (focal)
+sudo add-apt-repository -y "deb https://packages.confluent.io/clients/deb $(lsb_release -cs) main"
+sudo apt-get install -y confluent-community-2.13
+cat ~/.kenv >> ~/.bashrc
+
 # Filebeat 설치
 ${var.filebeat_url != "" ? local.install_filebeat : ""}
 EOT
