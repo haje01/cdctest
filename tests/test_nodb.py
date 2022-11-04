@@ -12,7 +12,7 @@ from kfktest.util import (delete_schema, get_ksqldb_ssh, local_produce_proc,
     load_setup, _hash, kill_proc_by_port, start_kafka_broker, ssh_exec,
     ksql_exec, list_ksql_tables, list_ksql_streams, delete_ksql_objects,
     _ksql_exec, setup_filebeat, producer_logger_proc, SSH, create_topic,
-    register_schema, delete_schema, consume_loop,
+    register_schema, delete_schema, consume_iter, new_consumer,
     # 픽스쳐들
     xsetup, xtopic, xkfssh, xkvmstart, xcp_setup, xs3sink, xhash, xs3rmdir,
     xrmcons, xconn, xkafka, xzookeeper, xksql, xlog, xksqlssh
@@ -164,8 +164,7 @@ def test_log_comp(xprofile, xcp_setup, xtopic):
         # value_deserializer=decoder
     )
 
-    def msg_process(msg):
-        """로그 컴팩션이 되기를 기다린 후 결과 확인."""
+    for msg in consume_iter(new_consumer(), [xtopic]):
         key, value = msg.key(), msg.value()
         print(key, value)
         if key in ('Bob', 'Lucy'):
@@ -174,8 +173,6 @@ def test_log_comp(xprofile, xcp_setup, xtopic):
         if key == 'Patric':
             # 헤드 세그먼트의 메시지 중복
             assert value in ('200', '300')
-
-    consume_loop(cons, [xtopic], msg_process)
 
 
 S3SK_NUM_MSG = 1000

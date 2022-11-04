@@ -14,7 +14,7 @@ from kfktest.util import (count_topic_message, get_kafka_ssh,
     local_select_proc, local_insert_proc, linfo, NUM_INS_PROCS, NUM_SEL_PROCS,
     remote_insert_proc, remote_select_proc, DB_ROWS, load_setup, insert_fake,
     db_concur, ssh_exec, s3_count_sinkmsg, KFKTEST_S3_BUCKET,
-    KFKTEST_S3_DIR, rot_table_proc, rot_insert_proc,
+    KFKTEST_S3_DIR, rot_table_proc, rot_insert_proc, new_consumer, consume_iter,
     # 픽스쳐들
     xsetup, xcp_setup, xjdbc, xtable, xkafka, xzookeeper, xkvmstart,
     xconn, xkfssh, xdbzm, xrmcons, xcdc, xhash, xtopic, xs3rmdir, xs3sink
@@ -249,8 +249,10 @@ def test_ct_remote_basic(xcp_setup, xjdbc, xprofile, xkfssh):
         ins_pros.append(p)
         p.start()
 
+    # 이것이 없으면 일부 메시지 유실 발생?!
+    time.sleep(5)
     # 카프카 토픽 확인 (timeout 되기전에 다 받아야 함)
-    cnt = count_topic_message(xprofile, f'{xprofile}_person', timeout=10)
+    cnt = count_topic_message(xprofile, f'{xprofile}_person', timeout=20)
     assert DB_ROWS == cnt
 
     for p in ins_pros:
@@ -338,7 +340,7 @@ def test_cdc_remote_basic(xcp_setup, xdbzm, xprofile, xkfssh, xtable):
     linfo(f"CDC Test Elapsed: {time.time() - xtable:.2f}")
 
 
-def test_ct_modify(xcp_setup, xjdbc, xtable, xprofile, xkfssh):
+def test_ct_modify(xcp_setup, xjdbc, xtopic, xtable, xprofile, xkfssh):
     """CT 방식에서 기존 행이 변하는 경우 동작 확인.
 
     - CT 방식은 기존행이 변경 (update) 된 것은 전송하지 않는다.
@@ -360,28 +362,18 @@ def test_ct_modify(xcp_setup, xjdbc, xtable, xprofile, xkfssh):
         p.join()
     linfo("All insert processes are done.")
 
+    time.sleep(2)
     setup = load_setup('mssql')
-    topic = 'mssql_person'
     broker_addr = setup['kafka_public_ip']['value']
     broker_port = 19092
 
-    def consume():
-        consumer = Consumer({
-                'group.id': 'my-group-mssql',
-                'bootstrap.servers': f'{broker_addr}:{broker_port}',
-                'auto.offset.reset': 'earliest',
-                'enable.auto.commit': False,
-            })
-        consumer.subscribe(topic)
-        return consumer
-
     cnt = 0
-    frow = org_name = None
-    for _msg in consume():
-        msg = _msg.value
+    org_name = None
+    for msg in consume_iter(new_consumer(broker_addr, broker_port), [xtopic]):
         cnt += 1
         if msg['id'] == 1:
             org_name = msg['name']
+
     assert cnt == num_msg
 
     # 일부 행을 변경
@@ -399,45 +391,46 @@ def test_ct_modify(xcp_setup, xjdbc, xtable, xprofile, xkfssh):
 
     cnt = mcnt = 0
     fname = None
-    for _msg in consume():
-        msg = _msg.value
+    for msg in consume_iter(new_consumer(broker_addr, broker_port), [xtopic]):
+        print(msg)
         cnt += 1
         if msg['id'] == 1:
             fname = msg['name']
+            # Timestamp 가 업데이트되지 않아 갱신 없음
             assert fname == org_name
             mcnt += 1
-    assert mcnt == 1
 
+    assert mcnt == 1
     # 새 행을 추가
     insert_fake(conn, cursor, 1, 1, 1, 'mssql')
     conn.close()
 
     cnt = mcnt = 0
-    for _msg in consume():
-        msg = _msg.value
+    for msg in consume_iter(new_consumer(broker_addr, broker_port), [xtopic]):
         cnt += 1
         if msg['id'] == 1:
             mcnt += 1
+
     assert cnt == 11
     assert mcnt == 1
 
     # 테이블을 리셋 후 행 추가 (rotation 흉내)
-    conn, cursor = reset_table(xprofile)
+    conn, cursor = reset_table(xprofile, 'dbo.person')
     insert_fake(conn, cursor, 1, 15, 1, 'mssql')
 
     cnt = 0
-    for _msg in consume():
-        msg = _msg.value
+    for msg in consume_iter(new_consumer(broker_addr, broker_port), [xtopic]):
         cnt += 1
         if msg['id'] == 1:
             # 같은 ID 에 대해서는 기존 값이 그대로 옴
             assert fname == msg['name']
+
     # 새로 추가된 행은 들어옴
     assert cnt == 15
 
 
 @pytest.mark.parametrize('xjdbc', [{'inc_col': 'id', 'ts_col': 'regdt'}], indirect=True)
-def test_ct_modify2(xcp_setup, xjdbc, xtable, xprofile, xkfssh):
+def test_ct_modify2(xcp_setup, xjdbc, xtable, xtopic, xprofile, xkfssh):
     """CT 방식에서 Current Timestamp 를 쓸 때 기존 행이 변하는 경우 동작 확인.
 
     - Incremental 과 Timestamp 컬럼을 함께 쓰는 경우
@@ -458,25 +451,12 @@ def test_ct_modify2(xcp_setup, xjdbc, xtable, xprofile, xkfssh):
     linfo("All insert processes are done.")
 
     setup = load_setup('mssql')
-    topic = 'mssql_person'
     broker_addr = setup['kafka_public_ip']['value']
     broker_port = 19092
 
-    def consume():
-        consumer = KafkaConsumer(topic,
-                        group_id=f'my-group-mssql',
-                        bootstrap_servers=[f'{broker_addr}:{broker_port}'],
-                        auto_offset_reset='earliest',
-                        value_deserializer=lambda x: json.loads(x.decode('utf8')),
-                        enable_auto_commit=False,
-                        consumer_timeout_ms=1000 * 10
-                        )
-        return consumer
-
     cnt = 0
-    frow = org_name = None
-    for _msg in consume():
-        msg = _msg.value
+    org_name = None
+    for msg in consume_iter(new_consumer(broker_addr, broker_port), [xtopic]):
         cnt += 1
         if msg['id'] == 1:
             org_name = msg['name']
@@ -499,8 +479,7 @@ def test_ct_modify2(xcp_setup, xjdbc, xtable, xprofile, xkfssh):
 
     cnt = mcnt = 0
     fnames = []
-    for _msg in consume():
-        msg = _msg.value
+    for msg in consume_iter(new_consumer(broker_addr, broker_port), [xtopic]):
         cnt += 1
         if msg['id'] == 1:
             fname = msg['name']

@@ -30,7 +30,7 @@ import pytest
 from retry import retry
 import pandas as pd
 import boto3
-from confluent_kafka import KafkaError, KafkaException
+from confluent_kafka import KafkaError, KafkaException, Consumer
 
 # Insert / Select 프로세스 수
 NUM_INS_PROCS = 10  # 10 초과이면 sshd 세션수 문제(?)로 Insert가 안되는 문제 발생
@@ -2148,7 +2148,7 @@ def delete_schema(ksql_ssh, name, hard=False):
     linfo(f"[v] delete_schema {name}")
 
 
-def consume_loop(consumer, topics, msg_process, timeout=5):
+def consume_loop(consumer, topics, msg_process, timeout=10):
     """메시지 컨슘 루프."""
     running = True
     try:
@@ -2158,7 +2158,6 @@ def consume_loop(consumer, topics, msg_process, timeout=5):
             msg = consumer.poll(timeout=timeout)
             if msg is None:
                 break
-
             if msg.error():
                 if msg.error().code() == KafkaError._PARTITION_EOF:
                     # End of partition event
@@ -2167,7 +2166,39 @@ def consume_loop(consumer, topics, msg_process, timeout=5):
                 elif msg.error():
                     raise KafkaException(msg.error())
             else:
-                msg_process(msg)
+                data = json.loads(msg.value())
+                print(data)
+                msg_process(data)
     finally:
         # Close down consumer to commit final offsets.
         consumer.close()
+
+
+def new_consumer(broker_addr, broker_port, gid=None):
+    gid = f'kfktest-{_hash()}' if gid is None else gid
+    cons = Consumer({
+            'group.id': gid,
+            'bootstrap.servers': f'{broker_addr}:{broker_port}',
+            'auto.offset.reset': 'earliest',
+        })
+    return cons
+
+
+def consume_iter(cons, topics, timeout=10):
+    cons.subscribe(topics)
+    time.sleep(3)
+    while True:
+        msg = cons.poll(timeout=timeout)
+        if msg is None:
+            break
+        if msg.error():
+            if msg.error().code() == KafkaError._PARTITION_EOF:
+                # End of partition event
+                sys.stderr.write('%% %s [%d] reached end at offset %d\n' %
+                                    (msg.topic(), msg.partition(), msg.offset()))
+            elif msg.error():
+                raise KafkaException(msg.error())
+        else:
+            data = json.loads(msg.value().decode())
+            yield data
+    cons.close()

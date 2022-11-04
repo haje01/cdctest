@@ -192,7 +192,7 @@ echo "alias kcat=kafkacat" >> ~/.kenv
 ## 설정
 sudo sed -i "s/#listeners=PLAINTEXT:\\/\\/:9092/listeners=INTERNAL:\\/\\/0.0.0.0:9092,EXTERNAL:\\/\\/0.0.0.0:19092/" /etc/kafka/server.properties
 sudo sed -i "s/#advertised.listeners=PLAINTEXT:\\/\\/your.host.name:9092/advertised.listeners=INTERNAL:\\/\\/${aws_instance.kafka.private_ip}:9092,EXTERNAL:\\/\\/${aws_eip.kafka.public_ip}:19092/" /etc/kafka/server.properties
-sudo sed -i "s/#listener.security.protocol.map=.*/listener.security.protocol.map=INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT" /etc/kafka/server.properties
+sudo sed -i "s/#listener.security.protocol.map=.*/listener.security.protocol.map=INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT/" /etc/kafka/server.properties
 echo 'inter.broker.listener.name=INTERNAL' | sudo tee -a /etc/kafka/server.properties
 echo "auto.create.topics.enable=false" | sudo tee -a /etc/kafka/server.properties
 
