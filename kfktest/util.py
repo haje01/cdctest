@@ -808,7 +808,7 @@ def register_dbzm(kfk_ssh, profile, svr_name, db_addr, db_port, db_name,
 
 
 @retry(RuntimeError, tries=6, delay=5)
-def register_schema(ksql_ssh, _schema, retry=True):
+def register_schema(ksql_ssh, _schema, schema_type='AVRO', retry=True):
     """Schemay Registry 에 스키마 등록
 
     참조:
@@ -817,7 +817,8 @@ def register_schema(ksql_ssh, _schema, retry=True):
     Args:
         ksql_ssh: ksqlDB 노드로의 Paramiko SSH 객체
         name (str): 스키마 명
-        schema (dict): 스키마 내용
+        _schema (dict): 스키마 내용
+        schema_type (str): 스키마 형식 (AVRO, JSON, PROTOBUF 중 하나. 기본값 AVRO)
 
     """
     assert 'name' in _schema
@@ -829,7 +830,7 @@ def register_schema(ksql_ssh, _schema, retry=True):
     cmd = f'''
         curl -vs -X POST 'http://localhost:8081/subjects/{name}/versions' \
         -H 'Content-Type: application/vnd.schemaregistry.v1+json' \
-        --data-raw '{{"schema": "{schema}"}}'
+        --data-raw '{{"schem_type": "{schema_type}", "schema": "{schema}"}}'
     '''
     ret = ssh_exec(ksql_ssh, cmd, kafka_env=False)
     if 'error_code' in ret:
@@ -2174,11 +2175,15 @@ def consume_loop(consumer, topics, msg_process, timeout=10):
         consumer.close()
 
 
-def new_consumer(broker_addr, broker_port, gid=None):
+def new_consumer(profile, gid=None):
+    """컨슈머 생성."""
+    setup = load_setup(profile)
+    addr = setup['kafka_public_ip']['value']
+    port = 19092
     gid = f'kfktest-{_hash()}' if gid is None else gid
     cons = Consumer({
             'group.id': gid,
-            'bootstrap.servers': f'{broker_addr}:{broker_port}',
+            'bootstrap.servers': f'{addr}:{port}',
             'auto.offset.reset': 'earliest',
         })
     return cons
@@ -2199,6 +2204,5 @@ def consume_iter(cons, topics, timeout=10):
             elif msg.error():
                 raise KafkaException(msg.error())
         else:
-            data = json.loads(msg.value().decode())
-            yield data
+            yield msg
     cons.close()

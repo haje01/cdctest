@@ -5,6 +5,10 @@ from multiprocessing import Process
 
 import pytest
 from confluent_kafka import Producer, Consumer
+from confluent_kafka.serialization import \
+    (StringSerializer, SerializationContext, MessageField)
+from confluent_kafka.schema_registry import SchemaRegistryClient
+from confluent_kafka.schema_registry.avro import AvroSerializer, AvroDeserializer
 
 from kfktest.util import (delete_schema, get_ksqldb_ssh, local_produce_proc,
     linfo, remote_produce_proc, count_topic_message, s3_count_sinkmsg,
@@ -164,9 +168,8 @@ def test_log_comp(xprofile, xcp_setup, xtopic):
         # value_deserializer=decoder
     )
 
-    for msg in consume_iter(new_consumer(), [xtopic]):
-        key, value = msg.key(), msg.value()
-        print(key, value)
+    for msg in consume_iter(new_consumer(xprofile), [xtopic]):
+        key, value = msg.key().decode(), msg.value().decode()
         if key in ('Bob', 'Lucy'):
             # 테일 세그먼트에는 중복이 없음
             assert value == '200'
@@ -1059,9 +1062,133 @@ def test_ksql_offset():
     """
 
 
+@pytest.fixture
+def xdel_ksql_null(xprofile):
+    """의존성을 고려한 테이블 및 스트림 삭제."""
+    ssh = get_ksqldb_ssh(xprofile)
+    delete_ksql_objects(ssh, [
+        (1, 't_value'), (0, 's_value')
+        ])
+
+def test_ksql_null(xkafka, xprofile, xtopic, xksql, xdel_ksql_null):
+    """null 값이 있는 경우.
+
+    - 값의 포맷이 JSON 인 경우
+        - 스트림에는 키가 null 이어도 나온다.
+        - 테이블에는 키가 null 인 것은 안나오고, null 값 컬럼이 있는 레코드는 나온다.
+
+    """
+    props = {
+        "ksql.streams.auto.offset.reset": "earliest",
+    }
+
+    sql = '''
+    -- 스트림
+    CREATE STREAM s_value (key INT KEY, value int)
+        with (kafka_topic='s_value', format='json', partitions=2);
+
+    -- 테이블
+    CREATE TABLE t_value
+        WITH (kafka_topic='t_value', format='json', partitions=2)
+        AS SELECT
+            key,
+            LATEST_BY_OFFSET(value) value
+        FROM s_value
+        GROUP BY key
+    '''
+    ksql_exec(xprofile, sql, 'ksql', props)
+
+    time.sleep(3)
+    sql = f'''
+    INSERT INTO s_value (key, value) VALUES(1, 1);
+    INSERT INTO s_value (key, value) VALUES(2, NULL);
+    INSERT INTO s_value (key, value) VALUES(NULL, 3);
+    '''
+    ksql_exec(xprofile, sql, 'ksql', props)
+
+    time.sleep(2)
+
+    # 스트림 쿼리 확인 (토픽도 같은 결과)
+    sql = '''
+        SELECT * FROM s_value;
+    '''
+    ret = ksql_exec(xprofile, sql, 'query')
+    cnt = 0
+    for row in ret[1:]:
+        cnt += 1
+        key, val = row[0], row[1]
+        if key == 1:
+            assert val == 1
+        elif key == 2:
+            assert val is None
+        elif key is None:
+            assert val == 3
+    assert cnt == 3
+
+    # 다음과 같은 결과
+    # +-------------------------------------+-------------------------------------+
+    # |ID                                   |value                                |
+    # +-------------------------------------+-------------------------------------+
+    # |1                                    |1                                    |
+    # |2                                    |null                                 |
+    # |null                                 |3                                    |
+
+    # 테이블 쿼리 확인 (토픽도 같은 결과)
+    sql = '''
+        SELECT * FROM t_value;
+    '''
+    ret = ksql_exec(xprofile, sql, 'query')
+    cnt = 0
+    for row in ret[1:]:
+        cnt += 1
+        import pdb; pdb.set_trace()
+        key, val = row[0], row[1]
+        if key == 1:
+            assert val == 1
+        elif key == 2:
+            assert val is None
+    assert cnt == 2
+
+    # 다음과 같은 결과
+    # +-------------------------------------+-------------------------------------+
+    # |ID                                   |value                                |
+    # +-------------------------------------+-------------------------------------+
+    # |1                                    |1                                    |
+    # |2                                    |null                                 |
+
+
+def test_ksql_nan(xkafka, xprofile, xtopic, xksql, xdel_ksql_missing):
+    """컬럼 값에 NaN 이 있는 경우.
+
+    Pandas 등을 통해 nan 값이 들어간 경우 동작 확인
+    - nan 값이 있는 행의 경우
+        - 스트림에서는 안나옴
+        - 토픽에서는 나옴
+    - nan 값은 일반적인 방법으로는 넣을 수 없고 (ACOS 동작 않음), 자세히 문서화도 안되어 정의되지 않은 동작인 듯.
+
+    """
+
+
+def test_ksql_tombstone(xkafka, xprofile, xtopic, xksql, xdel_ksql_tombstone):
+    """툼스톤 동작 확인.
+
+    - 툼스톤은 레코드의 값이 0 byte 인 것
+    - ksqlDB 에서 툼스톤은 value_format 이 'kafka' 일때 NULL 을 넣어 주는 식
+        - 특정 필드가 아닌 전체 value 가 NULL 이어야만 툼스톤으로 동작
+    - 로그 컴팩션이 일어나야 효과
+        - 테스트가 곤란..
+    - 스트림의 value_format 이 json 인 경우
+        - 지우려는 레코드가 있는 토픽을 이용하는 스트림을 value_format='kafka' 로 새로 만들고
+        - 그 스트림을 통해 NULL 값을 넣어준다.
+
+    참고:
+        https://stackoverflow.com/questions/66305527/how-to-delete-a-value-from-ksqldb-table-or-insert-a-tombstone-value
+
+    """
+
 
 def test_schema_register(xkafka, xprofile, xtopic, xksqlssh):
-    """스키마 등록 테스트.
+    """스키마 (AVRO) 등록 테스트.
 
     - SR 의 기본 호환성 설정은 BACKWARD
         - 새 스키마를 이용하는 컨슈머가 옛 프로듀서 데이터를 읽을 수 있음
@@ -1159,3 +1286,187 @@ def test_schema_register(xkafka, xprofile, xtopic, xksqlssh):
     }
     ret = register_schema(xksqlssh, schema)
     assert 'id' in ret
+
+
+def test_schema_evolution(xkafka, xprofile, xtopic, xksqlssh):
+    """SR 을 이용한 스키마 발전 (schema evolution) 테스트.
+
+    - 메시지를 보낼 때 AVRO 스키마 이용
+      - 이 때 없는 스키마면 새로 등록
+      - 이 과정에서 기본 호환성 (FORWARD) 가 성립하는지 SR 이 검사
+
+    """
+    # 기존 스키마 삭제
+    delete_schema(xksqlssh, 'nodb_person-value')
+
+    def delivery_report(err, msg):
+        """
+        Reports the failure or success of a message delivery.
+        Args:
+            err (KafkaError): The error that occurred on None on success.
+            msg (Message): The message that was produced or failed.
+        Note:
+            In the delivery report callback the Message.key() and Message.value()
+            will be the binary format as encoded by any configured Serializers and
+            not the same object that was passed to produce().
+            If you wish to pass the original object(s) for key and value to delivery
+            report callback we recommend a bound callback or lambda where you pass
+            the objects along.
+        """
+
+        if err is not None:
+            print("Delivery failed for User record {}: {}".format(msg.key(), err))
+            return
+        print('User record {} successfully produced to {} [{}] at offset {}'.format(
+            msg.key(), msg.topic(), msg.partition(), msg.offset()))
+
+    setup = load_setup(xprofile)
+
+    #
+    # Version 1
+    #
+
+    # Person 객체 AVRO 스키마
+    schema1 = {
+        "type": "record",
+        "name": "person",
+        "namespace": "io.kfktest",
+        "fields": [
+            {"name": "regdt", "type": "string"},
+        ]
+    }
+    schema_str1 = json.dumps(schema1)
+
+    sr_url = f'http://{setup["ksqldb_public_ip"]["value"]}:8081'
+    scmreg_conf = {'url': sr_url}
+    scmreg_client = SchemaRegistryClient(scmreg_conf)
+
+    avro_ser1 = AvroSerializer(scmreg_client, schema_str1)
+    str_ser = StringSerializer('utf_8')
+
+    # 토픽에 메시지 발행
+    broker = f"{setup['kafka_public_ip']['value']}:19092"
+
+    # nested json 파일 토픽에 보내기
+    prod = Producer({'bootstrap.servers': broker})
+    person1 = {'regdt': '2022-11-07 13:47:00'}
+    prod.produce(xtopic,
+        key=str_ser('haje01', SerializationContext(xtopic, MessageField.KEY)),
+        value=avro_ser1(person1, SerializationContext(xtopic, MessageField.VALUE)),
+        on_delivery=delivery_report
+        )
+    prod.flush()
+
+    # 토픽에서 메시지 소비
+    avro_deser = AvroDeserializer(scmreg_client, schema_str1)
+
+    cons_conf1 = {'bootstrap.servers': broker,
+                 'group.id': 'cgid1',
+                 'auto.offset.reset': "earliest"}
+
+    cons1 = Consumer(cons_conf1)
+    for msg in consume_iter(cons1, [xtopic]):
+        _person1 = avro_deser(msg.value(), SerializationContext(msg.topic(), MessageField.VALUE))
+        assert person1 == _person1
+        print(f"Person1 regdt: {_person1['regdt']}")
+
+    #
+    # Version 2
+    #
+
+    # Person 객체 AVRO 스키마
+    schema2 = {
+        "type": "record",
+        "name": "person",
+        "namespace": "io.kfktest",
+        "fields": [
+            {"name": "regdt", "type": "string"},
+            {"name": "address", "type": "string", "default": "N/A"},
+        ]
+    }
+    schema_str2 = json.dumps(schema2)
+
+    avro_ser2 = AvroSerializer(scmreg_client, schema_str2)
+
+    # 토픽에 메시지 발행
+    broker = f"{setup['kafka_public_ip']['value']}:19092"
+
+    # nested json 파일 토픽에 보내기
+    prod = Producer({'bootstrap.servers': broker})
+    person2 = {'regdt': '2022-11-07 13:47:00', 'address': 'Seoul'}
+    prod.produce(xtopic,
+        key=str_ser('haje01', SerializationContext(xtopic, MessageField.KEY)),
+        value=avro_ser2(person2, SerializationContext(xtopic, MessageField.VALUE)),
+        on_delivery=delivery_report
+        )
+    prod.flush()
+
+    # 토픽에서 메시지 소비
+    avro_deser2 = AvroDeserializer(scmreg_client, schema_str2)
+
+    cons_conf2 = {'bootstrap.servers': broker,
+                 'group.id': 'cgid2',
+                 'auto.offset.reset': "earliest"}
+
+    cons2 = Consumer(cons_conf2)
+    for i, msg in enumerate(consume_iter(cons2, [xtopic])):
+        _person1 = avro_deser(msg.value(), SerializationContext(msg.topic(), MessageField.VALUE))
+        _person2 = avro_deser2(msg.value(), SerializationContext(msg.topic(), MessageField.VALUE))
+        assert 'address' not in _person1
+        assert 'address' in _person2
+        if i == 0:
+            assert _person2['address'] == 'N/A'
+        elif i == 1:
+            assert _person2['address'] == 'Seoul'
+
+
+    #
+    # Version 3
+    #
+
+    # Person 객체 AVRO 스키마
+    schema3 = {
+        "type": "record",
+        "name": "person",
+        "namespace": "io.kfktest",
+        "fields": [
+            {"name": "regdt", "type": "string"},
+            {"name": "address", "type": "string", "default": "N/A"},
+            {"name": "company", "type": "string", "default": "N/A"},
+        ]
+    }
+    schema_str3 = json.dumps(schema3)
+
+    avro_ser3 = AvroSerializer(scmreg_client, schema_str3)
+
+    # 토픽에 메시지 발행
+    broker = f"{setup['kafka_public_ip']['value']}:19092"
+
+    # nested json 파일 토픽에 보내기
+    prod = Producer({'bootstrap.servers': broker})
+    person3 = {'regdt': '2022-11-07 13:47:00', 'address': 'Seoul', 'company': "wow.com"}
+    prod.produce(xtopic,
+        key=str_ser('haje01', SerializationContext(xtopic, MessageField.KEY)),
+        value=avro_ser3(person3, SerializationContext(xtopic, MessageField.VALUE)),
+        on_delivery=delivery_report
+        )
+    prod.flush()
+
+    # 토픽에서 메시지 소비
+    avro_deser3 = AvroDeserializer(scmreg_client, schema_str3)
+
+    cons_conf3 = {'bootstrap.servers': broker,
+                 'group.id': 'cgid3',
+                 'auto.offset.reset': "earliest"}
+
+    cons3 = Consumer(cons_conf3)
+    for i, msg in enumerate(consume_iter(cons3, [xtopic])):
+        _person1 = avro_deser(msg.value(), SerializationContext(msg.topic(), MessageField.VALUE))
+        _person2 = avro_deser2(msg.value(), SerializationContext(msg.topic(), MessageField.VALUE))
+        _person3 = avro_deser3(msg.value(), SerializationContext(msg.topic(), MessageField.VALUE))
+        assert 'address' not in _person1
+        assert 'address' in _person2
+        if i == 3:
+            assert _person1['company'] == 'N/A'
+            assert _person2['company'] == 'Seoul'
+            assert _person3['company'] == 'wow.com'

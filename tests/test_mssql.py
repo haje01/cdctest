@@ -369,7 +369,7 @@ def test_ct_modify(xcp_setup, xjdbc, xtopic, xtable, xprofile, xkfssh):
 
     cnt = 0
     org_name = None
-    for msg in consume_iter(new_consumer(broker_addr, broker_port), [xtopic]):
+    for msg in consume_iter(new_consumer(xprofile), [xtopic]):
         cnt += 1
         if msg['id'] == 1:
             org_name = msg['name']
@@ -391,7 +391,7 @@ def test_ct_modify(xcp_setup, xjdbc, xtopic, xtable, xprofile, xkfssh):
 
     cnt = mcnt = 0
     fname = None
-    for msg in consume_iter(new_consumer(broker_addr, broker_port), [xtopic]):
+    for msg in consume_iter(new_consumer(xprofile), [xtopic]):
         print(msg)
         cnt += 1
         if msg['id'] == 1:
@@ -406,7 +406,7 @@ def test_ct_modify(xcp_setup, xjdbc, xtopic, xtable, xprofile, xkfssh):
     conn.close()
 
     cnt = mcnt = 0
-    for msg in consume_iter(new_consumer(broker_addr, broker_port), [xtopic]):
+    for msg in consume_iter(new_consumer(xprofile), [xtopic]):
         cnt += 1
         if msg['id'] == 1:
             mcnt += 1
@@ -419,7 +419,7 @@ def test_ct_modify(xcp_setup, xjdbc, xtopic, xtable, xprofile, xkfssh):
     insert_fake(conn, cursor, 1, 15, 1, 'mssql')
 
     cnt = 0
-    for msg in consume_iter(new_consumer(broker_addr, broker_port), [xtopic]):
+    for msg in consume_iter(new_consumer(xprofile), [xtopic]):
         cnt += 1
         if msg['id'] == 1:
             # 같은 ID 에 대해서는 기존 값이 그대로 옴
@@ -451,12 +451,10 @@ def test_ct_modify2(xcp_setup, xjdbc, xtable, xtopic, xprofile, xkfssh):
     linfo("All insert processes are done.")
 
     setup = load_setup('mssql')
-    broker_addr = setup['kafka_public_ip']['value']
-    broker_port = 19092
 
     cnt = 0
     org_name = None
-    for msg in consume_iter(new_consumer(broker_addr, broker_port), [xtopic]):
+    for msg in consume_iter(new_consumer(xprofile), [xtopic]):
         cnt += 1
         if msg['id'] == 1:
             org_name = msg['name']
@@ -479,7 +477,7 @@ def test_ct_modify2(xcp_setup, xjdbc, xtable, xtopic, xprofile, xkfssh):
 
     cnt = mcnt = 0
     fnames = []
-    for msg in consume_iter(new_consumer(broker_addr, broker_port), [xtopic]):
+    for msg in consume_iter(new_consumer(xprofile), [xtopic]):
         cnt += 1
         if msg['id'] == 1:
             fname = msg['name']

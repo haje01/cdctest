@@ -18,6 +18,14 @@ resource "aws_security_group" "ksqldb" {
     cidr_blocks = var.work_cidr
   }
 
+  ingress {
+    from_port = 8081
+    to_port = 8081
+    description = "From Dev PC to Schema Registry"
+    protocol = "tcp"
+    cidr_blocks = var.work_cidr
+  }
+
   egress {
     protocol  = "-1"
     from_port = 0
