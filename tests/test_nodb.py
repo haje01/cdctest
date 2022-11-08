@@ -1351,7 +1351,7 @@ def test_schema_evolution(xkafka, xprofile, xtopic, xksqlssh):
     prod = Producer({'bootstrap.servers': broker})
     person1 = {'regdt': '2022-11-07 13:47:00'}
     prod.produce(xtopic,
-        key=str_ser('haje01', SerializationContext(xtopic, MessageField.KEY)),
+        key=str_ser('pid1', SerializationContext(xtopic, MessageField.KEY)),
         value=avro_ser1(person1, SerializationContext(xtopic, MessageField.VALUE)),
         on_delivery=delivery_report
         )
@@ -1395,7 +1395,7 @@ def test_schema_evolution(xkafka, xprofile, xtopic, xksqlssh):
     prod = Producer({'bootstrap.servers': broker})
     person2 = {'regdt': '2022-11-07 13:47:00', 'address': 'Seoul'}
     prod.produce(xtopic,
-        key=str_ser('haje01', SerializationContext(xtopic, MessageField.KEY)),
+        key=str_ser('pid1', SerializationContext(xtopic, MessageField.KEY)),
         value=avro_ser2(person2, SerializationContext(xtopic, MessageField.VALUE)),
         on_delivery=delivery_report
         )
@@ -1446,7 +1446,7 @@ def test_schema_evolution(xkafka, xprofile, xtopic, xksqlssh):
     prod = Producer({'bootstrap.servers': broker})
     person3 = {'regdt': '2022-11-07 13:47:00', 'address': 'Seoul', 'company': "wow.com"}
     prod.produce(xtopic,
-        key=str_ser('haje01', SerializationContext(xtopic, MessageField.KEY)),
+        key=str_ser('pid1', SerializationContext(xtopic, MessageField.KEY)),
         value=avro_ser3(person3, SerializationContext(xtopic, MessageField.VALUE)),
         on_delivery=delivery_report
         )
@@ -1465,8 +1465,19 @@ def test_schema_evolution(xkafka, xprofile, xtopic, xksqlssh):
         _person2 = avro_deser2(msg.value(), SerializationContext(msg.topic(), MessageField.VALUE))
         _person3 = avro_deser3(msg.value(), SerializationContext(msg.topic(), MessageField.VALUE))
         assert 'address' not in _person1
+        assert 'company' not in _person1
         assert 'address' in _person2
-        if i == 3:
-            assert _person1['company'] == 'N/A'
-            assert _person2['company'] == 'Seoul'
+        assert 'company' not in _person2
+        assert 'address' in _person3
+        assert 'company' in _person3
+        if i == 0:
+            assert _person2['address'] == 'N/A'
+            assert _person3['address'] == 'N/A'
+            assert _person3['company'] == 'N/A'
+        elif i == 1:
+            assert _person2['address'] == 'Seoul'
+            assert _person3['address'] == 'Seoul'
+            assert _person3['company'] == 'N/A'
+        elif i == 2:
+            assert _person3['address'] == 'Seoul'
             assert _person3['company'] == 'wow.com'
