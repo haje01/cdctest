@@ -388,6 +388,7 @@ def delete_ksql_objects(ssh, strtbls):
     """ksqlDB 에서 주어진 순서대로 스트림과 테이블을 삭제.
 
     - 테스트별 의존성에 맞게 삭제
+    - 존재하지 않으면 무시
 
     Args:
         strtbls: [(객체_타입, 객체_이름), ...] 형태의 리스트

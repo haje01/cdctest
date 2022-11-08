@@ -2,6 +2,7 @@ from re import L
 import time
 import json
 from multiprocessing import Process
+from collections import defaultdict
 
 import pytest
 from confluent_kafka import Producer, Consumer
@@ -16,7 +17,7 @@ from kfktest.util import (delete_schema, get_ksqldb_ssh, local_produce_proc,
     load_setup, _hash, kill_proc_by_port, start_kafka_broker, ssh_exec,
     ksql_exec, list_ksql_tables, list_ksql_streams, delete_ksql_objects,
     _ksql_exec, setup_filebeat, producer_logger_proc, SSH, create_topic,
-    register_schema, delete_schema, consume_iter, new_consumer,
+    register_schema, delete_schema, consume_iter, new_consumer, delete_topic,
     # 픽스쳐들
     xsetup, xtopic, xkfssh, xkvmstart, xcp_setup, xs3sink, xhash, xs3rmdir,
     xrmcons, xconn, xkafka, xzookeeper, xksql, xlog, xksqlssh
@@ -1481,3 +1482,72 @@ def test_schema_evolution(xkafka, xprofile, xtopic, xksqlssh):
         elif i == 2:
             assert _person3['address'] == 'Seoul'
             assert _person3['company'] == 'wow.com'
+
+
+def test_ksql_repart(xkafka, xprofile, xsetup, xkfssh, xksqlssh):
+    """ksqlDB 를 이용해 토픽 파티션 조정.
+
+    https://developer.confluent.io/tutorials/change-topic-partitions-replicas/ksql.html
+
+    """
+    delete_topic(xkfssh, 'topic1', True)
+    delete_topic(xkfssh, 'topic2', True)
+    delete_ksql_objects(xksqlssh, [(0, 'S2'), (0, 'S1')])
+    # 토픽에서 스트림 생성
+    sql = '''
+    CREATE STREAM S1 (
+        key VARCHAR KEY,
+        val VARCHAR
+        )
+        with (kafka_topic = 'topic1', value_format='kafka', partitions=1);
+
+    CREATE STREAM S2
+        WITH (kafka_topic = 'topic2', value_format='kafka', partitions=2)
+        AS SELECT * FROM S1;
+    '''
+    ksql_exec(xprofile, sql, 'ksql')
+
+    time.sleep(2)
+    sql = '''
+    INSERT INTO S1 (key, val) VALUES ('a', '1');
+    INSERT INTO S1 (key, val) VALUES ('b', '1');
+    INSERT INTO S1 (key, val) VALUES ('c', '1');
+    INSERT INTO S1 (key, val) VALUES ('d', '1');
+    INSERT INTO S1 (key, val) VALUES ('a', '2');
+    INSERT INTO S1 (key, val) VALUES ('b', '2');
+    INSERT INTO S1 (key, val) VALUES ('c', '2');
+    INSERT INTO S1 (key, val) VALUES ('d', '2');
+    INSERT INTO S1 (key, val) VALUES ('a', '3');
+    INSERT INTO S1 (key, val) VALUES ('b', '3');
+    INSERT INTO S1 (key, val) VALUES ('c', '3');
+    INSERT INTO S1 (key, val) VALUES ('d', '3');
+    '''
+    ksql_exec(xprofile, sql, 'ksql')
+    cmd = "kafkacat -b localhost:9092 -t topic2 -C -q -e -f '%p:%k:%s\n'"
+    ret = ssh_exec(xkfssh, cmd)
+    parts = defaultdict(lambda: defaultdict(list))
+    for msg in ret.split():
+        part, key, val = msg.split(':')
+        parts[part][key].append(val)
+
+    # 결과  (partition, key, value)
+    # 0:a:1
+    # 0:b:1
+    # 0:c:1
+    # 0:a:2
+    # 0:b:2
+    # 0:c:2
+    # 0:a:3
+    # 0:b:3
+    # 0:c:3
+    # 1:d:1
+    # 1:d:2
+    # 1:d:3
+
+    assert len(parts.keys()) == 2
+    assert len(parts['0'].keys()) == 3
+    assert len(parts['1'].keys()) == 1
+    assert parts['0']['a'] == ['1', '2', '3']
+    assert parts['0']['b'] == ['1', '2', '3']
+    assert parts['0']['c'] == ['1', '2', '3']
+    assert parts['1']['d'] == ['1', '2', '3']
