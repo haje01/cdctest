@@ -17,7 +17,7 @@ from kfktest.util import (get_kafka_ssh, load_setup, linfo, gen_fake_data
 parser = argparse.ArgumentParser(description="프로파일에 맞는 토픽에 레코드 생성.",
     formatter_class=argparse.ArgumentDefaultsHelpFormatter
 )
-parser.add_argument('profile', type=str, help="프로파일 이름.")
+parser.add_argument('profile', type=str, help="프로파일 이름 (. 이 있으면 도메인/IP 로 해석).")
 parser.add_argument('-m', '--messages', type=int, default=10000, help="생성할 메시지 수.")
 parser.add_argument('--acks', type=int, default=1, help="전송 완료에 필요한 승인 수.")
 parser.add_argument('-c', '--compress', type=str,
@@ -108,17 +108,21 @@ def produce(profile,
         - retry 를 해도 메시지 손실이 발생할 수 있으나, 안하는 것보다는 작은 손실
 
     """
-    topic = f'{profile}_person' if etopic is None else etopic
-    linfo(f"[ ] producer {pid} produces {messages} messages to {topic} with acks {acks}.")
+    if '.' not in topic:
+        topic = f'{profile}_person' if etopic is None else etopic
+        linfo(f"[ ] producer {pid} produces {messages} messages to {topic} with acks {acks}.")
 
-    setup = load_setup(profile)
-    ip_key = 'kafka_public_ip' if dev else 'kafka_private_ip'
-    broker_addr = setup[ip_key]['value']
-    broker_port = 19092 if dev else 9092
-    linfo(f"kafka broker at {broker_addr}:{broker_port}")
+        setup = load_setup(profile)
+        ip_key = 'kafka_public_ip' if dev else 'kafka_private_ip'
+        broker_addr = setup[ip_key]['value']
+        broker_port = 19092 if dev else 9092
+        addr = f'{broker_addr}:{broker_port}'
+    else:
+        addr = topic
+    linfo(f"kafka broker at {addr}")
 
     conf = {
-        'bootstrap.servers': f'{broker_addr}:{broker_port}',
+        'bootstrap.servers': f'{addr}',
         'client.id': socket.gethostname(),
         'compression.codec': compress
         }
