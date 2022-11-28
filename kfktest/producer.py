@@ -108,7 +108,7 @@ def produce(profile,
         - retry 를 해도 메시지 손실이 발생할 수 있으나, 안하는 것보다는 작은 손실
 
     """
-    if '.' not in topic:
+    if '.' not in profile:
         topic = f'{profile}_person' if etopic is None else etopic
         linfo(f"[ ] producer {pid} produces {messages} messages to {topic} with acks {acks}.")
 
@@ -118,7 +118,7 @@ def produce(profile,
         broker_port = 19092 if dev else 9092
         addr = f'{broker_addr}:{broker_port}'
     else:
-        addr = topic
+        addr = profile
     linfo(f"kafka broker at {addr}")
 
     conf = {
