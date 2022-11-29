@@ -118,6 +118,7 @@ def produce(profile,
         broker_port = 19092 if dev else 9092
         addr = f'{broker_addr}:{broker_port}'
     else:
+        topic = 'person' if etopic is None else etopic
         addr = profile
     linfo(f"kafka broker at {addr}")
 
