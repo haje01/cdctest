@@ -1,6 +1,6 @@
 import argparse
 
-from kfktest.util import mysql_exec_many, db_concur, linfo
+from kfktest.util import mysql_exec_many, db_concur, linfo, _db_concur
 
 
 # CLI 용 파서
@@ -10,13 +10,20 @@ parser = argparse.ArgumentParser(description="MySQL DB 에 가짜 데이터 인�
 parser.add_argument('db_type', type=str, choices=['mysql', 'mssql'], help="DBMS 종류.")
 parser.add_argument('--db-name', type=str, default='test', help="이용할 데이터베이스 이름.")
 parser.add_argument('-t', '--table', type=str, default='person', help="이용할 테이블 이름.")
+parser.add_argument('--db-host', type=str, help="외부 MySQL DB 주소.")
+parser.add_argument('--db-user', type=str, help="외부 MySQL DB 유저.")
+parser.add_argument('--db-passwd', type=str, help="외부 MySQL DB 암호.")
 
 
-def reset_table(profile, table, fix_regdt=None, concur=None, datetime1=False):
+def reset_table(profile, table, fix_regdt=None, concur=None, datetime1=False,
+        db_host=None, db_user=None, db_passwd=None):
     regdt_def = 'CURRENT_TIMESTAMP' if fix_regdt is None else f"'{fix_regdt}'"
     linfo(f"[ ] reset_table for {profile} {table}")
     if concur is None:
-        conn, cursor = db_concur(profile)
+        if db_host is None:
+            conn, cursor = db_concur(profile)
+        else:
+            conn, cursor = _db_concur(profile, db_host, db_user, db_passwd)
     else:
         conn, cursor = concur
 
@@ -69,4 +76,5 @@ def reset_table(profile, table, fix_regdt=None, concur=None, datetime1=False):
 
 if __name__ == '__main__':
     args = parser.parse_args()
-    reset_table(args.db_type, args.table)
+    reset_table(args.db_type, args.table, None, None, False, 
+        args.db_host, args.db_user, args.db_passwd)

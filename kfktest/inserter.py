@@ -112,7 +112,7 @@ if __name__ == '__main__':
                                              table, args.epoch, args.batch,
                                              args.pid, args.dev, args.no_result,
                                              args.delay, args.dt, False,
-
+                                             args.db_host, args.db_user, args.db_passwd
                                              ))
             procs.append(p)
             p.start()
