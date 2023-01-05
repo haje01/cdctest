@@ -68,14 +68,13 @@ def insert(db_type,
     # 프로세스간 commit 이 몰리지 않게
     time.sleep(random.random() * delay)
 
-    setup = load_setup(db_type)
-    if db_type == 'mysql':
-        db_ip_key = 'mysql_public_ip' if dev else 'mysql_private_ip'
-    else:
-        db_ip_key = 'mssql_public_ip' if dev else 'mssql_private_ip'
-
     # 외부 DB 정보가 없으면 생성한 DB
     if db_host is None:
+        setup = load_setup(db_type)
+        if db_type == 'mysql':
+            db_ip_key = 'mysql_public_ip' if dev else 'mysql_private_ip'
+        else:
+            db_ip_key = 'mssql_public_ip' if dev else 'mssql_private_ip'
         db_host = setup[db_ip_key]['value']
         db_user = setup['db_user']['value']
         db_passwd = setup['db_passwd']['value']['result']
