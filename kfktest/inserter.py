@@ -63,7 +63,9 @@ def insert(db_type,
         delay (int): 지연 시간. 기본값 0
         dt (str): 지정된 일시. 기본값 None
         show (bool): fake 메시지 표시 여부. 기본값 False
-
+        db_host (str): 외부 DB 주소
+        db_user (str): 외부 DB 유저
+        db_passwd (str): 외부 DB 암호
     """
     # 프로세스간 commit 이 몰리지 않게
     time.sleep(random.random() * delay)
@@ -102,7 +104,8 @@ if __name__ == '__main__':
     tables = [tbl.strip() for tbl in args.table.split(',')]
     if len(tables) == 1:
         insert(args.db_type, args.db_name, args.table, args.epoch, args.batch,
-            args.pid, args.dev, args.no_result)
+            args.pid, args.dev, args.no_result, args.delay, args.dt, False,
+            args.db_host, args.db_user, args.db_passwd)
     else:
         # 테이블이 하나 이상 지정되면 병렬 처리
         procs = []
