@@ -16,7 +16,7 @@ parser.add_argument('--db-passwd', type=str, help="외부 MySQL DB 암호.")
 
 
 def reset_table(profile, table, fix_regdt=None, concur=None, datetime1=False,
-        db_host=None, db_user=None, db_passwd=None):
+        db_name='test', db_host=None, db_user=None, db_passwd=None):
     regdt_def = 'CURRENT_TIMESTAMP' if fix_regdt is None else f"'{fix_regdt}'"
     linfo(f"[ ] reset_table for {profile} {table}")
     if concur is None:
@@ -29,6 +29,7 @@ def reset_table(profile, table, fix_regdt=None, concur=None, datetime1=False,
 
     if profile == 'mysql':
         head = f'''
+    CREATE DATABASE IF NOT EXISTS {db_name};
     DROP TABLE IF EXISTS {table};
     CREATE TABLE {table} (
         id  INT NOT NULL AUTO_INCREMENT,
@@ -44,6 +45,11 @@ def reset_table(profile, table, fix_regdt=None, concur=None, datetime1=False,
         #  -> timestamp.delay.interval.ms 로 대응
         dt_type = 'DATETIME' if datetime1 else 'DATETIME2'
         head = f'''
+    IF NOT EXISTS (SELECT * FROM sys.databases WHERE name = '{db_name}')
+    BEGIN
+    CREATE DATABASE {db_name};
+    END;
+    GO        
     IF OBJECT_ID('{table}', 'U') IS NOT NULL
         DROP TABLE {table}
     CREATE TABLE {table} (
@@ -77,4 +83,4 @@ def reset_table(profile, table, fix_regdt=None, concur=None, datetime1=False,
 if __name__ == '__main__':
     args = parser.parse_args()
     reset_table(args.db_type, args.table, None, None, False, 
-        args.db_host, args.db_user, args.db_passwd)
+        args.db_name, args.db_host, args.db_user, args.db_passwd)
