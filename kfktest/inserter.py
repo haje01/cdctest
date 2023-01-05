@@ -27,6 +27,9 @@ parser.add_argument('-n', '--no-result', action='store_true', default=False,
     help="출력 감추기.")
 parser.add_argument('--delay', type=int, default=0, help="여러 테이블에 인서트시 지연 시간 범위 (초).")
 parser.add_argument('--dt', type=str, default=None, help="지정된 일시로 테이블에 인서트.")
+parser.add_argument('--db-host', type=str, help="외부 MySQL DB 주소.")
+parser.add_argument('--db-user', type=str, help="외부 MySQL DB 유저.")
+parser.add_argument('--db-passwd', type=str, help="외부 MySQL DB 암호.")
 
 
 def insert(db_type,
@@ -39,7 +42,10 @@ def insert(db_type,
         no_result=parser.get_default('no_result'),
         delay=0,
         dt=None,
-        show=False
+        show=False,
+        db_host=None,
+        db_user=None,
+        db_passwd=None
         ):
     """가짜 데이터 인서트.
 
@@ -67,9 +73,12 @@ def insert(db_type,
         db_ip_key = 'mysql_public_ip' if dev else 'mysql_private_ip'
     else:
         db_ip_key = 'mssql_public_ip' if dev else 'mssql_private_ip'
-    db_host = setup[db_ip_key]['value']
-    db_user = setup['db_user']['value']
-    db_passwd = setup['db_passwd']['value']['result']
+
+    # 외부 DB 정보가 없으면 생성한 DB
+    if db_host is None:
+        db_host = setup[db_ip_key]['value']
+        db_user = setup['db_user']['value']
+        db_passwd = setup['db_passwd']['value']['result']
 
     linfo(f"Inserter {pid} connect DB at {db_host}")
     if db_type == 'mysql':
@@ -102,7 +111,9 @@ if __name__ == '__main__':
             p = Process(target=insert, args=(args.db_type, args.db_name,
                                              table, args.epoch, args.batch,
                                              args.pid, args.dev, args.no_result,
-                                             args.delay, args.dt))
+                                             args.delay, args.dt, False,
+
+                                             ))
             procs.append(p)
             p.start()
         for p in procs:
