@@ -75,8 +75,8 @@ sudo rm ${basename(var.kafka_s3_sink)}
 cd -
 EOT
   install_mysql_jdbc_driver = <<EOT
-sudo apt install -y /tmp/${basename(var.mysql_jdbc_driver)}
-# cp /usr/share/java/mysql-connector-java-*.jar /home/ubuntu/$confluent_dir/connectors/$kjc_dir/lib
+sudo dpkg -i /tmp/${basename(var.mysql_jdbc_driver)}
+sudo cp /usr/share/java/mysql-connector-java-*.jar /usr/share/java/${trimsuffix(basename(var.kafka_jdbc_connector), ".zip")}/lib
 EOT
   install_mysql_dbzm_connector = <<EOT
 sudo mv /tmp/${basename(var.mysql_dbzm_connector)} /usr/share/java
@@ -174,7 +174,7 @@ sudo sed -i 's/#$nrconf{restart} = '"'"'i'"'"';/$nrconf{restart} = '"'"'a'"'"';/
 
 # Confluent Community Edition 설치
 wget -qO - https://packages.confluent.io/deb/7.2/archive.key | sudo apt-key add -
-sudo add-apt-repository "deb [arch=amd64] https://packages.confluent.io/deb/7.2 stable main"
+sudo add-apt-repository -y "deb [arch=amd64] https://packages.confluent.io/deb/7.2 stable main"
 # 현재(2022-11-02) 공식 지원 OS 는 20.x 대 (focal)
 sudo add-apt-repository -y "deb https://packages.confluent.io/clients/deb $(lsb_release -cs) main"
 sudo apt-get install -y confluent-community-2.13
@@ -195,6 +195,14 @@ sudo sed -i "s/#advertised.listeners=PLAINTEXT:\\/\\/your.host.name:9092/adverti
 sudo sed -i "s/#listener.security.protocol.map=.*/listener.security.protocol.map=INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT/" /etc/kafka/server.properties
 echo 'inter.broker.listener.name=INTERNAL' | sudo tee -a /etc/kafka/server.properties
 echo "auto.create.topics.enable=false" | sudo tee -a /etc/kafka/server.properties
+
+# 서비스 유저 변경 (Confluent 플랫폼에서 설치해주는 서비스 유저는 root 가 아니어서 문제 발생)
+cd /lib/systemd/system
+sudo sed -i 's/User=.*$/User=root/' confluent-kafka-connect.service
+sudo sed -i 's/Group=.*$/Group=root/' confluent-kafka-connect.service
+sudo systemctl daemon-reload
+sudo systemctl restart confluent-kafka-connect
+cd -
 
 cat ~/.kenv >> ~/.bashrc
 

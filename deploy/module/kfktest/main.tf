@@ -74,7 +74,7 @@ echo 'export PATH=$PATH:$JAVA_HOME/bin' >> ~/.kenv
 
 # Confluent Community Edition 설치
 wget -qO - https://packages.confluent.io/deb/7.2/archive.key | sudo apt-key add -
-sudo add-apt-repository "deb [arch=amd64] https://packages.confluent.io/deb/7.2 stable main"
+sudo add-apt-repository -y "deb [arch=amd64] https://packages.confluent.io/deb/7.2 stable main"
 # 현재(2022-11-02) 공식 지원 OS 가 20.x 대 (focal)
 sudo add-apt-repository -y "deb https://packages.confluent.io/clients/deb $(lsb_release -cs) main"
 sudo apt-get install -y confluent-community-2.13

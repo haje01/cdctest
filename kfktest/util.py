@@ -1165,7 +1165,7 @@ def db_concur(profile):
     db_addr = setup[f'{profile}_public_ip']['value']
     db_user = setup['db_user']['value']
     db_passwd = setup['db_passwd']['value']['result']
-    _db_concur(profile, db_addr, db_user, db_passwd)
+    return _db_concur(profile, db_addr, db_user, db_passwd)
 
 
 def _db_concur(profile, db_addr, db_user, db_passwd):

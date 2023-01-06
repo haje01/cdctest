@@ -12,17 +12,19 @@
 
 ### 사전 작업
 - 내려 받을 Kafka 의 URL 확보
-  - 예: `https://archive.apache.org/dist/kafka/3.0.0/kafka_2.13-3.0.0.tgz`
+  - 예: `https://downloads.apache.org/kafka/3.3.1/kafka_2.13-3.3.1.tgz`
 - 환경 변수 `KFKTEST_SSH_PKEY` 에 AWS 에서 이용할 Private Key 경로를 지정
 - `refers` 디렉토리에 아래의 파일들 (가능한 최신 버전) 이 있어야 한다
   - `confluentinc-kafka-connect-jdbc-10.5.0.zip`
     - [Confluent 의 JDBC 커넥터 다운로드](https://www.confluent.io/hub/confluentinc/kafka-connect-jdbc?_ga=2.129728655.246901732.1655082179-1759829787.1651627548&_gac=1.126341503.1655171481.Cj0KCQjwwJuVBhCAARIsAOPwGASjitveKrkPlHSvd6FzJtL8sQZu-c1mrjjhFPBgtc4_f_fGhCBZHx8aAseAEALw_wcB) 에서 Download 클릭하여 받음
-  - `mysql-connector-java_8.0.29-1ubuntu21.10_all.deb`
+  - `mysql-connector-java_8.0.30-1ubuntu20.04_all.deb`
     - [MySQL 의 커넥터 다운로드 페이지](https://dev.mysql.com/downloads/connector/j/) 에서 OS 에 맞는 파일을 받음
   - `debezium-connector-mysql-1.9.4.Final-plugin.tar` 및  `debezium-connector-sqlserver-1.9.4.Final-plugin.tar`
     - [Debezium 커넥터 다운로드](https://debezium.io/documentation/reference/stable/install.html) 에서 MySQL 및 MSSQL 을 위한 Debezium 커넥트를 각각 내려 받음
   - `kafka-connect-replicator:7.1.1.zip`
     - [Confluent 의 Kafka Replicator 다운로드](https://www7.confluent.io/hub/confluentinc/kafka-connect-replicator) 에서 Download 클릭하여 받음
+  - `confluentinc-kafka-connect-s3-10.3.0.zip`
+    - [Confluent 의 S3 싱크 커넥터 다운로드](https://www.confluent.io/hub/confluentinc/kafka-connect-s3)
 - `test.tfvars` 파일 만들기
   - 각 설정별  `deploy` 폴더 아래의 `variables.tf` 파일을 참고하여 아래와 같은 형식의 `test.tfvars` 파일을 만들어 준다.
   ```
